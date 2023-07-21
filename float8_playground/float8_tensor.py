@@ -2,8 +2,6 @@ from enum import Enum
 import torch
 from torch.utils._pytree import tree_map
 
-from float8_utils import E4M3, E5M2
-
 aten = torch.ops.aten
 
 class Float8ConstrFunc(torch.autograd.Function):
@@ -12,15 +10,15 @@ class Float8ConstrFunc(torch.autograd.Function):
     TODO(future): split into two for cleaner code
     """
     @staticmethod
-    def forward(ctx, tensor, scale: float=None, flavor=E4M3):
+    def forward(ctx, tensor, scale: float=None, dtype=torch.float8_e4m3fn):
         if isinstance(tensor, Float8Tensor):
             ctx.inp_is_float8 = True
-            return torch.ops.aten.float8_to_float32(tensor._data, tensor._flavor) / tensor._scale
+            return tensor._data.to(torch.float32) / tensor._scale
         else:
             ctx.inp_is_float8 = False
             tensor_scaled = tensor * scale
-            bits_fp8 = torch.ops.aten.float32_to_float8(tensor_scaled, flavor)
-            return Float8Tensor(bits_fp8, scale, flavor)
+            bits_fp8 = tensor_scaled.to(dtype)
+            return Float8Tensor(bits_fp8, scale)
 
     @staticmethod
     def backward(ctx, g):
@@ -41,7 +39,6 @@ class Float8Tensor(torch.Tensor):
     * `_scale`: the scale used to scale the original fp32 tensor. We multiply
       by scale to go from fp32 range to fp8 range, and divide by scale to go
       from fp8 range to fp32 range.
-    * `_flavor`: either E4M3 or E5M2
 
     The current purpose of this object is 99% to bundle raw data + fp8 metadata
     together for easy passing through PyTorch systems, and 1% to implement
@@ -57,11 +54,9 @@ class Float8Tensor(torch.Tensor):
     to fp32 for them.
     """
 
-    def __new__(cls, data, scale, flavor):
+    def __new__(cls, data, scale):
         # This is a non-differentiable constructor!
         assert not data.requires_grad
-        # TODO(future): make bits8 easier to work with and switch to using it
-        # assert data.dtype == torch.bits8
         assert scale.dtype == torch.float32
         assert scale.nelement() == 1
 
@@ -77,19 +72,18 @@ class Float8Tensor(torch.Tensor):
         )
         self._data = data
         self._scale = scale
-        self._flavor = flavor
 
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(flavor={self._flavor}, scale={self._scale}, as_float32={self.to_float32()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_float32={self.to_float32()}"
 
     def to_float32(self):
         return Float8ConstrFunc.apply(self)
 
     @classmethod
-    def from_float32(cls, tensor, scale, flavor):
-        return Float8ConstrFunc.apply(tensor, scale, flavor)
+    def from_float32(cls, tensor, scale, dtype):
+        return Float8ConstrFunc.apply(tensor, scale, dtype)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -113,14 +107,14 @@ class Float8Tensor(torch.Tensor):
             and isinstance(args[1], Float8Tensor)
         ):
             x1_fp8, x2_fp8 = args[0], args[1]
-            assert x1_fp8._flavor == E5M2 and x2_fp8._flavor == E5M2
-            # naive scale calculation: max of incoming two scales
-            x3_scale = torch.max(x1_fp8._scale, x2_fp8._scale)
+            assert x1_fp8._data.dtype == torch.float8_e5m2 and x2_fp8._data.dtype == torch.float8_e5m2
+            # scale will be filled in by the kernel, not using delayed scaling
+            x3_scale = torch.empty(1)
             res_bits = torch.ops.aten.add_float8_e5m2(
                 x1_fp8._data, x1_fp8._scale,
                 x2_fp8._data, x2_fp8._scale,
                 x3_scale)
-            res = Float8Tensor(res_bits, x3_scale, x1_fp8._flavor)
+            res = Float8Tensor(res_bits, x3_scale)
             return res
 
         # for all other ops, fall back to fp32
