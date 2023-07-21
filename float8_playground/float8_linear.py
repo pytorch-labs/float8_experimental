@@ -14,10 +14,9 @@ import float8_aten_api
 from float8_utils import E4M3, E5M2, tensor_to_scale
 from float8_tensor import Float8Tensor
 
-class float8_linear_no_bias(torch.autograd.Function):
+class float8_linear(torch.autograd.Function):
     """
     Like F.linear, but with X, W, and Y in float8
-    TODO(future) add logic for bias
     """
 
     @staticmethod
@@ -120,7 +119,7 @@ class Float8Linear(torch.nn.Linear):
             self.fp8_s_bias.fill_(tensor_to_scale(self.bias, E4M3))
             maybe_b_fp8 = Float8Tensor.from_float32(self.bias, self.fp8_s_bias, E4M3)
 
-        y_fp8 = float8_linear_no_bias.apply(
+        y_fp8 = float8_linear.apply(
             x_fp8, w_fp8, maybe_b_fp8, self.fp8_s_out, self.fp8_s_dL_dX,
             self.fp8_s_dL_dW, self.fp8_s_dL_dY)
 
