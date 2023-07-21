@@ -39,6 +39,22 @@ def add_float8_e5m2(m1, s1, m2, s2, s3):
     m3_float32 = m1_float32 + m2_float32
     return float32_to_float8(m3_float32 * s3, E5M2)
 
+# TODO naming of these vars is weird
+def addmm_float8(
+        inp1, inp_s1, inp_flavor1, m1, s1, flavor1, m2, s2, flavor2, 
+        s3, flavor3):
+    # naive implementation: dq -> op -> q
+    # TODO(future): hook up to real kernel
+    inp1_fp32 = float8_to_float32(inp1, inp_flavor1) / inp_s1
+    m1_fp32 = float8_to_float32(m1, flavor1) / s1
+    m2_fp32 = float8_to_float32(m2, flavor2) / s2
+    m3_fp32 = torch.addmm(inp1_fp32, m1_fp32, m2_fp32)
+    # TODO(future): switch to delayed scaling
+    s3.fill_(tensor_to_scale(m3_fp32, flavor3))
+    m3_fp32_scaled = m3_fp32 * s3
+    return float32_to_float8(m3_fp32_scaled, flavor3)
+
+
 #
 # ATen op placeholders
 #
@@ -60,3 +76,6 @@ lib.impl("mm_float8", mm_float8, "CPU")
 
 lib.define("add_float8_e5m2(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3) -> Tensor")
 lib.impl("add_float8_e5m2", add_float8_e5m2, "CPU")
+
+lib.define("addmm_float8(Tensor inp1, Tensor inp_s1, int inp_flavor1, Tensor m1, Tensor s1, int flavor1, Tensor m2, Tensor s2, int flavor2, Tensor s3, int flavor3) -> Tensor")
+lib.impl("addmm_float8", addmm_float8, "CPU")

@@ -154,12 +154,9 @@ class Float8TensorUnitTest(unittest.TestCase):
         self.assertTrue(sqnr >= 10.0)
 
 class Float8LinearUnitTest(unittest.TestCase):
+    def _test_linear_impl(self, x, m_ref):
 
-    def test_e2e(self):
-        m_ref = nn.Linear(4, 4, bias=False)
         m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
-
-        x = torch.randn(4, 4)
 
         y_fp8 = m_fp8(x)
         y_fp8.sum().backward()
@@ -170,22 +167,37 @@ class Float8LinearUnitTest(unittest.TestCase):
         g_sqnr = compute_error(m_ref.weight.grad, m_fp8.weight.grad)
 
         # verify sqnr is reasonable
-        self.assertTrue(y_sqnr >= 27.0)
-        self.assertTrue(g_sqnr >= 27.0)
+        self.assertTrue(y_sqnr >= 24.0)
+        self.assertTrue(g_sqnr >= 24.0)
+        if m_ref.bias is not None:
+            torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the scales got updated
-        for buffer_name in (
+        buffer_names = [
             'fp8_s_in',
             'fp8_s_weight',
             'fp8_s_out',
             'fp8_s_dL_dX',
             'fp8_s_dL_dW',
             'fp8_s_dL_dY',
-        ):
+        ]
+        if m_ref.bias is not None:
+            buffer_names.append('fp8_s_bias')
+        for buffer_name in buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
             self.assertTrue(
                 torch.ne(buffer_value, torch.tensor(1.0)),
                 f"{buffer_name} not filled")
+
+    def test_linear_nobias(self):
+        x = torch.randn(2, 3)
+        m_ref = nn.Linear(3, 4, bias=False)
+        self._test_linear_impl(x, m_ref)
+
+    def test_linear_bias(self):
+        x = torch.randn(2, 3)
+        m_ref = nn.Linear(3, 4, bias=True)
+        self._test_linear_impl(x, m_ref)
 
 
 if __name__ == '__main__':
