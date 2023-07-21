@@ -7,52 +7,51 @@ import torch
 from torch.library import Library
 
 from float8_utils import (
-    float32_to_float8,
-    float8_to_float32,
-    E4M3,
-    E5M2,
     tensor_to_scale,
 )
 
 
-def mm_float8(m1, s1, flavor1, m2, s2, flavor2, s3, flavor3):
+def mm_float8(m1, s1, m2, s2, s3, dtype3):
     # naive implementation: dq -> op -> q
     # TODO(future): hook up to real kernel
-    m1_fp32 = float8_to_float32(m1, flavor1) / s1
-    m2_fp32 = float8_to_float32(m2, flavor2) / s2
+    m1_fp32 = m1.float() / s1
+    m2_fp32 = m2.float() / s2
     m3_fp32 = torch.mm(m1_fp32, m2_fp32)
     # TODO(future): switch to delayed scaling
-    s3.fill_(tensor_to_scale(m3_fp32, flavor3))
+    s3.fill_(tensor_to_scale(m3_fp32, dtype3))
     m3_fp32_scaled = m3_fp32 * s3
-    return float32_to_float8(m3_fp32_scaled, flavor3)
+    if dtype3 == torch.float8_e4m3fn:
+        return m3_fp32_scaled.to(torch.float8_e4m3fn)
+    else:
+        return m3_fp32_scaled.to(torch.float8_e5m2)
 
 def add_float8_e5m2(m1, s1, m2, s2, s3):
     # for now this is only implemented for e5m2 because we only care about
     # this for adding gradients
     # naive implementation: dq -> op -> q
     # TODO(future): hook up to real kernel
-    # TODO(future): make this more accurate, accuracy is pretty low,
-    # can probably just calculate s3 dynamically since this is an edge case
-    # unlikely to affect e2e performance
-    m1_float32 = float8_to_float32(m1, E5M2) / s1
-    m2_float32 = float8_to_float32(m2, E5M2) / s2
+    m1_float32 = m1.float() / s1
+    m2_float32 = m2.float() / s2
     m3_float32 = m1_float32 + m2_float32
-    return float32_to_float8(m3_float32 * s3, E5M2)
+    s3_val = tensor_to_scale(m3_float32, torch.float8_e5m2)
+    s3.fill_(s3_val)
+    return (m3_float32 * s3).to(torch.float8_e5m2)
 
 # TODO naming of these vars is weird
-def addmm_float8(
-        inp1, inp_s1, inp_flavor1, m1, s1, flavor1, m2, s2, flavor2, 
-        s3, flavor3):
+def addmm_float8(inp1, inp_s1, m1, s1, m2, s2, s3, dtype3):
     # naive implementation: dq -> op -> q
     # TODO(future): hook up to real kernel
-    inp1_fp32 = float8_to_float32(inp1, inp_flavor1) / inp_s1
-    m1_fp32 = float8_to_float32(m1, flavor1) / s1
-    m2_fp32 = float8_to_float32(m2, flavor2) / s2
+    inp1_fp32 = inp1.float() / inp_s1
+    m1_fp32 = m1.float() / s1
+    m2_fp32 = m2.float() / s2
     m3_fp32 = torch.addmm(inp1_fp32, m1_fp32, m2_fp32)
     # TODO(future): switch to delayed scaling
-    s3.fill_(tensor_to_scale(m3_fp32, flavor3))
+    s3.fill_(tensor_to_scale(m3_fp32, dtype3))
     m3_fp32_scaled = m3_fp32 * s3
-    return float32_to_float8(m3_fp32_scaled, flavor3)
+    if dtype3 == torch.float8_e4m3fn:
+        return m3_fp32_scaled.to(torch.float8_e4m3fn)
+    else:
+        return m3_fp32_scaled.to(torch.float8_e5m2)
 
 
 #
@@ -65,17 +64,11 @@ lib = Library("aten", "FRAGMENT")
 
 # For now register on CPU,
 # TODO(future) add GPU and test there
-lib.define("float32_to_float8(Tensor t, int flavor) -> Tensor")
-lib.impl("float32_to_float8", float32_to_float8, "CPU")
-
-lib.define("float8_to_float32(Tensor t, int flavor) -> Tensor")
-lib.impl("float8_to_float32", float8_to_float32, "CPU")
-
-lib.define("mm_float8(Tensor m1, Tensor s1, int flavor1, Tensor m2, Tensor s2, int flavor2, Tensor s3, int flavor3) -> Tensor")
+lib.define("mm_float8(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, int dtype3) -> Tensor")
 lib.impl("mm_float8", mm_float8, "CPU")
 
 lib.define("add_float8_e5m2(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3) -> Tensor")
 lib.impl("add_float8_e5m2", add_float8_e5m2, "CPU")
 
-lib.define("addmm_float8(Tensor inp1, Tensor inp_s1, int inp_flavor1, Tensor m1, Tensor s1, int flavor1, Tensor m2, Tensor s2, int flavor2, Tensor s3, int flavor3) -> Tensor")
+lib.define("addmm_float8(Tensor inp1, Tensor inp_s1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, int dtype3) -> Tensor")
 lib.impl("addmm_float8", addmm_float8, "CPU")
