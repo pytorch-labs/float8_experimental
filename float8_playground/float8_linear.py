@@ -25,17 +25,26 @@ class float8_linear_no_bias(torch.autograd.Function):
         ctx,
         x_fp8,
         w_fp8,
+        b_fp8,
         fp8_s_out,
         fp8_s_dL_dX,
         fp8_s_dL_dW,
         fp8_s_dL_dY,
     ):
-        ctx.save_for_backward(x_fp8, w_fp8, fp8_s_dL_dX, fp8_s_dL_dW, fp8_s_dL_dY)
-
-        res_bits = torch.ops.aten.mm_float8(
-            x_fp8._data, x_fp8._scale, x_fp8._flavor,
-            w_fp8._data.t(), w_fp8._scale, w_fp8._flavor,
-            fp8_s_out, E4M3)
+        ctx.save_for_backward(
+            x_fp8, w_fp8, b_fp8, fp8_s_dL_dX, fp8_s_dL_dW, fp8_s_dL_dY)
+        if b_fp8 is not None:
+            # TODO add this
+            res_bits = torch.ops.aten.addmm_float8(
+                b_fp8._data, b_fp8._scale, b_fp8._flavor,
+                x_fp8._data, x_fp8._scale, x_fp8._flavor,
+                w_fp8._data.t(), w_fp8._scale, w_fp8._flavor,
+                fp8_s_out, E4M3)
+        else:
+            res_bits = torch.ops.aten.mm_float8(
+                x_fp8._data, x_fp8._scale, x_fp8._flavor,
+                w_fp8._data.t(), w_fp8._scale, w_fp8._flavor,
+                fp8_s_out, E4M3)
 
         res = Float8Tensor(res_bits, fp8_s_out, E4M3)
         # scale update would also happen here, for now no-op
@@ -43,7 +52,7 @@ class float8_linear_no_bias(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, go):
-        x_fp8, w_fp8, fp8_s_dL_dX, fp8_s_dL_dW, fp8_s_dL_dY = \
+        x_fp8, w_fp8, b_fp8, fp8_s_dL_dX, fp8_s_dL_dW, fp8_s_dL_dY = \
             ctx.saved_tensors
 
         if not isinstance(go, Float8Tensor):
@@ -69,7 +78,10 @@ class float8_linear_no_bias(torch.autograd.Function):
         dL_dW_fp8 = Float8Tensor(dL_dW_bits, fp8_s_dL_dW, E5M2)
 
         # scale update would also happen here, for now no-op
-        return dL_dX_fp8, dL_dW_fp8, None, None, None, None
+        if b_fp8 is not None:
+            return dL_dX_fp8, dL_dW_fp8, go_fp8, None, None, None, None
+        else:
+            return dL_dX_fp8, dL_dW_fp8, None, None, None, None, None
 
 
 class Float8Linear(torch.nn.Linear):
@@ -86,6 +98,7 @@ class Float8Linear(torch.nn.Linear):
         # or PTQ calibration.
         self.register_buffer('fp8_s_in', torch.tensor(1.0))
         self.register_buffer('fp8_s_weight', torch.tensor(1.0))
+        self.register_buffer('fp8_s_bias', torch.tensor(1.0))
         self.register_buffer('fp8_s_out', torch.tensor(1.0))
         self.register_buffer('fp8_s_dL_dX', torch.tensor(1.0))
         self.register_buffer('fp8_s_dL_dW', torch.tensor(1.0))
@@ -102,9 +115,13 @@ class Float8Linear(torch.nn.Linear):
         # TODO(future): switch to delayed scaling
         self.fp8_s_weight.fill_(tensor_to_scale(self.weight, E4M3))
         w_fp8 = Float8Tensor.from_float32(self.weight, self.fp8_s_weight, E4M3)
+        maybe_b_fp8 = None
+        if self.bias is not None:
+            self.fp8_s_bias.fill_(tensor_to_scale(self.bias, E4M3))
+            maybe_b_fp8 = Float8Tensor.from_float32(self.bias, self.fp8_s_bias, E4M3)
 
         y_fp8 = float8_linear_no_bias.apply(
-            x_fp8, w_fp8, self.fp8_s_out, self.fp8_s_dL_dX,
+            x_fp8, w_fp8, maybe_b_fp8, self.fp8_s_out, self.fp8_s_dL_dX,
             self.fp8_s_dL_dW, self.fp8_s_dL_dY)
 
         # For now, hardcode returning Float8Tensor (propagate as much as we can).
@@ -116,7 +133,7 @@ class Float8Linear(torch.nn.Linear):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
         """
-        assert mod.bias is None, 'bias support not implemented yet'
         new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = mod.weight
+        new_mod.bias = mod.bias
         return new_mod
