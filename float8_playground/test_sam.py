@@ -17,7 +17,7 @@ torch.manual_seed(0)
 class Float8SAMIntegrationTest(unittest.TestCase):
 
     def test_encoder_fw_bw(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        model = SamModel.from_pretrained("facebook/sam-vit-base").cuda()
         # print(model)
 
         # for now just test the encoder to simplify things
@@ -26,7 +26,7 @@ class Float8SAMIntegrationTest(unittest.TestCase):
         swap_linear_with_float8_linear(encoder_fp8)
 
         # an image 
-        data = torch.randn(1, 3, 1024, 1024)
+        data = torch.randn(1, 3, 1024, 1024).cuda()
 
         encoder_ref_out = encoder_ref(data)
         last_hidden_ref = encoder_ref_out.last_hidden_state
