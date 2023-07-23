@@ -109,7 +109,7 @@ class Float8Tensor(torch.Tensor):
             x1_fp8, x2_fp8 = args[0], args[1]
             assert x1_fp8._data.dtype == torch.float8_e5m2 and x2_fp8._data.dtype == torch.float8_e5m2
             # scale will be filled in by the kernel, not using delayed scaling
-            x3_scale = torch.empty(1)
+            x3_scale = torch.empty(1, device=x1_fp8.device)
             res_bits = torch.ops.aten.add_float8_e5m2(
                 x1_fp8._data, x1_fp8._scale,
                 x2_fp8._data, x2_fp8._scale,

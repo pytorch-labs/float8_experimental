@@ -62,13 +62,14 @@ def addmm_float8(inp1, inp_s1, m1, s1, m2, s2, s3, dtype3):
 # These are mostly placeholder and might need to be implemented in c++ as needed
 lib = Library("aten", "FRAGMENT")
 
-# For now register on CPU,
-# TODO(future) add GPU and test there
 lib.define("mm_float8(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, int dtype3) -> Tensor")
 lib.impl("mm_float8", mm_float8, "CPU")
+lib.impl("mm_float8", mm_float8, "CUDA")
 
 lib.define("add_float8_e5m2(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3) -> Tensor")
 lib.impl("add_float8_e5m2", add_float8_e5m2, "CPU")
+lib.impl("add_float8_e5m2", add_float8_e5m2, "CUDA")
 
 lib.define("addmm_float8(Tensor inp1, Tensor inp_s1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, int dtype3) -> Tensor")
 lib.impl("addmm_float8", addmm_float8, "CPU")
+lib.impl("addmm_float8", addmm_float8, "CUDA")
