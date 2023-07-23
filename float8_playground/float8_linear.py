@@ -32,17 +32,20 @@ class float8_linear(torch.autograd.Function):
     ):
         ctx.save_for_backward(
             x_fp8, w_fp8, b_fp8, fp8_s_dL_dX, fp8_s_dL_dW, fp8_s_dL_dY)
+        orig_shape = x_fp8._data.shape
+        x_fp8_data_reshaped = x_fp8._data.reshape(-1, orig_shape[-1])
         if b_fp8 is not None:
             res_bits = torch.ops.aten.addmm_float8(
                 b_fp8._data, b_fp8._scale,
-                x_fp8._data, x_fp8._scale,
+                x_fp8_data_reshaped, x_fp8._scale,
                 w_fp8._data.t(), w_fp8._scale,
                 fp8_s_out, torch.float8_e4m3fn)
         else:
             res_bits = torch.ops.aten.mm_float8(
-                x_fp8._data, x_fp8._scale,
+                x_fp8_data_reshaped, x_fp8._scale,
                 w_fp8._data.t(), w_fp8._scale,
                 fp8_s_out, torch.float8_e4m3fn)
+        res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
 
         res = Float8Tensor(res_bits, fp8_s_out)
         # scale update would also happen here, for now no-op
@@ -62,16 +65,25 @@ class float8_linear(torch.autograd.Function):
         else:
             go_fp8 = go
 
+        go_fp8_orig_shape = go_fp8._data.shape
+        go_fp8_data_reshaped = go_fp8._data.reshape(-1, go_fp8_orig_shape[-1])
+
         dL_dX_bits = torch.ops.aten.mm_float8(
-            go_fp8._data, go_fp8._scale,
+            go_fp8_data_reshaped, go_fp8._scale,
             w_fp8._data, w_fp8._scale,
             fp8_s_dL_dX, torch.float8_e5m2)
+        dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
         dL_dX_fp8 = Float8Tensor(dL_dX_bits, fp8_s_dL_dX)
 
+        x_fp8_orig_shape = x_fp8._data.shape
+        x_fp8_data_reshaped = x_fp8._data.reshape(-1, x_fp8_orig_shape[-1])
+
         dL_dW_bits = torch.ops.aten.mm_float8(
-            x_fp8._data.t(), x_fp8._scale,
-            go_fp8._data, go_fp8._scale,
+            x_fp8_data_reshaped.t(), x_fp8._scale,
+            go_fp8_data_reshaped, go_fp8._scale,
             fp8_s_dL_dW, torch.float8_e5m2).t()
+        # import pdb; pdb.set_trace()
+        # dL_dW_bits = dL_dW_bits.reshape(*x_fp8_orig_shape[:-1], dL_dW_bits.shape[-1])
         dL_dW_fp8 = Float8Tensor(dL_dW_bits, fp8_s_dL_dW)
 
         # scale update would also happen here, for now no-op
@@ -134,3 +146,13 @@ class Float8Linear(torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         return new_mod
+
+
+def swap_linear_with_float8_linear(model):
+    name_to_child = dict(model.named_children())
+    for name, child in name_to_child.items():
+        if isinstance(child, torch.nn.Linear):
+            new_child = Float8Linear.from_float(child)
+            setattr(model, name, new_child)
+        else:
+            swap_linear_with_float8_linear(child)
