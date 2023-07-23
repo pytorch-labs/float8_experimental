@@ -40,6 +40,8 @@ class Float8LinearUnitTest(unittest.TestCase):
         y_ref = m_ref(x)
         y_ref.sum().backward()
 
+        self.assertTrue(y_ref.shape == y_fp8.shape)
+
         y_sqnr = compute_error(y_ref, y_fp8)
         g_sqnr = compute_error(m_ref.weight.grad, m_fp8.weight.grad)
 
@@ -67,14 +69,18 @@ class Float8LinearUnitTest(unittest.TestCase):
                 f"{buffer_name} not filled")
 
     def test_linear_nobias(self):
-        x = torch.randn(2, 3)
-        m_ref = nn.Linear(3, 4, bias=False)
-        self._test_linear_impl(x, m_ref)
+        x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
+        for x_shape in x_shapes:
+            x = torch.randn(*x_shape)
+            m_ref = nn.Linear(3, 4, bias=False)
+            self._test_linear_impl(x, m_ref)
 
     def test_linear_bias(self):
-        x = torch.randn(2, 3)
-        m_ref = nn.Linear(3, 4, bias=True)
-        self._test_linear_impl(x, m_ref)
+        x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
+        for x_shape in x_shapes:
+            x = torch.randn(*x_shape)
+            m_ref = nn.Linear(3, 4, bias=True)
+            self._test_linear_impl(x, m_ref)
 
 
 if __name__ == '__main__':
