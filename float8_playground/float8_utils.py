@@ -12,13 +12,14 @@ E5M2_MAX_POS = 57344.0
 EPS = 1e-12
 
 def amax_to_scale(amax, dtype):
+    amax = amax.detach()
     if dtype == torch.float8_e4m3fn:
         return E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     else:  # e5m2
         return E5M2_MAX_POS / torch.clamp(amax, min=EPS)
 
 def tensor_to_scale(x, dtype):
-    amax = torch.max(torch.abs(x))
+    amax = torch.max(torch.abs(x.detach()))
     return amax_to_scale(amax, dtype)
 
 def compute_error(x, y):
