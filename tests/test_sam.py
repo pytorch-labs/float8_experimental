@@ -9,6 +9,9 @@ import torch
 
 from transformers import SamModel
 
+# set up float8 path
+import context
+
 from float8_linear import swap_linear_with_float8_linear
 from float8_utils import compute_error
 
