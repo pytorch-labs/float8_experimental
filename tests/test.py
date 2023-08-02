@@ -5,6 +5,9 @@ import unittest
 import torch
 import torch.nn as nn
 
+# set up float8 path
+import context
+
 from float8_utils import (
     compute_error,
     tensor_to_scale,
