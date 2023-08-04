@@ -113,6 +113,13 @@ class Float8Linear(torch.nn.Linear):
 
     def forward(self, x):
         if not isinstance(x, Float8Tensor):
+            # Duplicate the autocast logic for F.linear, so that the output
+            # of our module has the right original precision
+            if torch.is_autocast_enabled():
+                # For now, hardcode to GPU's autocast dtype
+                # if we need CPU support in the future, we can add it
+                x = x.to(torch.get_autocast_gpu_dtype())
+
             # TODO(future): switch to delayed scaling
             self.fp8_s_in.fill_(tensor_to_scale(x, torch.float8_e4m3fn))
             x_fp8 = Float8Tensor.to_float8(x, self.fp8_s_in, torch.float8_e4m3fn)
