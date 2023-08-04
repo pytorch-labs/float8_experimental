@@ -4,32 +4,36 @@ from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
-class Float8ConstrFunc(torch.autograd.Function):
+
+class ToFloat8ConstrFunc(torch.autograd.Function):
     """
-    A differentiable conversion between fp32 and fp8
-    TODO(future): split into two for cleaner code
+    A differentiable conversion to fp8
     """
     @staticmethod
     def forward(ctx, tensor, scale: float=None, dtype=torch.float8_e4m3fn):
-        if isinstance(tensor, Float8Tensor):
-            ctx.inp_is_float8 = True
-            return tensor._data.to(torch.float32) / tensor._scale
-        else:
-            ctx.inp_is_float8 = False
-            tensor_scaled = tensor * scale
-            bits_fp8 = tensor_scaled.to(dtype)
-            return Float8Tensor(bits_fp8, scale)
+        tensor_scaled = tensor * scale
+        bits_fp8 = tensor_scaled.to(dtype)
+        return Float8Tensor(bits_fp8, scale)
 
     @staticmethod
     def backward(ctx, g):
-        # Assume that we always want to scale the gradients
-        # back to full precision. We could do something else
-        if isinstance(g, Float8Tensor) and not ctx.inp_is_float8:
+        if isinstance(g, Float8Tensor):
             return g.to_float32(), None, None
-        elif ctx.inp_is_float8:
-            return Float8Tensor.from_float32(g), None, None
         else:
             return g, None, None
+
+
+class FromFloat8ConstrFunc(torch.autograd.Function):
+    """
+    A differentiable conversion from fp8
+    """
+    @staticmethod
+    def forward(ctx, tensor):
+        return tensor._data.to(torch.float32) / tensor._scale
+
+    @staticmethod
+    def backward(ctx, g):
+        return Float8Tensor.from_float32(g), None, None
 
 
 class Float8Tensor(torch.Tensor):
@@ -79,11 +83,11 @@ class Float8Tensor(torch.Tensor):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_float32={self.to_float32()}"
 
     def to_float32(self):
-        return Float8ConstrFunc.apply(self)
+        return FromFloat8ConstrFunc.apply(self)
 
     @classmethod
     def from_float32(cls, tensor, scale, dtype):
-        return Float8ConstrFunc.apply(tensor, scale, dtype)
+        return ToFloat8ConstrFunc.apply(tensor, scale, dtype)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
