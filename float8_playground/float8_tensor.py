@@ -13,12 +13,12 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     def forward(ctx, tensor, scale: float=None, dtype=torch.float8_e4m3fn):
         tensor_scaled = tensor * scale
         bits_fp8 = tensor_scaled.to(dtype)
-        return Float8Tensor(bits_fp8, scale)
+        return Float8Tensor(bits_fp8, scale, tensor.dtype)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_float32(), None, None
+            return g.to_original_precision(), None, None
         else:
             return g, None, None
 
@@ -29,11 +29,11 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, tensor):
-        return tensor._data.to(torch.float32) / tensor._scale
+        return tensor._data.to(tensor._orig_dtype) / tensor._scale
 
     @staticmethod
     def backward(ctx, g):
-        return Float8Tensor.from_float32(g), None, None
+        return Float8Tensor.to_float8(g), None, None
 
 
 class Float8Tensor(torch.Tensor):
@@ -43,6 +43,8 @@ class Float8Tensor(torch.Tensor):
     * `_scale`: the scale used to scale the original fp32 tensor. We multiply
       by scale to go from fp32 range to fp8 range, and divide by scale to go
       from fp8 range to fp32 range.
+    * `_orig_dtype`: the original dtype of the tensor used to create this
+      tensor.
 
     The current purpose of this object is 99% to bundle raw data + fp8 metadata
     together for easy passing through PyTorch systems, and 1% to implement
@@ -52,16 +54,11 @@ class Float8Tensor(torch.Tensor):
     version of stateless scaling. This allows e5m2 gradients to be added.
     TODO(future): verify this is numericaly accurate, optionally replace
     with something better.
-
-    It would probably make sense to also define fp8 path for data shuffling
-    ops like cat, transpose, view, etc inline so we don't have to fall back
-    to fp32 for them.
     """
 
-    def __new__(cls, data, scale):
+    def __new__(cls, data, scale, orig_dtype):
         # This is a non-differentiable constructor!
         assert not data.requires_grad
-        assert scale.dtype == torch.float32
         assert scale.nelement() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
@@ -69,40 +66,32 @@ class Float8Tensor(torch.Tensor):
             data.size(),
             strides=data.stride(),
             storage_offset=data.storage_offset(),
-            dtype=torch.float32,
+            dtype=orig_dtype,
             layout=data.layout,
             requires_grad=data.requires_grad,
             device=data.device,
         )
         self._data = data
         self._scale = scale
+        self._orig_dtype = orig_dtype
 
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_float32={self.to_float32()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
 
-    def to_float32(self):
+    def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
 
     @classmethod
-    def from_float32(cls, tensor, scale, dtype):
+    def to_float8(cls, tensor, scale, dtype):
         return ToFloat8ConstrFunc.apply(tensor, scale, dtype)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         # Note: unlike many other subclasses, this subclass's only propagates
         # itself for addition (for gradient addition in backward). For all
-        # other ops, it self-converts to fp32. The user/framework is
-        # assumed to take care of defining where fp8 operations occur in the
-        # forward pass and how scaling is calculated. In this example, that is
-        # done by the `FP8Linear` class.
-        # Vasiliy: the main reason I went with ^ is because NVIDIA is
-        # doing stateful delayed scaling, and I don't know of a safe
-        # way to enable that without either full program capture or punting it
-        # to the user. This prototype takes the "punt it to the user" approach.
-        # IMO for now let's just write out the scale stuff manually so we can
-        # focus on other things, and revisit later if needed.
+        # other ops, it self-converts to original precision. 
 
         # override addition so we can add e5m2 gradients
         if (
@@ -118,15 +107,15 @@ class Float8Tensor(torch.Tensor):
                 x1_fp8._data, x1_fp8._scale,
                 x2_fp8._data, x2_fp8._scale,
                 x3_scale)
-            res = Float8Tensor(res_bits, x3_scale)
+            # TODO(future): handle type promotion if orig dtypes do not match
+            # for now, just take the first one
+            res = Float8Tensor(res_bits, x3_scale, x1_fp8._orig_dtype)
             return res
 
-        # for all other ops, fall back to fp32
-        # TODO(future): add support for fp16/bf16
-
+        # for all other ops, fall back to original precision
         def maybe_unwrap(t):
             if isinstance(t, Float8Tensor):
-                return t.to_float32()
+                return t.to_original_precision()
             return t
 
         args = tree_map(maybe_unwrap, args)
