@@ -47,7 +47,7 @@ class float8_linear(torch.autograd.Function):
                 fp8_s_out, torch.float8_e4m3fn)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
 
-        res = Float8Tensor(res_bits, fp8_s_out)
+        res = Float8Tensor(res_bits, fp8_s_out, x_fp8._orig_dtype)
         # scale update would also happen here, for now no-op
         return res
 
@@ -61,7 +61,7 @@ class float8_linear(torch.autograd.Function):
             fp8_s_dL_dY.fill_(tensor_to_scale(go, torch.float8_e5m2))
             go_fp8 = Float8Tensor(
                 (go * fp8_s_dL_dY).to(torch.float8_e5m2),
-                fp8_s_dL_dY)
+                fp8_s_dL_dY, go.dtype)
         else:
             go_fp8 = go
 
@@ -73,7 +73,7 @@ class float8_linear(torch.autograd.Function):
             w_fp8._data, w_fp8._scale,
             fp8_s_dL_dX, torch.float8_e5m2)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
-        dL_dX_fp8 = Float8Tensor(dL_dX_bits, fp8_s_dL_dX)
+        dL_dX_fp8 = Float8Tensor(dL_dX_bits, fp8_s_dL_dX, go_fp8._orig_dtype)
 
         x_fp8_orig_shape = x_fp8._data.shape
         x_fp8_data_reshaped = x_fp8._data.reshape(-1, x_fp8_orig_shape[-1])
@@ -82,9 +82,7 @@ class float8_linear(torch.autograd.Function):
             x_fp8_data_reshaped.t(), x_fp8._scale,
             go_fp8_data_reshaped, go_fp8._scale,
             fp8_s_dL_dW, torch.float8_e5m2).t()
-        # import pdb; pdb.set_trace()
-        # dL_dW_bits = dL_dW_bits.reshape(*x_fp8_orig_shape[:-1], dL_dW_bits.shape[-1])
-        dL_dW_fp8 = Float8Tensor(dL_dW_bits, fp8_s_dL_dW)
+        dL_dW_fp8 = Float8Tensor(dL_dW_bits, fp8_s_dL_dW, go_fp8._orig_dtype)
 
         # scale update would also happen here, for now no-op
         if b_fp8 is not None:
@@ -117,17 +115,17 @@ class Float8Linear(torch.nn.Linear):
         if not isinstance(x, Float8Tensor):
             # TODO(future): switch to delayed scaling
             self.fp8_s_in.fill_(tensor_to_scale(x, torch.float8_e4m3fn))
-            x_fp8 = Float8Tensor.from_float32(x, self.fp8_s_in, torch.float8_e4m3fn)
+            x_fp8 = Float8Tensor.to_float8(x, self.fp8_s_in, torch.float8_e4m3fn)
         else:
             x_fp8 = x
 
         # TODO(future): switch to delayed scaling
         self.fp8_s_weight.fill_(tensor_to_scale(self.weight, torch.float8_e4m3fn))
-        w_fp8 = Float8Tensor.from_float32(self.weight, self.fp8_s_weight, torch.float8_e4m3fn)
+        w_fp8 = Float8Tensor.to_float8(self.weight, self.fp8_s_weight, torch.float8_e4m3fn)
         maybe_b_fp8 = None
         if self.bias is not None:
             self.fp8_s_bias.fill_(tensor_to_scale(self.bias, torch.float8_e4m3fn))
-            maybe_b_fp8 = Float8Tensor.from_float32(self.bias, self.fp8_s_bias, torch.float8_e4m3fn)
+            maybe_b_fp8 = Float8Tensor.to_float8(self.bias, self.fp8_s_bias, torch.float8_e4m3fn)
 
         y_fp8 = float8_linear.apply(
             x_fp8, w_fp8, maybe_b_fp8, self.fp8_s_out, self.fp8_s_dL_dX,

@@ -30,6 +30,7 @@ def add_float8_e5m2(m1, s1, m2, s2, s3):
     # this for adding gradients
     # naive implementation: dq -> op -> q
     # TODO(future): hook up to real kernel
+    # TODO(future): change these to use original precision
     m1_float32 = m1.float() / s1
     m2_float32 = m2.float() / s2
     m3_float32 = m1_float32 + m2_float32

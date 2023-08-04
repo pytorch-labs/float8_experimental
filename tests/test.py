@@ -1,4 +1,5 @@
 import copy
+import itertools
 import random
 import unittest
 
@@ -24,14 +25,26 @@ class Float8TensorUnitTest(unittest.TestCase):
         x1_s = tensor_to_scale(x1_fp32, torch.float8_e5m2)
         x2_fp32 = torch.randn(4, 4, device='cuda')
         x2_s = tensor_to_scale(x2_fp32, torch.float8_e5m2)
-        x1_fp8 = Float8Tensor.from_float32(x1_fp32, x1_s, torch.float8_e5m2)
-        x2_fp8 = Float8Tensor.from_float32(x2_fp32, x2_s, torch.float8_e5m2)
+        x1_fp8 = Float8Tensor.to_float8(x1_fp32, x1_s, torch.float8_e5m2)
+        x2_fp8 = Float8Tensor.to_float8(x2_fp32, x2_s, torch.float8_e5m2)
         x3_fp8 = x1_fp8 + x2_fp8
-        x3_fp32 = x3_fp8.to_float32()
+        x3_fp32 = x3_fp8.to_original_precision()
         x3_fp32_ref = x1_fp32 + x2_fp32
         sqnr = compute_error(x3_fp32_ref, x3_fp32)
         # TODO(future): make this more accurate, accuracy is pretty low
         self.assertTrue(sqnr >= 10.0)
+
+    def test_preserves_dtype(self):
+        # hp means high precision, lp means low precision
+        hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
+        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        for hp_dtype, lp_dtype in itertools.product(hp_dtypes, lp_dtypes):
+            x1_hp = torch.randn(4, 4, dtype=hp_dtype)
+            x1_s = tensor_to_scale(x1_hp, lp_dtype)
+            x2_lp = Float8Tensor.to_float8(x1_hp, x1_s, lp_dtype)
+            x3_hp = x2_lp.to_original_precision()
+            self.assertTrue(x3_hp.dtype == hp_dtype)
+
 
 class Float8LinearUnitTest(unittest.TestCase):
     def _test_linear_impl(self, x, m_ref):
