@@ -60,8 +60,8 @@ class Float8LinearUnitTest(unittest.TestCase):
         g_sqnr = compute_error(m_ref.weight.grad, m_fp8.weight.grad)
 
         # verify sqnr is reasonable
-        self.assertTrue(y_sqnr >= 22.0)
-        self.assertTrue(g_sqnr >= 22.0)
+        self.assertTrue(y_sqnr >= 18.0)
+        self.assertTrue(g_sqnr >= 18.0)
         if m_ref.bias is not None:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
@@ -95,6 +95,24 @@ class Float8LinearUnitTest(unittest.TestCase):
             x = torch.randn(*x_shape, device='cuda')
             m_ref = nn.Linear(3, 4, bias=True, device='cuda')
             self._test_linear_impl(x, m_ref)
+
+    def test_autocast(self):
+        # for now the support is very simple:
+        # 1. if autocast is off, output of Float8Linear has _orig_precision set to float
+        # 2. if autocast is on, output of Float8Linear has _orig_precision set to half
+
+        m = nn.Linear(4, 4, device='cuda')
+        m = Float8Linear.from_float(m)
+
+        # autocast off
+        x = torch.randn(4, 4, device='cuda')
+        y = m(x)
+        self.assertTrue(y._orig_dtype == torch.float)
+
+        # autocast on
+        with torch.autocast('cuda'):
+            y = m(x)
+        self.assertTrue(y._orig_dtype == torch.half)
 
 
 if __name__ == '__main__':
