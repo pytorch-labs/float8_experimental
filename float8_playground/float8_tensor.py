@@ -38,7 +38,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
 class Float8Tensor(torch.Tensor):
     """
-    A Python-only FP8 tensor.  Contains:
+    A Python-only Float8 tensor subclass.  Contains:
     * `_data`: the underlying e4m3 or e5m2 data
     * `_scale`: the scale used to scale the original fp32 tensor. We multiply
       by scale to go from fp32 range to fp8 range, and divide by scale to go
@@ -46,14 +46,13 @@ class Float8Tensor(torch.Tensor):
     * `_orig_dtype`: the original dtype of the tensor used to create this
       tensor.
 
-    The current purpose of this object is 99% to bundle raw data + fp8 metadata
-    together for easy passing through PyTorch systems, and 1% to implement
-    gradient addition (since that has to happen outside of user code).
-
-    The addition operation is defined inline and uses a naive
-    version of stateless scaling. This allows e5m2 gradients to be added.
-    TODO(future): verify this is numericaly accurate, optionally replace
-    with something better.
+    Intended usage of this abstraction:
+    1. to bundle raw data + fp8 metadata together for easy passing through 
+       Python PyTorch systems.
+    2. Float8-aware user code can use the private fields on these tensors
+       to call into float8 operations. 
+    3. Float8-agnostic user code can use these tensors as is - they will
+       convert to original precision in `__torch_dispatch__`.
     """
 
     def __new__(cls, data, scale, orig_dtype):
@@ -89,38 +88,15 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        # Note: unlike many other subclasses, this subclass's only propagates
-        # itself for addition (for gradient addition in backward). For all
-        # other ops, it self-converts to original precision. 
-
-        # override addition so we can add e5m2 gradients
-        if (
-            func is aten.add.Tensor
-            and isinstance(args[0], Float8Tensor)
-            and isinstance(args[1], Float8Tensor)
-        ):
-            x1_fp8, x2_fp8 = args[0], args[1]
-            assert x1_fp8._data.dtype == torch.float8_e5m2 and x2_fp8._data.dtype == torch.float8_e5m2
-            # scale will be filled in by the kernel, not using delayed scaling
-            x3_scale = torch.empty(1, device=x1_fp8.device)
-            res_bits = torch.ops.aten.add_float8_e5m2(
-                x1_fp8._data, x1_fp8._scale,
-                x2_fp8._data, x2_fp8._scale,
-                x3_scale)
-            # TODO(future): handle type promotion if orig dtypes do not match
-            # for now, just take the first one
-            res = Float8Tensor(res_bits, x3_scale, x1_fp8._orig_dtype)
-            return res
-
-        # for all other ops, fall back to original precision
-        def maybe_unwrap(t):
+        # for all ops that get here, fall back to original precision
+        def unwrap(t):
             if isinstance(t, Float8Tensor):
                 return t.to_original_precision()
             return t
 
-        args = tree_map(maybe_unwrap, args)
+        args = tree_map(unwrap, args)
         if kwargs is not None:
-            kwargs = tree_map(maybe_unwrap, kwargs)
+            kwargs = tree_map(unwrap, kwargs)
         out = super().__torch_dispatch__(func, types, args, kwargs)
         return out
 

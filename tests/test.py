@@ -20,19 +20,17 @@ random.seed(0)
 torch.manual_seed(0)
 
 class Float8TensorUnitTest(unittest.TestCase):
-    def test_add(self):
+    def test_grad_add(self):
         x1_fp32 = torch.randn(4, 4, device='cuda')
         x1_s = tensor_to_scale(x1_fp32, torch.float8_e5m2)
         x2_fp32 = torch.randn(4, 4, device='cuda')
         x2_s = tensor_to_scale(x2_fp32, torch.float8_e5m2)
         x1_fp8 = Float8Tensor.to_float8(x1_fp32, x1_s, torch.float8_e5m2)
         x2_fp8 = Float8Tensor.to_float8(x2_fp32, x2_s, torch.float8_e5m2)
-        x3_fp8 = x1_fp8 + x2_fp8
-        x3_fp32 = x3_fp8.to_original_precision()
+        x3_fp32 = x1_fp8 + x2_fp8
         x3_fp32_ref = x1_fp32 + x2_fp32
         sqnr = compute_error(x3_fp32_ref, x3_fp32)
-        # TODO(future): make this more accurate, accuracy is pretty low
-        self.assertTrue(sqnr >= 10.0)
+        self.assertTrue(sqnr >= 20.0)
 
     def test_preserves_dtype(self):
         # hp means high precision, lp means low precision
