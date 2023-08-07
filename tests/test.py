@@ -67,7 +67,7 @@ class Float8LinearUnitTest(unittest.TestCase):
         if m_ref.bias is not None:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
-        # verify all of the scales got updated
+        # verify all of the amax buffers got updated
         buffer_names = [
             'float8_amax_in',
             'float8_amax_weight',
@@ -84,6 +84,10 @@ class Float8LinearUnitTest(unittest.TestCase):
                 self.assertTrue(
                     torch.ne(buffer_value, torch.tensor(init_val)),
                     f"{buffer_name} not filled, current value {buffer_value}")
+
+        # verify initialization buffers got updated
+        self.assertTrue(m_fp8.fw_amax_initialized[0] == 1)
+        self.assertTrue(m_fp8.bw_amax_initialized[0] == 1)
 
     def test_linear_nobias(self):
         x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
