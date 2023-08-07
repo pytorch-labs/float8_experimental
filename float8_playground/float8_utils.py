@@ -20,7 +20,7 @@ def amax_to_scale(amax, dtype):
         return E5M2_MAX_POS / torch.clamp(amax, min=EPS)
 
 @torch.no_grad()
-def tensor_to_scale(x, dtype):
+def tensor_to_amax(x):
     amax = torch.max(torch.abs(x))
     amax_copy = amax.detach().clone()
     # Hack: inline the distributed logic, just for testing numerics
@@ -28,6 +28,11 @@ def tensor_to_scale(x, dtype):
     # TODO(future): better composability with distributed
     if dist.is_initialized():
         dist.all_reduce(amax, op=dist.ReduceOp.MAX)
+    return amax
+
+@torch.no_grad()
+def tensor_to_scale(x, dtype):
+    amax = tensor_to_amax(x)
     return amax_to_scale(amax, dtype)
 
 def compute_error(x, y):
