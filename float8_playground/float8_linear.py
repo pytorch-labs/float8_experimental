@@ -41,7 +41,7 @@ class float8_linear(torch.autograd.Function):
             x_fp8, w_fp8, b_fp8, float8_amax_dL_dX, float8_amax_dL_dW, float8_amax_dL_dY,
             bw_amax_initialized)
         orig_shape = x_fp8._data.shape
-        x_fp8_data_reshaped = x_fp8._data.reshape(-1, orig_shape[-1])
+        x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
         is_fw_amax_initialized = torch.any(fw_amax_initialized)
 
         if b_fp8 is not None:
@@ -50,29 +50,29 @@ class float8_linear(torch.autograd.Function):
                 with torch.no_grad():
                     ref_result = torch.addmm(
                         b_fp8.to_original_precision(), 
-                        x_fp8.to_original_precision().reshape(-1, orig_shape[-1]),
-                        w_fp8.to_original_precision().t())
+                        x_fp8_reshaped.to_original_precision(),
+                        w_fp8.t().to_original_precision())
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
             res_bits = torch.ops.aten.addmm_float8(
                 b_fp8._data, b_fp8._scale,
-                x_fp8_data_reshaped, x_fp8._scale,
-                w_fp8._data.t(), w_fp8._scale,
+                x_fp8_reshaped._data, x_fp8._scale,
+                w_fp8.t()._data, w_fp8._scale,
                 float8_amax_out, y_scale, torch.float8_e4m3fn)
         else:
             if not is_fw_amax_initialized:
                 # calculate reference amax of output
                 with torch.no_grad():
                     ref_result = torch.mm(
-                        x_fp8.to_original_precision().reshape(-1, orig_shape[-1]),
-                        w_fp8.to_original_precision().t())
+                        x_fp8_reshaped.to_original_precision(),
+                        w_fp8.t().to_original_precision())
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
             res_bits = torch.ops.aten.mm_float8(
-                x_fp8_data_reshaped, x_fp8._scale,
-                w_fp8._data.t(), w_fp8._scale,
+                x_fp8_reshaped._data, x_fp8._scale,
+                w_fp8.t()._data, w_fp8._scale,
                 float8_amax_out, y_scale, torch.float8_e4m3fn)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
 
@@ -101,39 +101,39 @@ class float8_linear(torch.autograd.Function):
             go_fp8 = go
 
         go_fp8_orig_shape = go_fp8._data.shape
-        go_fp8_data_reshaped = go_fp8._data.reshape(-1, go_fp8_orig_shape[-1])
+        go_fp8_reshaped = go_fp8.reshape(-1, go_fp8_orig_shape[-1])
 
         if not is_bw_amax_initialized:
             # calculate reference amax of output
             with torch.no_grad():
                 dL_dX_ref = torch.mm(
-                    go_fp8.to_original_precision().reshape(-1, go_fp8_orig_shape[-1]),
+                    go_fp8_reshaped.to_original_precision(),
                     w_fp8.to_original_precision())
                 float8_amax_dL_dX.fill_(tensor_to_amax(dL_dX_ref))
 
         dL_dX_scale = amax_to_scale(float8_amax_dL_dX, torch.float8_e5m2)
         dL_dX_bits = torch.ops.aten.mm_float8(
-            go_fp8_data_reshaped, go_fp8._scale,
+            go_fp8_reshaped._data, go_fp8._scale,
             w_fp8._data, w_fp8._scale,
             float8_amax_dL_dX, dL_dX_scale, torch.float8_e5m2)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
         dL_dX_fp8 = Float8Tensor(dL_dX_bits, dL_dX_scale, go_fp8._orig_dtype)
 
         x_fp8_orig_shape = x_fp8._data.shape
-        x_fp8_data_reshaped = x_fp8._data.reshape(-1, x_fp8_orig_shape[-1])
+        x_fp8_reshaped = x_fp8.reshape(-1, x_fp8_orig_shape[-1])
 
         if not is_bw_amax_initialized:
             # calculate reference amax of output
             with torch.no_grad():
                 dL_dW_ref = torch.mm(
-                    x_fp8.to_original_precision().reshape(-1, x_fp8_orig_shape[-1]).t(),
-                    go_fp8.to_original_precision().reshape(-1, go_fp8_orig_shape[-1])).t()
+                    x_fp8_reshaped.t().to_original_precision(),
+                    go_fp8_reshaped.to_original_precision()).t()
                 float8_amax_dL_dW.fill_(tensor_to_amax(dL_dW_ref))
 
         dL_dW_scale = amax_to_scale(float8_amax_dL_dW, torch.float8_e5m2)
         dL_dW_bits = torch.ops.aten.mm_float8(
-            x_fp8_data_reshaped.t(), x_fp8._scale,
-            go_fp8_data_reshaped, go_fp8._scale,
+            x_fp8_reshaped.t()._data, x_fp8._scale,
+            go_fp8_reshaped._data, go_fp8._scale,
             float8_amax_dL_dW, dL_dW_scale, torch.float8_e5m2).t()
         dL_dW_fp8 = Float8Tensor(dL_dW_bits, dL_dW_scale, go_fp8._orig_dtype)
 
