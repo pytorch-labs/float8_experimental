@@ -12,6 +12,8 @@ import context
 from float8_utils import (
     compute_error,
     tensor_to_scale,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
 )
 from float8_tensor import Float8Tensor
 from float8_linear import Float8Linear
@@ -67,20 +69,21 @@ class Float8LinearUnitTest(unittest.TestCase):
 
         # verify all of the scales got updated
         buffer_names = [
-            'fp8_s_in',
-            'fp8_s_weight',
-            'fp8_s_out',
-            'fp8_s_dL_dX',
-            'fp8_s_dL_dW',
-            'fp8_s_dL_dY',
+            'float8_amax_in',
+            'float8_amax_weight',
+            'float8_amax_out',
+            'float8_amax_dL_dX',
+            'float8_amax_dL_dW',
+            'float8_amax_dL_dY',
         ]
         if m_ref.bias is not None:
-            buffer_names.append('fp8_s_bias')
+            buffer_names.append('float8_amax_bias')
         for buffer_name in buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
-            self.assertTrue(
-                torch.ne(buffer_value, torch.tensor(1.0)),
-                f"{buffer_name} not filled")
+            for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
+                self.assertTrue(
+                    torch.ne(buffer_value, torch.tensor(init_val)),
+                    f"{buffer_name} not filled, current value {buffer_value}")
 
     def test_linear_nobias(self):
         x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
