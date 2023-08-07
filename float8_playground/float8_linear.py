@@ -9,7 +9,10 @@ owners to implement their own UEX.
 
 import torch
 
-import float8_aten_api
+from float8_python_api import (
+    mm_float8,
+    addmm_float8,
+)
 
 from float8_utils import (
     tensor_to_amax,
@@ -52,11 +55,9 @@ class float8_linear(torch.autograd.Function):
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
-            res_bits = torch.ops.aten.addmm_float8(
-                b_fp8._data, b_fp8._scale,
-                x_fp8_reshaped._data, x_fp8._scale,
-                w_fp8.t()._data, w_fp8._scale,
-                float8_amax_out, y_scale, torch.float8_e4m3fn)
+            res_bits = addmm_float8(
+                b_fp8, x_fp8_reshaped, w_fp8.t(), float8_amax_out, y_scale, 
+                torch.float8_e4m3fn)
         else:
             if not is_fw_amax_initialized:
                 # calculate reference amax of output
@@ -65,10 +66,9 @@ class float8_linear(torch.autograd.Function):
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
-            res_bits = torch.ops.aten.mm_float8(
-                x_fp8_reshaped._data, x_fp8._scale,
-                w_fp8.t()._data, w_fp8._scale,
-                float8_amax_out, y_scale, torch.float8_e4m3fn)
+            res_bits = mm_float8(
+                x_fp8_reshaped, w_fp8.t(), float8_amax_out, y_scale, 
+                torch.float8_e4m3fn)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
 
         res = Float8Tensor(res_bits, y_scale, x_fp8._orig_dtype)
@@ -105,10 +105,8 @@ class float8_linear(torch.autograd.Function):
                 float8_amax_dL_dX.fill_(tensor_to_amax(dL_dX_ref))
 
         dL_dX_scale = amax_to_scale(float8_amax_dL_dX, torch.float8_e5m2)
-        dL_dX_bits = torch.ops.aten.mm_float8(
-            go_fp8_reshaped._data, go_fp8._scale,
-            w_fp8._data, w_fp8._scale,
-            float8_amax_dL_dX, dL_dX_scale, torch.float8_e5m2)
+        dL_dX_bits = mm_float8(
+            go_fp8_reshaped, w_fp8, float8_amax_dL_dX, dL_dX_scale, torch.float8_e5m2)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
         dL_dX_fp8 = Float8Tensor(dL_dX_bits, dL_dX_scale, go_fp8._orig_dtype)
 
@@ -122,10 +120,9 @@ class float8_linear(torch.autograd.Function):
                 float8_amax_dL_dW.fill_(tensor_to_amax(dL_dW_ref))
 
         dL_dW_scale = amax_to_scale(float8_amax_dL_dW, torch.float8_e5m2)
-        dL_dW_bits = torch.ops.aten.mm_float8(
-            x_fp8_reshaped.t()._data, x_fp8._scale,
-            go_fp8_reshaped._data, go_fp8._scale,
-            float8_amax_dL_dW, dL_dW_scale, torch.float8_e5m2).t()
+        dL_dW_bits = mm_float8(
+            x_fp8_reshaped.t(), go_fp8_reshaped, float8_amax_dL_dW, 
+            dL_dW_scale, torch.float8_e5m2).t()
         dL_dW_fp8 = Float8Tensor(dL_dW_bits, dL_dW_scale, go_fp8._orig_dtype)
 
         if not is_bw_amax_initialized:
