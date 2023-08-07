@@ -17,7 +17,6 @@ def mm_float8(
     s1,  # input 1 scale
     m2,  # input 2 data
     s2,  # input 2 scale
-    # s3,  # ouput scale
     amax3,  # amax buffer of output, updated inplace in this function
     dtype3,  # output dtype
 ):
@@ -32,10 +31,7 @@ def mm_float8(
     s3 = amax_to_scale(amax3, dtype3)
 
     m3_fp32_scaled = m3_fp32 * s3
-    if dtype3 == torch.float8_e4m3fn:
-        return m3_fp32_scaled.to(torch.float8_e4m3fn)
-    else:
-        return m3_fp32_scaled.to(torch.float8_e5m2)
+    return m3_fp32_scaled.to(dtype3)
 
 # TODO naming of these vars is weird
 def addmm_float8(
@@ -45,7 +41,6 @@ def addmm_float8(
     s1,  # input 1 scale
     m2,  # input 2 data
     s2,  # input 2 scale
-    # s3,  # output scale
     amax3,  # amax buffer of output, updated inplace in this function
     dtype3,  # output dtype
 ):
@@ -61,10 +56,7 @@ def addmm_float8(
     s3 = amax_to_scale(amax3, dtype3)
 
     m3_fp32_scaled = m3_fp32 * s3
-    if dtype3 == torch.float8_e4m3fn:
-        return m3_fp32_scaled.to(torch.float8_e4m3fn)
-    else:
-        return m3_fp32_scaled.to(torch.float8_e5m2)
+    return m3_fp32_scaled.to(dtype3)
 
 
 #
