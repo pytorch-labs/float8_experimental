@@ -48,10 +48,7 @@ class float8_linear(torch.autograd.Function):
             if not is_fw_amax_initialized:
                 # calculate reference amax of output
                 with torch.no_grad():
-                    ref_result = torch.addmm(
-                        b_fp8.to_original_precision(), 
-                        x_fp8_reshaped.to_original_precision(),
-                        w_fp8.t().to_original_precision())
+                    ref_result = torch.addmm(b_fp8, x_fp8_reshaped, w_fp8.t())
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
@@ -64,9 +61,7 @@ class float8_linear(torch.autograd.Function):
             if not is_fw_amax_initialized:
                 # calculate reference amax of output
                 with torch.no_grad():
-                    ref_result = torch.mm(
-                        x_fp8_reshaped.to_original_precision(),
-                        w_fp8.t().to_original_precision())
+                    ref_result = torch.mm(x_fp8_reshaped, w_fp8.t())
                     float8_amax_out.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(float8_amax_out, torch.float8_e4m3fn)
@@ -106,9 +101,7 @@ class float8_linear(torch.autograd.Function):
         if not is_bw_amax_initialized:
             # calculate reference amax of output
             with torch.no_grad():
-                dL_dX_ref = torch.mm(
-                    go_fp8_reshaped.to_original_precision(),
-                    w_fp8.to_original_precision())
+                dL_dX_ref = torch.mm(go_fp8_reshaped, w_fp8)
                 float8_amax_dL_dX.fill_(tensor_to_amax(dL_dX_ref))
 
         dL_dX_scale = amax_to_scale(float8_amax_dL_dX, torch.float8_e5m2)
@@ -125,9 +118,7 @@ class float8_linear(torch.autograd.Function):
         if not is_bw_amax_initialized:
             # calculate reference amax of output
             with torch.no_grad():
-                dL_dW_ref = torch.mm(
-                    x_fp8_reshaped.t().to_original_precision(),
-                    go_fp8_reshaped.to_original_precision()).t()
+                dL_dW_ref = torch.mm(x_fp8_reshaped.t(), go_fp8_reshaped).t()
                 float8_amax_dL_dW.fill_(tensor_to_amax(dL_dW_ref))
 
         dL_dW_scale = amax_to_scale(float8_amax_dL_dW, torch.float8_e5m2)
