@@ -88,6 +88,19 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        if func is aten.view.default:
+            orig_tensor, view_args = args
+            new_tensor = Float8Tensor(
+                orig_tensor._data.view(*view_args), orig_tensor._scale, 
+                orig_tensor._orig_dtype)
+            return new_tensor
+        elif func is aten.t.default:
+            orig_tensor, = args
+            new_tensor = Float8Tensor(
+                orig_tensor._data.t(), orig_tensor._scale,
+                orig_tensor._orig_dtype)
+            return new_tensor
+
         # for all ops that get here, fall back to original precision
         def unwrap(t):
             if isinstance(t, Float8Tensor):
