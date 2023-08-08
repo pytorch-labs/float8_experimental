@@ -88,15 +88,15 @@ class Float8LinearUnitTest(unittest.TestCase):
 
         # verify all of the amax buffers got updated
         buffer_names = [
-            'float8_amax_in',
-            'float8_amax_weight',
-            'float8_amax_out',
-            'float8_amax_dL_dX',
-            'float8_amax_dL_dW',
-            'float8_amax_dL_dY',
+            'fp8_amax_x',
+            'fp8_amax_w',
+            'fp8_amax_y',
+            'fp8_amax_dL_dX',
+            'fp8_amax_dL_dW',
+            'fp8_amax_dL_dY',
         ]
         if m_ref.bias is not None:
-            buffer_names.append('float8_amax_bias')
+            buffer_names.append('fp8_amax_b')
         for buffer_name in buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
             for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
