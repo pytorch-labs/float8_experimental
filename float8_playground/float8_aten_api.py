@@ -34,8 +34,7 @@ def mm_float8(
 
 # TODO naming of these vars is weird
 def addmm_float8(
-    inp1,  # bias data
-    inp_s1,  # bias scale
+    inp1,  # bias (in fp32/fp16/bf16, no fp8 support)
     m1,  # input 1 data
     s1,  # input 1 scale
     m2,  # input 2 data
@@ -46,10 +45,9 @@ def addmm_float8(
 ):
     # naive implementation: dq -> op -> q
     # TODO(future): hook up to real kernel
-    inp1_fp32 = inp1.float() / inp_s1
     m1_fp32 = m1.float() / s1
     m2_fp32 = m2.float() / s2
-    m3_fp32 = torch.addmm(inp1_fp32, m1_fp32, m2_fp32)
+    m3_fp32 = torch.addmm(inp1, m1_fp32, m2_fp32)
 
     # TODO(future): switch to delayed scaling
     amax3.fill_(tensor_to_amax(m3_fp32))
@@ -70,6 +68,6 @@ lib.define("mm_float8(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, 
 lib.impl("mm_float8", mm_float8, "CPU")
 lib.impl("mm_float8", mm_float8, "CUDA")
 
-lib.define("addmm_float8(Tensor inp1, Tensor inp_s1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
+lib.define("addmm_float8(Tensor inp1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
 lib.impl("addmm_float8", addmm_float8, "CPU")
 lib.impl("addmm_float8", addmm_float8, "CUDA")

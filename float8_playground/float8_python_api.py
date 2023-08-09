@@ -20,7 +20,7 @@ def mm_float8(
         amax3, s3, dtype3)
 
 def addmm_float8(
-    inp1,  # addition term
+    inp1,  # addition term (in fp32/fp16/bf16, no fp8 support)
     x1,  # first mm term
     x2,  # second mm term
     amax3,  # output aax, updated inplace in this function
@@ -28,7 +28,7 @@ def addmm_float8(
     dtype3,  # output dtype
 ):
     return torch.ops.aten.addmm_float8(
-        inp1._data, inp1._scale,
+        inp1,
         x1._data, x1._scale,
         x2._data, x2._scale,
         amax3, s3, dtype3)

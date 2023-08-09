@@ -95,8 +95,6 @@ class Float8LinearUnitTest(unittest.TestCase):
             'fp8_amax_dL_dW',
             'fp8_amax_dL_dY',
         ]
-        if m_ref.bias is not None:
-            buffer_names.append('fp8_amax_b')
         for buffer_name in buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
             for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
