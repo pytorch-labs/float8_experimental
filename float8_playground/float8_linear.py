@@ -32,7 +32,7 @@ class float8_linear(torch.autograd.Function):
         ctx,
         x_fp8,
         w_fp8,
-        b_fp8,
+        b,
         fp8_amax_y,
         fp8_amax_dL_dX,
         fp8_amax_dL_dW,
@@ -41,22 +41,22 @@ class float8_linear(torch.autograd.Function):
         bw_amax_initialized,
     ):
         ctx.save_for_backward(
-            x_fp8, w_fp8, b_fp8, fp8_amax_dL_dX, fp8_amax_dL_dW, fp8_amax_dL_dY,
+            x_fp8, w_fp8, b, fp8_amax_dL_dX, fp8_amax_dL_dW, fp8_amax_dL_dY,
             bw_amax_initialized)
         orig_shape = x_fp8._data.shape
         x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
         is_fw_amax_initialized = torch.any(fw_amax_initialized)
 
-        if b_fp8 is not None:
+        if b is not None:
             if not is_fw_amax_initialized:
                 # calculate reference amax of output
                 with torch.no_grad():
-                    ref_result = torch.addmm(b_fp8, x_fp8_reshaped, w_fp8.t())
+                    ref_result = torch.addmm(b, x_fp8_reshaped, w_fp8.t())
                     fp8_amax_y.fill_(tensor_to_amax(ref_result))
 
             y_scale = amax_to_scale(fp8_amax_y, torch.float8_e4m3fn)
             res_bits = addmm_float8(
-                b_fp8, x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale, 
+                b, x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale, 
                 torch.float8_e4m3fn)
         else:
             if not is_fw_amax_initialized:
@@ -149,7 +149,6 @@ class Float8Linear(torch.nn.Linear):
         # or PTQ calibration.
         self.register_buffer('fp8_amax_x', torch.tensor(E4M3_MAX_POS))
         self.register_buffer('fp8_amax_w', torch.tensor(E4M3_MAX_POS))
-        self.register_buffer('fp8_amax_b', torch.tensor(E4M3_MAX_POS))
         self.register_buffer('fp8_amax_y', torch.tensor(E4M3_MAX_POS))
         self.register_buffer('fp8_amax_dL_dX', torch.tensor(E5M2_MAX_POS))
         self.register_buffer('fp8_amax_dL_dW', torch.tensor(E5M2_MAX_POS))
@@ -184,18 +183,9 @@ class Float8Linear(torch.nn.Linear):
         self.fp8_amax_w.fill_(tensor_to_amax(self.weight))
 
         w_fp8 = Float8Tensor.to_float8(self.weight, w_scale, torch.float8_e4m3fn)
-        maybe_b_fp8 = None
-        if self.bias is not None:
-            # TODO(future): switch to windowed delayed scaling
-            if not is_fw_amax_initialized:
-                self.fp8_amax_b.fill_(tensor_to_amax(self.bias))
-            b_scale = amax_to_scale(self.fp8_amax_b, torch.float8_e4m3fn)
-            self.fp8_amax_b.fill_(tensor_to_amax(self.bias))
-
-            maybe_b_fp8 = Float8Tensor.to_float8(self.bias, b_scale, torch.float8_e4m3fn)
 
         y_fp8 = float8_linear.apply(
-            x_fp8, w_fp8, maybe_b_fp8, self.fp8_amax_y, self.fp8_amax_dL_dX,
+            x_fp8, w_fp8, self.bias, self.fp8_amax_y, self.fp8_amax_dL_dX,
             self.fp8_amax_dL_dW, self.fp8_amax_dL_dY, self.fw_amax_initialized,
             self.bw_amax_initialized)
 
