@@ -15,7 +15,9 @@ launch() {
     # generate FSDP model output and updated state dict
     # the NCCL_DEBUG setting is to avoid log spew
     # the CUDA_VISIBLE_DEVICES setting is for easy debugging
-    NCCL_DEBUG=WARN CUDA_VISIBLE_DEVICES=0,1 python tests/test_fsdp.py \
+    # the NCCL_NET setting is to work around transient issues on a
+    #   specific host (`devgpu001.nha2`)
+    NCCL_DEBUG=WARN CUDA_VISIBLE_DEVICES=0,1 NCCL_NET=SOCKET python tests/test_fsdp.py \
         --mode fsdp --is_fp8 $IS_FP8
 
     # compare the outputs and state dicts and verify equivalence
