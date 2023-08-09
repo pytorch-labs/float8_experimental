@@ -36,12 +36,11 @@ class float8_linear(torch.autograd.Function):
         fp8_amax_y,
         fp8_amax_dL_dX,
         fp8_amax_dL_dW,
-        fp8_amax_dL_dY,
         fw_amax_initialized,
         bw_amax_initialized,
     ):
         ctx.save_for_backward(
-            x_fp8, w_fp8, b, fp8_amax_dL_dX, fp8_amax_dL_dW, fp8_amax_dL_dY,
+            x_fp8, w_fp8, b, fp8_amax_dL_dX, fp8_amax_dL_dW,
             bw_amax_initialized)
         orig_shape = x_fp8._data.shape
         x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
@@ -76,24 +75,12 @@ class float8_linear(torch.autograd.Function):
         return res
 
     @staticmethod
-    def backward(ctx, go):
+    def backward(ctx, go_fp8):
         x_fp8, w_fp8, b_fp8, fp8_amax_dL_dX, fp8_amax_dL_dW, \
-            fp8_amax_dL_dY, bw_amax_initialized = \
+            bw_amax_initialized = \
                 ctx.saved_tensors
                 
         is_bw_amax_initialized = torch.any(bw_amax_initialized)
-
-        if not isinstance(go, Float8Tensor):
-            # TODO(future): switch to windowed delayed scaling
-            if not is_bw_amax_initialized:
-                fp8_amax_dL_dY.fill_(tensor_to_amax(go))
-            dL_dY_scale = amax_to_scale(fp8_amax_dL_dY, torch.float8_e5m2)
-            fp8_amax_dL_dY.fill_(tensor_to_amax(go))
-            go_fp8 = Float8Tensor(
-                (go * dL_dY_scale).to(torch.float8_e5m2),
-                dL_dY_scale, go.dtype)
-        else:
-            go_fp8 = go
 
         go_fp8_orig_shape = go_fp8._data.shape
         go_fp8_reshaped = go_fp8.reshape(-1, go_fp8_orig_shape[-1])
@@ -130,9 +117,33 @@ class float8_linear(torch.autograd.Function):
 
         # scale update would also happen here, for now no-op
         if b_fp8 is not None:
-            return dL_dX_fp8, dL_dW_fp8, go_fp8, None, None, None, None, None, None
+            return dL_dX_fp8, dL_dW_fp8, go_fp8, None, None, None, None, None
         else:
-            return dL_dX_fp8, dL_dW_fp8, None, None, None, None, None, None, None
+            return dL_dX_fp8, dL_dW_fp8, None, None, None, None, None, None
+
+class _NoOpFwToFloat8E5M2Bw(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, fp8_amax_dL_dY, bw_amax_initialized):
+        ctx.save_for_backward(fp8_amax_dL_dY, bw_amax_initialized)
+        return x
+
+    @staticmethod
+    def backward(ctx, go):
+        fp8_amax_dL_dY, bw_amax_initialized = ctx.saved_tensors
+        is_bw_amax_initialized = torch.any(bw_amax_initialized)
+        if not isinstance(go, Float8Tensor):
+            # TODO(future): switch to windowed delayed scaling
+            with torch.no_grad():
+                if not is_bw_amax_initialized:
+                    fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+                dL_dY_scale = amax_to_scale(fp8_amax_dL_dY, torch.float8_e5m2)
+                fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+            go_fp8 = Float8Tensor(
+                (go * dL_dY_scale).to(torch.float8_e5m2),
+                dL_dY_scale, go.dtype)
+        else:
+            go_fp8 = go
+        return go_fp8, None, None
 
 
 class Float8Linear(torch.nn.Linear):
@@ -186,11 +197,14 @@ class Float8Linear(torch.nn.Linear):
 
         y_fp8 = float8_linear.apply(
             x_fp8, w_fp8, self.bias, self.fp8_amax_y, self.fp8_amax_dL_dX,
-            self.fp8_amax_dL_dW, self.fp8_amax_dL_dY, self.fw_amax_initialized,
-            self.bw_amax_initialized)
+            self.fp8_amax_dL_dW, self.fw_amax_initialized, self.bw_amax_initialized)
 
         if not is_fw_amax_initialized:
             self.fw_amax_initialized.fill_(1)
+
+        # Set up cast to fp8 in bw
+        y_fp8 = _NoOpFwToFloat8E5M2Bw.apply(
+            y_fp8, self.fp8_amax_dL_dY, self.bw_amax_initialized)
 
         # For now, hardcode returning Float8Tensor (propagate as much as we can).
         # This can be changed to return a different dtype, if needed.
