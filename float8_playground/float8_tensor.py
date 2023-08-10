@@ -2,6 +2,14 @@ from enum import Enum
 import torch
 from torch.utils._pytree import tree_map
 
+from float8_utils import (
+    tensor_to_amax,
+    amax_to_scale,
+)
+from float8_python_api import (
+    mm_float8,
+)
+
 aten = torch.ops.aten
 
 
@@ -73,6 +81,16 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
+        # References to relevant buffers which need to be updated for
+        # the scaled_matmul computation. The caller is expected to optionally
+        # set these after initializing the tensor subclass.
+        self._fp8_buffer_refs = {
+            'fp8_amax_y': None,
+            # 'fp8_amax_dL_dX': None,
+            # 'fp8_amax_dL_dW': None,
+            'fw_amax_initialized': None,
+            'bw_amax_initialized': None,
+        }
 
         return self
 
@@ -88,7 +106,36 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        if func is aten.view.default:
+
+        if func is aten.mm.default:
+            if (
+                isinstance(args[0], Float8Tensor) and 
+                args[0]._data.dtype == torch.float8_e4m3fn and
+                isinstance(args[1], Float8Tensor) and 
+                args[1]._data.dtype == torch.float8_e4m3fn
+            ):
+                # forward, y = torch.mm(x, w)
+                x_fp8, w_fp8 = args
+                is_fw_amax_initialized = torch.any(w_fp8._fp8_buffer_refs['fw_amax_initialized'])
+                fp8_amax_y = w_fp8._fp8_buffer_refs['fp8_amax_y']
+                if not is_fw_amax_initialized:
+                    # calculate reference amax of output
+                    with torch.no_grad():
+                        ref_result = torch.mm(x_fp8.to_original_precision(), w_fp8.to_original_precision())
+                        fp8_amax_y.fill_(tensor_to_amax(ref_result))
+
+                y_scale = amax_to_scale(fp8_amax_y, torch.float8_e4m3fn)
+                res_bits = mm_float8(
+                    x_fp8, w_fp8, fp8_amax_y, y_scale, 
+                    torch.float8_e4m3fn)
+
+                res = Float8Tensor(res_bits, y_scale, x_fp8._orig_dtype)
+                return res
+            # TODO(before land): implement the two backward matmuls, currently
+            # they take the fallback which leads them to be executed in original
+            # precision
+            
+        elif func is aten.view.default:
             orig_tensor, view_args = args
             new_tensor = Float8Tensor(
                 orig_tensor._data.view(*view_args), orig_tensor._scale, 
@@ -99,6 +146,7 @@ class Float8Tensor(torch.Tensor):
             new_tensor = Float8Tensor(
                 orig_tensor._data.t(), orig_tensor._scale,
                 orig_tensor._orig_dtype)
+            new_tensor._fp8_buffer_refs = orig_tensor._fp8_buffer_refs
             return new_tensor
 
         # for all ops that get here, fall back to original precision

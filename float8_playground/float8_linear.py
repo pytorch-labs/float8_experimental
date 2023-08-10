@@ -8,6 +8,7 @@ owners to implement their own UEX.
 """
 
 import torch
+import torch.nn.functional as F
 
 from float8_python_api import (
     mm_float8,
@@ -195,9 +196,15 @@ class Float8Linear(torch.nn.Linear):
 
         w_fp8 = Float8Tensor.to_float8(self.weight, w_scale, torch.float8_e4m3fn)
 
-        y_fp8 = float8_linear.apply(
-            x_fp8, w_fp8, self.bias, self.fp8_amax_y, self.fp8_amax_dL_dX,
-            self.fp8_amax_dL_dW, self.fw_amax_initialized, self.bw_amax_initialized)
+        use_new = True
+        if use_new:
+            w_fp8._fp8_buffer_refs['fp8_amax_y'] = self.fp8_amax_y
+            w_fp8._fp8_buffer_refs['fw_amax_initialized'] = self.fw_amax_initialized
+            y_fp8 = F.linear(x_fp8, w_fp8, self.bias)
+        else:
+            y_fp8 = float8_linear.apply(
+                x_fp8, w_fp8, self.bias, self.fp8_amax_y, self.fp8_amax_dL_dX,
+                self.fp8_amax_dL_dW, self.fw_amax_initialized, self.bw_amax_initialized)
 
         if not is_fw_amax_initialized:
             self.fw_amax_initialized.fill_(1)
