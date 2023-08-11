@@ -1,3 +1,4 @@
+from typing import Callable
 import torch
 import torch.distributed as dist
 
@@ -59,3 +60,11 @@ def compute_error(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+def update_amax_if_not_initialized(initiliazed: torch.Tensor, amax: torch.Tensor, ref_output: Callable):
+    """ If the amax for an output has not been calculated yet this will use the full precision
+        to establish baseline and then update the amax tensor inplace
+    """
+    if not initiliazed:
+        with torch.no_grad():
+            amax.fill_(tensor_to_amax(ref_output()))

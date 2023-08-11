@@ -65,15 +65,15 @@ class Float8Tensor(torch.Tensor):
       tensor.
 
     Intended usage of this abstraction:
-    1. to bundle raw data + fp8 metadata together for easy passing through 
+    1. to bundle raw data + fp8 metadata together for easy passing through
        Python PyTorch systems.
     2. Float8-aware user code can use the private fields on these tensors
-       to call into float8 operations. 
+       to call into float8 operations.
     3. Float8-agnostic user code can use these tensors as is - they will
        convert to original precision in `__torch_dispatch__`.
     """
 
-    def __new__(cls, data, scale, orig_dtype):
+    def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
         # This is a non-differentiable constructor!
         assert not data.requires_grad
         assert scale.nelement() == 1
@@ -109,7 +109,7 @@ class Float8Tensor(torch.Tensor):
         if func is aten.view.default:
             orig_tensor, view_args = args
             new_tensor = Float8Tensor(
-                orig_tensor._data.view(*view_args), orig_tensor._scale, 
+                orig_tensor._data.view(*view_args), orig_tensor._scale,
                 orig_tensor._orig_dtype)
             return new_tensor
         elif func is aten.t.default:

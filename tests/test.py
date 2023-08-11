@@ -2,6 +2,8 @@ import copy
 import itertools
 import random
 import unittest
+#pip install parameterized
+from parameterized import parameterized
 
 import torch
 import torch.nn as nn
@@ -83,7 +85,6 @@ class Float8LinearUnitTest(unittest.TestCase):
 
         y_sqnr = compute_error(y_ref, y_fp8)
         g_sqnr = compute_error(m_ref.weight.grad, m_fp8.weight.grad)
-
         # verify sqnr is reasonable
         self.assertTrue(y_sqnr >= 18.0, f'{y_sqnr} is too low')
         self.assertTrue(g_sqnr >= 17.0, f'{g_sqnr} is too low')
@@ -123,29 +124,27 @@ class Float8LinearUnitTest(unittest.TestCase):
         self.assertTrue(m_fp8.fw_amax_initialized[0] == 1)
         self.assertTrue(m_fp8.bw_amax_initialized[0] == 1)
 
-    def test_linear_nobias(self):
-        x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
+    @parameterized.expand([(True,), (False,)])
+    def test_linear_nobias(self, emulate: bool):
+        x_shapes = ((16, 16),(2, 16, 16), (3, 2, 16, 16))
         for x_shape in x_shapes:
             for use_no_ts in (True, False):
                 x = torch.randn(*x_shape, device='cuda')
                 m_ref = nn.Linear(3, 4, bias=False, device='cuda')
                 self._test_linear_impl(x, m_ref, use_no_tensor_subclass=use_no_ts)
 
-    def test_linear_bias(self):
-        x_shapes = ((2, 3), (4, 2, 3), (5, 4, 2, 3))
+    @parameterized.expand([(True,), (False,)])
+    def test_linear_bias(self, emulate: bool):
+        x_shapes = ((16, 16),(2, 16, 16), (3, 2, 16, 16))
         for x_shape in x_shapes:
             for use_no_ts in (True, False):
                 x = torch.randn(*x_shape, device='cuda')
                 m_ref = nn.Linear(3, 4, bias=True, device='cuda')
                 self._test_linear_impl(x, m_ref, use_no_tensor_subclass=use_no_ts)
 
-    def test_autocast(self):
-        # for now the support is very simple:
-        # 1. if autocast is off, output of Float8Linear has _orig_precision set to float
-        # 2. if autocast is on, output of Float8Linear has _orig_precision set to half
 
         m = nn.Linear(4, 4, device='cuda')
-        m = Float8Linear.from_float(m)
+        m = Float8Linear.from_float(m, emulate)
 
         # autocast off
         x = torch.randn(4, 4, device='cuda')
@@ -159,13 +158,13 @@ class Float8LinearUnitTest(unittest.TestCase):
 
     def _test_pt2_impl(self, use_no_tensor_subclass):
         from torch._dynamo.testing import EagerAndRecordGraphs, CompileCounterWithBackend
-        
+
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
         m = nn.Linear(4, 4, device='cpu', bias=False)
         x = torch.randn(4, 4, device='cpu')
-        # TODO(future): switch back to tensor subclass based UX once the PT 
+        # TODO(future): switch back to tensor subclass based UX once the PT
         # support is there
         if use_no_tensor_subclass:
             m = Float8LinearNoTensorSubclass.from_float(m)
