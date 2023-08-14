@@ -14,7 +14,6 @@ from float8_linear_utils import (
     _maybe_initialize_amaxes_for_mm,
     _maybe_initialize_amaxes_for_addmm,
     _update_history_with_new_amax,
-    _update_amaxes_for_float8_cast,
 )
 
 from float8_python_api import (
@@ -158,9 +157,9 @@ class _NoOpFwToFloat8E5M2Bw(torch.autograd.Function):
                 # TODO(next): calculate scale based on history here
                 dL_dY_scale = amax_to_scale(fp8_amax_dL_dY, torch.float8_e5m2)
                 go_fp8 = Float8Tensor.to_float8(
-                    go, dL_dY_scale, torch.float8_e5m2)
-                _update_amaxes_for_float8_cast(
-                    go, fp8_amax_dL_dY, fp8_amax_history_dL_dY)
+                    go, dL_dY_scale, torch.float8_e5m2, fp8_amax_dL_dY)
+                _update_history_with_new_amax(
+                    fp8_amax_dL_dY, fp8_amax_history_dL_dY)
         else:
             go_fp8 = go
         return go_fp8, None, None, None
@@ -205,9 +204,10 @@ class Float8Linear(torch.nn.Linear):
                 x, self.fp8_amax_x, self.fp8_amax_history_x, is_fw_amax_initialized)
             # TODO(next): calculate state from history
             x_scale = amax_to_scale(self.fp8_amax_x, torch.float8_e4m3fn)
-            x_fp8 = Float8Tensor.to_float8(x, x_scale, torch.float8_e4m3fn)
-            _update_amaxes_for_float8_cast(
-                x, self.fp8_amax_x, self.fp8_amax_history_x)
+            x_fp8 = Float8Tensor.to_float8(
+                x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+            _update_history_with_new_amax(
+                self.fp8_amax_x, self.fp8_amax_history_x)
         else:
             x_fp8 = x
 
@@ -216,9 +216,10 @@ class Float8Linear(torch.nn.Linear):
             self.weight, self.fp8_amax_w, self.fp8_amax_history_w, is_fw_amax_initialized)
         # TODO(next): calculate state from history
         w_scale = amax_to_scale(self.fp8_amax_w, torch.float8_e4m3fn)
-        w_fp8 = Float8Tensor.to_float8(self.weight, w_scale, torch.float8_e4m3fn)
-        _update_amaxes_for_float8_cast(
-            self.weight, self.fp8_amax_w, self.fp8_amax_history_w)
+        w_fp8 = Float8Tensor.to_float8(
+            self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+        _update_history_with_new_amax(
+            self.fp8_amax_w, self.fp8_amax_history_w)
 
         y_fp8 = float8_linear.apply(
             x_fp8, w_fp8, self.bias, 

@@ -2,6 +2,8 @@ from enum import Enum
 import torch
 from torch.utils._pytree import tree_map
 
+from float8_utils import tensor_to_amax
+
 aten = torch.ops.aten
 
 
@@ -10,17 +12,30 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     A differentiable conversion to fp8
     """
     @staticmethod
-    def forward(ctx, tensor, scale: float=None, dtype=torch.float8_e4m3fn):
+    def forward(
+        ctx, 
+        tensor, 
+        scale: float=None, 
+        float8_dtype=torch.float8_e4m3fn, 
+        amax_buffer=None,
+    ):
+        # In TransformerEngine, the casts to float8 are fused with calculating
+        # the new amax value. In this codebase, the eager mode code for those 
+        # two things is colocated in this function. We expect PT2.0 to fuse it
+        # for us.
+        if amax_buffer is not None:
+            amax_buffer.fill_(tensor_to_amax(tensor))
+
         tensor_scaled = tensor * scale
-        bits_fp8 = tensor_scaled.to(dtype)
+        bits_fp8 = tensor_scaled.to(float8_dtype)
         return Float8Tensor(bits_fp8, scale, tensor.dtype)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None
+            return g.to_original_precision(), None, None, None
         else:
-            return g, None, None
+            return g, None, None, None
 
 
 class FromFloat8ConstrFunc(torch.autograd.Function):
@@ -83,8 +98,8 @@ class Float8Tensor(torch.Tensor):
         return FromFloat8ConstrFunc.apply(self)
 
     @classmethod
-    def to_float8(cls, tensor, scale, dtype):
-        return ToFloat8ConstrFunc.apply(tensor, scale, dtype)
+    def to_float8(cls, tensor, scale, float8_dtype, amax_buffer=None):
+        return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):

@@ -43,7 +43,6 @@ def _maybe_initialize_amaxes_for_addmm(inp, x1, x2, cur_amax, amax_history, is_i
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
 
-
 def _update_history_with_new_amax(new_amax, amax_history):
     """
     Updates `amax_history` (the last N cur_amax values) inplace with the value 
@@ -52,14 +51,3 @@ def _update_history_with_new_amax(new_amax, amax_history):
     new_amax_history = torch.roll(amax_history, 1)
     new_amax_history[0] = new_amax
     amax_history.copy_(new_amax_history)
-
-def _update_amaxes_for_float8_cast(x, cur_amax, amax_history):
-    """
-    If x is about to be cast to `float8`, this function does two things:
-    1. calculates the scale to be used for scaling the current iteration
-    2. updates the amax buffers with the unscaled value from the current 
-       iteration so it can be used for the next iteration
-    """
-    new_amax = tensor_to_amax(x)
-    cur_amax.fill_(new_amax)
-    _update_history_with_new_amax(new_amax, amax_history)
