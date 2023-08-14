@@ -87,7 +87,7 @@ class Float8LinearUnitTest(unittest.TestCase):
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        buffer_names = [
+        amax_buffer_names = [
             'fp8_amax_x',
             'fp8_amax_w',
             'fp8_amax_y',
@@ -95,12 +95,25 @@ class Float8LinearUnitTest(unittest.TestCase):
             'fp8_amax_dL_dW',
             'fp8_amax_dL_dY',
         ]
-        for buffer_name in buffer_names:
+        for buffer_name in amax_buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
             for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
                 self.assertTrue(
                     torch.ne(buffer_value, torch.tensor(init_val)),
                     f"{buffer_name} not filled, current value {buffer_value}")
+
+        # verify all of the amax history buffers got updated
+        amax_history_buffer_names = [
+            'fp8_amax_history_x',
+            'fp8_amax_history_w',
+            'fp8_amax_history_y',
+            'fp8_amax_history_dL_dX',
+            'fp8_amax_history_dL_dW',
+            'fp8_amax_history_dL_dY',
+        ]
+        for buffer_name in amax_history_buffer_names:
+            buffer_value = getattr(m_fp8, buffer_name)
+            self.assertTrue(torch.max(buffer_value) > 0.0, f"{buffer_name} not filled")
 
         # verify initialization buffers got updated
         self.assertTrue(m_fp8.fw_amax_initialized[0] == 1)
