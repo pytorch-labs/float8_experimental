@@ -1,0 +1,65 @@
+import torch
+
+from float8_utils import (
+    tensor_to_amax,
+    amax_to_scale,
+)
+
+def _maybe_initialize_amaxes_for_float8_cast(x, cur_amax, amax_history, is_initialized):
+    """
+    If x is about to be cast to `float8` and the amax buffers are not initialized,
+    initializes them inplace.
+    """
+    if is_initialized:
+        return
+    with torch.no_grad():
+        new_amax = tensor_to_amax(x)
+        cur_amax.fill_(new_amax)
+        amax_history[0] = new_amax
+
+def _maybe_initialize_amaxes_for_mm(x1, x2, cur_amax, amax_history, is_initialized):
+    """
+    If we are about to run the float8 version of `torch.mm(x1, x2)` and the output
+    amax buffer is not initialized, initialize it inplace.
+    """
+    if is_initialized:
+        return
+    with torch.no_grad():
+        ref_result = torch.mm(x1, x2)            
+        new_amax = tensor_to_amax(ref_result)
+        cur_amax.fill_(new_amax)
+        amax_history[0] = new_amax
+
+def _maybe_initialize_amaxes_for_addmm(inp, x1, x2, cur_amax, amax_history, is_initialized):
+    """
+    If we are about to run the float8 version of `torch.addmm(inp, x1, x2)` and the output
+    amax buffer is not initialized, initialize it inplace.
+    """
+    if is_initialized:
+        return
+    with torch.no_grad():
+        ref_result = torch.addmm(inp, x1, x2)            
+        new_amax = tensor_to_amax(ref_result)
+        cur_amax.fill_(new_amax)
+        amax_history[0] = new_amax
+
+
+def _update_history_with_new_amax(new_amax, amax_history):
+    """
+    Updates `amax_history` (the last N cur_amax values) inplace with the value 
+    of `new_amax`.
+    """
+    new_amax_history = torch.roll(amax_history, 1)
+    new_amax_history[0] = new_amax
+    amax_history.copy_(new_amax_history)
+
+def _update_amaxes_for_float8_cast(x, cur_amax, amax_history):
+    """
+    If x is about to be cast to `float8`, this function does two things:
+    1. calculates the scale to be used for scaling the current iteration
+    2. updates the amax buffers with the unscaled value from the current 
+       iteration so it can be used for the next iteration
+    """
+    new_amax = tensor_to_amax(x)
+    cur_amax.fill_(new_amax)
+    _update_history_with_new_amax(new_amax, amax_history)
