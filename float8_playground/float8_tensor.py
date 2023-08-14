@@ -2,7 +2,10 @@ from enum import Enum
 import torch
 from torch.utils._pytree import tree_map
 
-from float8_utils import tensor_to_amax
+from float8_utils import (
+    tensor_to_amax,
+    to_fp8_saturated,
+)
 
 aten = torch.ops.aten
 
@@ -27,7 +30,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             amax_buffer.fill_(tensor_to_amax(tensor))
 
         tensor_scaled = tensor * scale
-        bits_fp8 = tensor_scaled.to(float8_dtype)
+        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
         return Float8Tensor(bits_fp8, scale, tensor.dtype)
 
     @staticmethod
