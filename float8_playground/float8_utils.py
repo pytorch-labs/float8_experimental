@@ -20,6 +20,13 @@ def amax_to_scale(amax, dtype):
         return E5M2_MAX_POS / torch.clamp(amax, min=EPS)
 
 @torch.no_grad()
+def amax_history_to_scale(amax_history, float8_dtype, history_to_scale_fn_type):
+    if history_to_scale_fn_type == 'max':
+        amax = torch.max(amax_history)
+        return amax_to_scale(amax, float8_dtype)
+    raise NotImplementedError()
+
+@torch.no_grad()
 def tensor_to_amax(x):
     amax = torch.max(torch.abs(x))
     amax_copy = amax.detach().clone()
