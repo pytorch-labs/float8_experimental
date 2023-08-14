@@ -8,6 +8,9 @@ from torch.library import Library
 
 from float8_utils import (
     tensor_to_amax,
+    to_fp8_saturated,
+    E4M3_MAX_POS,
+    E5M2_MAX_POS,
 )
 
 
@@ -30,7 +33,7 @@ def mm_float8(
     amax3.fill_(tensor_to_amax(m3_fp32))
 
     m3_fp32_scaled = m3_fp32 * s3
-    return m3_fp32_scaled.to(dtype3)
+    return to_fp8_saturated(m3_fp32_scaled, dtype3)
 
 # TODO naming of these vars is weird
 def addmm_float8(
@@ -53,7 +56,7 @@ def addmm_float8(
     amax3.fill_(tensor_to_amax(m3_fp32))
 
     m3_fp32_scaled = m3_fp32 * s3
-    return m3_fp32_scaled.to(dtype3)
+    return to_fp8_saturated(m3_fp32_scaled, dtype3)
 
 
 #
