@@ -157,7 +157,7 @@ class Float8LinearUnitTest(unittest.TestCase):
             y = m(x)
         self.assertTrue(y._orig_dtype == torch.half)
 
-    def test_pt2(self):
+    def _test_pt2_impl(self, use_no_tensor_subclass):
         from torch._dynamo.testing import EagerAndRecordGraphs, CompileCounterWithBackend
         
         backend = EagerAndRecordGraphs()
@@ -167,12 +167,22 @@ class Float8LinearUnitTest(unittest.TestCase):
         x = torch.randn(4, 4, device='cpu')
         # TODO(future): switch back to tensor subclass based UX once the PT 
         # support is there
-        m = Float8LinearNoTensorSubclass.from_float(m)
-        m = torch.compile(m, backend=cnt)
+        if use_no_tensor_subclass:
+            m = Float8LinearNoTensorSubclass.from_float(m)
+        else:
+            m = Float8Linear.from_float(m)
+        m = torch.compile(m, backend='eager')
         # verify things don't crash
         m(x)
         # logs with TORCH_LOGS="aot": https://gist.github.com/vkuzo/e4e372bd88085a0ac2de46d553a3c0d8
         # TODO(future): inspect the graph programmaticaly
+
+    def test_pt2_nots(self):
+        self._test_pt2_impl(use_no_tensor_subclass=True)
+
+    @unittest.skip("PT2.0 tracing subclasses does not work yet")
+    def test_pt2_ts(self):
+        self._test_pt2_impl(use_no_tensor_subclass=False)
 
 
 if __name__ == '__main__':
