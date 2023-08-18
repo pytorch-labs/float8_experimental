@@ -10,6 +10,7 @@ owners to implement their own UEX.
 import dataclasses
 
 import torch
+from typing import Optional
 
 from float8_linear_utils import (
     _maybe_initialize_amaxes_for_float8_cast,
@@ -51,13 +52,15 @@ class float8_linear(torch.autograd.Function):
         fw_amax_initialized,
         bw_amax_initialized,
         recipe,
+        emulate: bool,
     ):
         ctx.save_for_backward(
-            x_fp8, w_fp8, b, 
+            x_fp8, w_fp8, b,
             fp8_amax_dL_dX, fp8_amax_history_dL_dX,
             fp8_amax_dL_dW, fp8_amax_history_dL_dW,
             bw_amax_initialized)
         ctx.recipe = recipe
+        ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
         x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
         is_fw_amax_initialized = torch.any(fw_amax_initialized)
@@ -70,7 +73,7 @@ class float8_linear(torch.autograd.Function):
             y_scale = amax_history_to_scale(
                 fp8_amax_history_y, torch.float8_e4m3fn, recipe.scale_fn_name)
             res_bits = addmm_float8(
-                b, x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale, 
+                b, x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale,
                 torch.float8_e4m3fn)
             _update_history_with_new_amax(fp8_amax_y, fp8_amax_history_y)
 
@@ -82,8 +85,8 @@ class float8_linear(torch.autograd.Function):
             y_scale = amax_history_to_scale(
                 fp8_amax_history_y, torch.float8_e4m3fn, recipe.scale_fn_name)
             res_bits = mm_float8(
-                x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale, 
-                torch.float8_e4m3fn)
+                x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale,
+                torch.float8_e4m3fn, emulate=emulate)
             _update_history_with_new_amax(fp8_amax_y, fp8_amax_history_y)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
 
@@ -96,7 +99,8 @@ class float8_linear(torch.autograd.Function):
             fp8_amax_dL_dW, fp8_amax_history_dL_dW, bw_amax_initialized = \
                 ctx.saved_tensors
         recipe = ctx.recipe
-                
+        emulate = ctx.emulate
+
         is_bw_amax_initialized = torch.any(bw_amax_initialized)
 
         go_fp8_orig_shape = go_fp8._data.shape
@@ -106,13 +110,13 @@ class float8_linear(torch.autograd.Function):
         # calculate dL/dX, update relevant buffers along the way
         #
         _maybe_initialize_amaxes_for_mm(
-            go_fp8_reshaped, w_fp8, fp8_amax_dL_dX, fp8_amax_history_dL_dX, 
+            go_fp8_reshaped, w_fp8, fp8_amax_dL_dX, fp8_amax_history_dL_dX,
             is_bw_amax_initialized)
 
         dL_dX_scale = amax_history_to_scale(
             fp8_amax_history_dL_dX, torch.float8_e5m2, recipe.scale_fn_name)
         dL_dX_bits = mm_float8(
-            go_fp8_reshaped, w_fp8, fp8_amax_dL_dX, dL_dX_scale, torch.float8_e5m2)
+            go_fp8_reshaped, w_fp8, fp8_amax_dL_dX, dL_dX_scale, torch.float8_e5m2, emulate=emulate)
         _update_history_with_new_amax(fp8_amax_dL_dX, fp8_amax_history_dL_dX)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
         dL_dX_fp8 = Float8Tensor(dL_dX_bits, dL_dX_scale, go_fp8._orig_dtype)
@@ -130,15 +134,15 @@ class float8_linear(torch.autograd.Function):
         dL_dW_scale = amax_history_to_scale(
             fp8_amax_history_dL_dW, torch.float8_e5m2, recipe.scale_fn_name)
         dL_dW_bits = mm_float8(
-            x_fp8_reshaped.t(), go_fp8_reshaped, fp8_amax_dL_dW, 
-            dL_dW_scale, torch.float8_e5m2).t()
+            x_fp8_reshaped.t(), go_fp8_reshaped, fp8_amax_dL_dW,
+            dL_dW_scale, torch.float8_e5m2, emulate=emulate).t()
         _update_history_with_new_amax(fp8_amax_dL_dW, fp8_amax_history_dL_dW)
         dL_dW_fp8 = Float8Tensor(dL_dW_bits, dL_dW_scale, go_fp8._orig_dtype)
 
         if not is_bw_amax_initialized:
             bw_amax_initialized.fill_(1)
 
-        empty_grads = None, None, None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX_fp8, dL_dW_fp8, go_fp8, *empty_grads
         else:
@@ -156,6 +160,7 @@ class _NoOpFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_amax_dL_dY, fp8_amax_history_dL_dY, bw_amax_initialized = ctx.saved_tensors
         recipe = ctx.recipe
         is_bw_amax_initialized = torch.any(bw_amax_initialized)
+
         if not isinstance(go, Float8Tensor):
             with torch.no_grad():
                 _maybe_initialize_amaxes_for_float8_cast(
@@ -190,7 +195,7 @@ class Float8Linear(torch.nn.Linear):
         delayed_scaling_recipe = kwargs.pop('delayed_scaling_recipe', DelayedScalingRecipe())
         super().__init__(*args, **kwargs)
 
-        # TODO(future): have a unique recipe per buffer instead of one per 
+        # TODO(future): have a unique recipe per buffer instead of one per
         # module, saving implementing that until we need it.
         # TODO(future): serialization for recipes
         self.recipe = delayed_scaling_recipe
@@ -210,6 +215,8 @@ class Float8Linear(torch.nn.Linear):
         self.register_buffer('fp8_amax_history_dL_dY', torch.zeros(history_len))
         self.register_buffer('fw_amax_initialized', torch.tensor([0], dtype=torch.uint8))
         self.register_buffer('bw_amax_initialized', torch.tensor([0], dtype=torch.uint8))
+        # Whether to emulate the fp8 matmul logic in float32
+        self.emulate = False
 
     def forward(self, x):
         is_fw_amax_initialized = torch.any(self.fw_amax_initialized)
@@ -244,18 +251,18 @@ class Float8Linear(torch.nn.Linear):
             self.fp8_amax_w, self.fp8_amax_history_w)
 
         y_fp8 = float8_linear.apply(
-            x_fp8, w_fp8, self.bias, 
-            self.fp8_amax_y, self.fp8_amax_history_y, 
+            x_fp8, w_fp8, self.bias,
+            self.fp8_amax_y, self.fp8_amax_history_y,
             self.fp8_amax_dL_dX, self.fp8_amax_history_dL_dX,
             self.fp8_amax_dL_dW, self.fp8_amax_history_dL_dW,
-            self.fw_amax_initialized, self.bw_amax_initialized, self.recipe)
+            self.fw_amax_initialized, self.bw_amax_initialized, self.recipe, self.emulate)
 
         if not is_fw_amax_initialized:
             self.fw_amax_initialized.fill_(1)
 
         # Set up cast to fp8 in bw
         y_fp8 = _NoOpFwToFloat8E5M2Bw.apply(
-            y_fp8, self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY, 
+            y_fp8, self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.bw_amax_initialized, self.recipe)
 
         # For now, hardcode returning Float8Tensor (propagate as much as we can).
@@ -263,21 +270,35 @@ class Float8Linear(torch.nn.Linear):
         return y_fp8
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, emulate: bool):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
+
+        Args:
+            mod (torch.nn.Linear): nn.Linear to convert
+            emulate (bool): whether to emulate fp8 matmul logic in float32
         """
         new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
+        new_mod.emulate = emulate
+        # I think its okay to send all params and buffers to device
+        new_mod.to(mod.weight.device)
         return new_mod
 
 
-def swap_linear_with_float8_linear(model):
+def swap_linear_with_float8_linear(model, emulate=False):
+    """
+    Replaces all instances of torch.nn.Linear in the given model with Float8Linear.
+
+    Args:
+        model (torch.nn.Module): The model to modify.
+        emulate (bool, optional): Whether to emulate the fp8 matmul logic in float32.
+    """
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
         if isinstance(child, torch.nn.Linear):
-            new_child = Float8Linear.from_float(child)
+            new_child = Float8Linear.from_float(child, emulate)
             setattr(model, name, new_child)
         else:
             swap_linear_with_float8_linear(child)
