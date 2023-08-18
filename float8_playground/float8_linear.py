@@ -301,4 +301,4 @@ def swap_linear_with_float8_linear(model, emulate=False):
             new_child = Float8Linear.from_float(child, emulate)
             setattr(model, name, new_child)
         else:
-            swap_linear_with_float8_linear(child)
+            swap_linear_with_float8_linear(child, emulate)

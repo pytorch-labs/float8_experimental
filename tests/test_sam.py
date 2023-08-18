@@ -26,7 +26,9 @@ class Float8SAMIntegrationTest(unittest.TestCase):
         # for now just test the encoder to simplify things
         encoder_ref = model.vision_encoder
         encoder_fp8 = copy.deepcopy(encoder_ref)
-        swap_linear_with_float8_linear(encoder_fp8)
+        # TODO(future): enable real compute, but may need a different model
+        # as the shapes need to be divisible by 16
+        swap_linear_with_float8_linear(encoder_fp8, emulate=True)
 
         # an image 
         data = torch.randn(1, 3, 1024, 1024).cuda()

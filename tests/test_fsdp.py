@@ -38,7 +38,7 @@ sd_out_fsdp_fname = os.path.join(data_dir, 'sd_out_fsdp.pt')
 output_single_gpu_fname = os.path.join(data_dir, 'output_single_gpu.pt')
 output_fsdp_fname = os.path.join(data_dir, 'output_fsdp.pt')
 
-B, M, K, N = 8, 1, 4, 4
+B, M, K, N = 8, 8, 32, 32
 lr = 0.01
 
 
@@ -97,7 +97,7 @@ def fsdp_main(rank, world_size, args):
     dist.all_gather(y_global, y_local)
     y_global = torch.cat(y_global, dim=0)
     if rank == 0:
-        torch.save(y_global.cpu(), output_fsdp_fname)
+        torch.save(y_global, output_fsdp_fname)
 
     # get global state dict
     # https://pytorch.org/tutorials/intermediate/FSDP_adavnced_tutorial.html
@@ -116,14 +116,14 @@ def run(mode: str, is_fp8: bool):
 
     if mode == 'generate':
         # generate reference input
-        ref_input = torch.randn(B, M, K)
-        model = get_model(K, N, is_fp8=is_fp8)
+        ref_input = torch.randn(B, M, K).cuda()
+        model = get_model(K, N, is_fp8=is_fp8).cuda()
         torch.save(ref_input, input_fname)
         torch.save(model.state_dict(), sd_in_fname)
 
     elif mode == 'single_gpu':
         ref_input = torch.load(input_fname)
-        model = get_model(K, N, is_fp8=is_fp8)
+        model = get_model(K, N, is_fp8=is_fp8).cuda()
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
         optimizer.zero_grad()
@@ -140,8 +140,8 @@ def run(mode: str, is_fp8: bool):
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == 'analyze':
-        y_single_gpu = torch.load(output_single_gpu_fname)
-        y_fsdp = torch.load(output_fsdp_fname)
+        y_single_gpu = torch.load(output_single_gpu_fname).cpu()
+        y_fsdp = torch.load(output_fsdp_fname).cpu()
         torch.testing.assert_close(y_single_gpu, y_fsdp)
         print('output testing single_gpu vs FSDP success')
 
@@ -151,6 +151,7 @@ def run(mode: str, is_fp8: bool):
         for k, v1 in sd_out_single_gpu.items():
 
             v2 = sd_out_fsdp[k]
+            v1, v2 = v1.cpu(), v2.cpu()
             if is_fp8:
                 # Note: for fp8 single-node vs FSDP, we are not expected
                 # to match the scale of the weight gradient. Because of this,
