@@ -15,7 +15,9 @@ from float8_utils import (
     tensor_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    amax_to_scale
 )
+from float8_python_api import mm_float8
 from float8_tensor import Float8Tensor
 from float8_linear import Float8Linear
 from float8_linear_nots import Float8LinearNoTensorSubclass
@@ -178,6 +180,37 @@ class TestFloat8Linear:
     def test_pt2_ts(self):
         self._test_pt2_impl(use_no_tensor_subclass=False)
 
+class TestScaledMM:
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
+    def test_scaled_mm_vs_emulated(self):
+        input_dtype = torch.float8_e4m3fn
+        output_dtype = torch.float8_e4m3fn
+        compare_type = torch.float32
+
+        a = torch.randn(16, 16, device='cuda')
+        b = torch.randn(16, 16, device='cuda').t()
+        out_ref = torch.matmul(a, b)
+
+        a_scale = tensor_to_scale(a, input_dtype)
+        b_scale = tensor_to_scale(b, input_dtype)
+        out_scale = tensor_to_scale(out_ref, output_dtype)
+
+        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
+        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
+
+        output_amax_scaled = torch.tensor(0, device='cuda')
+        output_amax_emulated = torch.tensor(0, device='cuda')
+
+        out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
+        out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+
+        out_scaled_mm = out_scaled_mm.to(compare_type)
+        out_emulated = out_emulated.to(compare_type)
+
+        out_scaled_mm = out_scaled_mm * amax_to_scale(output_amax_scaled, input_dtype)
+        out_emulated = out_emulated * amax_to_scale(output_amax_emulated, input_dtype)
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated)
 
 if __name__ == '__main__':
     unittest.main()
