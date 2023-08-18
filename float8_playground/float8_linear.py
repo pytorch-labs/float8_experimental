@@ -288,6 +288,13 @@ class Float8Linear(torch.nn.Linear):
 
 
 def swap_linear_with_float8_linear(model, emulate=False):
+    """
+    Replaces all instances of torch.nn.Linear in the given model with Float8Linear.
+
+    Args:
+        model (torch.nn.Module): The model to modify.
+        emulate (bool, optional): Whether to emulate the fp8 matmul logic in float32.
+    """
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
         if isinstance(child, torch.nn.Linear):
