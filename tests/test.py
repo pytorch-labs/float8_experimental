@@ -2,8 +2,7 @@ import copy
 import itertools
 import random
 import unittest
-#pip install parameterized
-from parameterized import parameterized
+import pytest
 
 import torch
 import torch.nn as nn
@@ -24,7 +23,7 @@ from float8_linear_nots import Float8LinearNoTensorSubclass
 random.seed(0)
 torch.manual_seed(0)
 
-class Float8TensorUnitTest(unittest.TestCase):
+class TestFloat8Tensor(unittest.TestCase):
     def test_grad_add(self):
         x1_fp32 = torch.randn(4, 4, device='cuda')
         x1_s = tensor_to_scale(x1_fp32, torch.float8_e5m2)
@@ -68,26 +67,26 @@ class Float8TensorUnitTest(unittest.TestCase):
         self.assertTrue(type(x2_fp8) == Float8Tensor)
 
 
-class Float8LinearUnitTest(unittest.TestCase):
-    def _test_linear_impl(self, x, m_ref, use_no_tensor_subclass=False):
+class TestFloat8Linear:
+    def _test_linear_impl(self, x, m_ref, use_no_tensor_subclass: bool, emulate: bool):
 
         if not use_no_tensor_subclass:
-            m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
+            m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref), emulate)
         else:
-            m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref))
+            m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref), emulate)
 
         y_fp8 = m_fp8(x)
         y_fp8.sum().backward()
         y_ref = m_ref(x)
         y_ref.sum().backward()
 
-        self.assertTrue(y_ref.shape == y_fp8.shape)
+        assert (y_ref.shape == y_fp8.shape)
 
         y_sqnr = compute_error(y_ref, y_fp8)
         g_sqnr = compute_error(m_ref.weight.grad, m_fp8.weight.grad)
         # verify sqnr is reasonable
-        self.assertTrue(y_sqnr >= 18.0, f'{y_sqnr} is too low')
-        self.assertTrue(g_sqnr >= 17.0, f'{g_sqnr} is too low')
+        assert y_sqnr >= 18.0, f'{y_sqnr} is too low'
+        assert g_sqnr >= 17.0, f'{g_sqnr} is too low'
         if m_ref.bias is not None:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
@@ -103,9 +102,7 @@ class Float8LinearUnitTest(unittest.TestCase):
         for buffer_name in amax_buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
             for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
-                self.assertTrue(
-                    torch.ne(buffer_value, torch.tensor(init_val)),
-                    f"{buffer_name} not filled, current value {buffer_value}")
+                assert torch.ne(buffer_value, torch.tensor(init_val)), f"{buffer_name} not filled, current value {buffer_value}"
 
         # verify all of the amax history buffers got updated
         amax_history_buffer_names = [
@@ -118,29 +115,27 @@ class Float8LinearUnitTest(unittest.TestCase):
         ]
         for buffer_name in amax_history_buffer_names:
             buffer_value = getattr(m_fp8, buffer_name)
-            self.assertTrue(torch.max(buffer_value) > 0.0, f"{buffer_name} not filled")
+            assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
 
         # verify initialization buffers got updated
-        self.assertTrue(m_fp8.fw_amax_initialized[0] == 1)
-        self.assertTrue(m_fp8.bw_amax_initialized[0] == 1)
+        assert (m_fp8.fw_amax_initialized[0] == 1)
+        assert (m_fp8.bw_amax_initialized[0] == 1)
 
-    @parameterized.expand([(True,), (False,)])
-    def test_linear_nobias(self, emulate: bool):
-        x_shapes = ((16, 16),(2, 16, 16), (3, 2, 16, 16))
-        for x_shape in x_shapes:
-            for use_no_ts in (True, False):
-                x = torch.randn(*x_shape, device='cuda')
-                m_ref = nn.Linear(3, 4, bias=False, device='cuda')
-                self._test_linear_impl(x, m_ref, use_no_tensor_subclass=use_no_ts)
+    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
+    @pytest.mark.parametrize("use_no_ts", [True, False])
+    def test_linear_nobias(self, x_shape, use_no_ts: bool, emulate: bool):
+        x = torch.randn(*x_shape, device='cuda')
+        m_ref = nn.Linear(16, 32, bias=False, device='cuda')
+        self._test_linear_impl(x, m_ref, use_no_ts, emulate)
 
-    @parameterized.expand([(True,), (False,)])
-    def test_linear_bias(self, emulate: bool):
-        x_shapes = ((16, 16),(2, 16, 16), (3, 2, 16, 16))
-        for x_shape in x_shapes:
-            for use_no_ts in (True, False):
-                x = torch.randn(*x_shape, device='cuda')
-                m_ref = nn.Linear(3, 4, bias=True, device='cuda')
-                self._test_linear_impl(x, m_ref, use_no_tensor_subclass=use_no_ts)
+    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
+    @pytest.mark.parametrize("use_no_ts", [True, False])
+    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool):
+        x = torch.randn(*x_shape, device='cuda')
+        m_ref = nn.Linear(16, 32, bias=True, device='cuda')
+        self._test_linear_impl(x, m_ref, use_no_ts, emulate)
 
 
         m = nn.Linear(4, 4, device='cuda')
@@ -149,12 +144,12 @@ class Float8LinearUnitTest(unittest.TestCase):
         # autocast off
         x = torch.randn(4, 4, device='cuda')
         y = m(x)
-        self.assertTrue(y._orig_dtype == torch.float)
+        assert y._orig_dtype == torch.float, f"y._orig_dtype is {y._orig_dtype}, expected {torch.float}"
 
         # autocast on
         with torch.autocast('cuda'):
             y = m(x)
-        self.assertTrue(y._orig_dtype == torch.half)
+        assert y._orig_dtype == torch.half, f"y._orig_dtype is {y._orig_dtype}, expected {torch.half}"
 
     def _test_pt2_impl(self, use_no_tensor_subclass):
         from torch._dynamo.testing import EagerAndRecordGraphs, CompileCounterWithBackend
@@ -167,7 +162,7 @@ class Float8LinearUnitTest(unittest.TestCase):
         # TODO(future): switch back to tensor subclass based UX once the PT
         # support is there
         if use_no_tensor_subclass:
-            m = Float8LinearNoTensorSubclass.from_float(m)
+            m = Float8LinearNoTensorSubclass.from_float(m, emulate=False)
         else:
             m = Float8Linear.from_float(m)
         m = torch.compile(m, backend='eager')

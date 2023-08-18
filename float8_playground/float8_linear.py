@@ -144,7 +144,7 @@ class float8_linear(torch.autograd.Function):
         if not is_bw_amax_initialized:
             bw_amax_initialized.fill_(1)
 
-        empty_grads = None, None, None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX_fp8, dL_dW_fp8, go_fp8, *empty_grads
         else:
