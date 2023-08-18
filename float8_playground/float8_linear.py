@@ -29,7 +29,6 @@ from float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
-    update_amax_if_not_initialized
 )
 from float8_tensor import Float8Tensor
 

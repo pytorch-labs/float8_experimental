@@ -46,7 +46,7 @@ def tensor_to_scale(x, dtype):
 def to_fp8_saturated(x, float8_dtype):
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
     # and `e5m2` is to not saturate. In this context, we should saturate.
-    # A common case where we want to saturate is when the history of a 
+    # A common case where we want to saturate is when the history of a
     # tensor has a maximum value of `amax1`, and the current amax value
     # is `amax2`, where `amax1 < amax2`. This is common when using delayed
     # scaling.
@@ -60,11 +60,3 @@ def compute_error(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
-
-def update_amax_if_not_initialized(initiliazed: torch.Tensor, amax: torch.Tensor, ref_output: Callable):
-    """ If the amax for an output has not been calculated yet this will use the full precision
-        to establish baseline and then update the amax tensor inplace
-    """
-    if not initiliazed:
-        with torch.no_grad():
-            amax.fill_(tensor_to_amax(ref_output()))
