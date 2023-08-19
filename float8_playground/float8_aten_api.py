@@ -35,7 +35,7 @@ def mm_float8_emulated(
 
 
 # TODO naming of these vars is weird
-def addmm_float8(
+def addmm_float8_emulated(
     inp1,  # bias (in fp32/fp16/bf16, no fp8 support)
     m1,  # input 1 data
     s1,  # input 1 scale
@@ -70,6 +70,6 @@ lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tenso
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
 
-lib.define("addmm_float8(Tensor inp1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
-lib.impl("addmm_float8", addmm_float8, "CPU")
-lib.impl("addmm_float8", addmm_float8, "CUDA")
+lib.define("addmm_float8_emulated(Tensor inp1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
+lib.impl("addmm_float8_emulated", addmm_float8_emulated, "CPU")
+lib.impl("addmm_float8_emulated", addmm_float8_emulated, "CUDA")

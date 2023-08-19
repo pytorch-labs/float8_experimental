@@ -7,6 +7,7 @@ to simplify the product code.
 import torch
 from float8_tensor import Float8Tensor
 import float8_aten_api
+import warnings
 
 def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
     """ Cublas requires row_major @ column major tensors"""
@@ -52,17 +53,65 @@ def mm_float8(
     output_amax.fill_(updated_amax)
     return output
 
-
+# See [Note] Usage of scales
 def addmm_float8(
-    inp1,  # addition term (in fp32/fp16/bf16, no fp8 support)
-    x1,  # first mm term
-    x2,  # second mm term
-    amax3,  # output aax, updated inplace in this function
-    s3,  # output scale, precomputed
-    dtype3,  # output dtype
-):
-    return torch.ops.aten.addmm_float8(
-        inp1,
-        x1._data, x1._scale,
-        x2._data, x2._scale,
-        amax3, s3, dtype3)
+    input_bias: torch.Tensor,
+    a: Float8Tensor,
+    b: Float8Tensor,
+    output_amax: torch.Tensor,
+    output_scale: torch.Tensor,
+    output_dtype: torch.dtype,
+    emulate: bool = False,
+) -> torch.Tensor:
+    """
+    Performs a matrix multiplication of two Float8Tensors `a` and `b`, adds an additional input tensor `input`.
+
+    Args:
+        input_bias: The addition term tensor, in fp32/fp16/bf16 format (no fp8 support).
+        a: The first matrix multiplication term.
+        b: The second matrix multiplication term.
+        output_amax: The output tensor's amax, updated inplace in this function.
+        output_scale: The output tensor's scale, precomputed.
+        output_dtype: The output tensor's dtype.
+        emulate: Whether to emulate the operation using fp32.
+
+    Returns:
+        torch.Tensor: The result of the matrix multiplication and addition.
+    """
+    assert input_bias.dtype in {torch.float32, torch.float16, torch.bfloat16}
+
+    if emulate:
+        return torch.ops.aten.addmm_float8_emulated(
+            input_bias,
+            a._data, a._scale,
+            b._data, b._scale,
+            output_amax, output_scale, output_dtype)
+
+    if input_bias.dtype == torch.float32:
+        warnings.warn("addmm_float8 does not support fp32 bias, using fp16 instead")
+        input_bias = input_bias.to(torch.float16)
+
+    temp_a = layout_helper(a._data, row_major=True)
+    temp_b = layout_helper(b._data, row_major=False)
+
+    a_inverse_scale = 1 / a._scale
+    b_inverse_scale = 1 / b._scale
+    output, updated_amax = torch._scaled_mm(
+        temp_a,
+        temp_b,
+        bias=input_bias,
+        out_dtype=output_dtype,
+        scale_a=a_inverse_scale,
+        scale_b=b_inverse_scale,
+        scale_result=output_scale,
+    )
+    # dummy_amax = torch.tensor(0.0, dtype=output_amax.dtype, device='cuda')
+    # emulated = torch.ops.aten.addmm_float8_emulated(
+    #         input_bias.float(),
+    #         a._data, a._scale,
+    #         b._data, b._scale,
+    #         dummy_amax, output_scale, output_dtype)
+
+    # breakpoint()
+    output_amax.fill_(updated_amax)
+    return output
