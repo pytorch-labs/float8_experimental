@@ -18,7 +18,12 @@ from float8_utils import (
 )
 from float8_linear import Float8Linear
 
-class ToFloat8ConstrFuncDecomposed(torch.autograd.Function):
+# Note: this class does not take arguments of type `torch.dtype`, as PT2.0
+# does not support tracing this: https://gist.github.com/vkuzo/4ca38f74b0be65a62133ba6cc306d5b5
+# TODO(future): relax this as needed
+# TODO(future): move working around this restriction to `Float8Linear`, once
+# there is a better way to test things.
+class ToFloat8E4M3FNConstrFuncDecomposed(torch.autograd.Function):
     """
     A differentiable conversion to fp8, returns decomposed representation
     """
@@ -27,10 +32,8 @@ class ToFloat8ConstrFuncDecomposed(torch.autograd.Function):
         ctx,
         tensor,
         scale: float=None,
-        float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
     ):
-        ctx.save_for_backward(scale)
         # In TransformerEngine, the casts to float8 are fused with calculating
         # the new amax value. In this codebase, the eager mode code for those
         # two things is colocated in this function. We expect PT2.0 to fuse it
@@ -39,16 +42,12 @@ class ToFloat8ConstrFuncDecomposed(torch.autograd.Function):
             amax_buffer.fill_(tensor_to_amax(tensor))
 
         tensor_scaled = tensor * scale
-        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+        bits_fp8 = to_fp8_saturated(tensor_scaled, torch.float8_e4m3fn)
         return bits_fp8
 
     @staticmethod
     def backward(ctx, g):
-        if g.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
-            scale, = ctx.saved_tensors
-            return g.to(torch.float32), None, None, None
-        else:
-            return g, None, None, None
+        return g.to(torch.float32), None, None, None
 
 
 class float8_linear_no_tensor_subclass(torch.autograd.Function):
@@ -132,8 +131,10 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         dL_dY_scale = amax_history_to_scale(
             fp8_amax_history_dL_dY, torch.float8_e5m2,
             scale_fn_name)
-        go_fp8_d = ToFloat8ConstrFuncDecomposed.apply(
-            go, dL_dY_scale, torch.float8_e5m2, fp8_amax_dL_dY)
+        fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+        go_scaled = go * dL_dY_scale
+        go_fp8_d = to_fp8_saturated(go_scaled, torch.float8_e5m2)
+
         _update_history_with_new_amax(
             fp8_amax_dL_dY, fp8_amax_history_dL_dY)
 
@@ -204,8 +205,8 @@ class Float8LinearNoTensorSubclass(Float8Linear):
         x_scale = amax_history_to_scale(
             self.fp8_amax_history_x, torch.float8_e4m3fn,
             scale_fn_name)
-        x_fp8_d = ToFloat8ConstrFuncDecomposed.apply(
-            x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+        x_fp8_d = ToFloat8E4M3FNConstrFuncDecomposed.apply(
+            x, x_scale, self.fp8_amax_x)
         _update_history_with_new_amax(
             self.fp8_amax_x, self.fp8_amax_history_x)
 
@@ -214,8 +215,8 @@ class Float8LinearNoTensorSubclass(Float8Linear):
         w_scale = amax_history_to_scale(
             self.fp8_amax_history_w, torch.float8_e4m3fn,
             scale_fn_name)
-        w_fp8_d = ToFloat8ConstrFuncDecomposed.apply(
-            self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+        w_fp8_d = ToFloat8E4M3FNConstrFuncDecomposed.apply(
+            self.weight, w_scale, self.fp8_amax_w)
         _update_history_with_new_amax(
             self.fp8_amax_w, self.fp8_amax_history_w)
 
