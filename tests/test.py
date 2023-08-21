@@ -185,7 +185,7 @@ class TestFloat8Linear:
             m = Float8LinearNoTensorSubclass.from_float(m, emulate=True)
         else:
             m = Float8Linear.from_float(m)
-        m = torch.compile(m, backend=cnt, fullgraph=True)
+        m = torch.compile(m, backend='aot_eager', fullgraph=True)
         # verify things don't crash
         m(x)
         # TODO(future): inspect the graph programmaticaly
