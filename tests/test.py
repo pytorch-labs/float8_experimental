@@ -7,6 +7,10 @@ import warnings
 
 import torch
 import torch.nn as nn
+from torch._dynamo.testing import (
+    EagerAndRecordGraphs, 
+    CompileCounterWithBackend,
+)
 
 # set up float8 path
 import context
@@ -120,8 +124,8 @@ class TestFloat8Linear:
             buffer_value = getattr(m_fp8, buffer_name)
             assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
 
-        # verify initialization buffers got updated
-        assert (m_fp8.amax_initialized[0] == 1)
+        # verify initialization flags got updated
+        assert (m_fp8.is_amax_initialized == True)
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
@@ -169,7 +173,6 @@ class TestFloat8Linear:
         assert y._orig_dtype == torch.half, f"y._orig_dtype is {y._orig_dtype}, expected {torch.half}"
 
     def _test_pt2_impl(self, use_no_tensor_subclass):
-        from torch._dynamo.testing import EagerAndRecordGraphs, CompileCounterWithBackend
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -182,11 +185,13 @@ class TestFloat8Linear:
             m = Float8LinearNoTensorSubclass.from_float(m, emulate=False)
         else:
             m = Float8Linear.from_float(m)
-        m = torch.compile(m, backend='eager')
+        m = torch.compile(m, backend=cnt, fullgraph=True)
         # verify things don't crash
         m(x)
-        # logs with TORCH_LOGS="aot": https://gist.github.com/vkuzo/e4e372bd88085a0ac2de46d553a3c0d8
         # TODO(future): inspect the graph programmaticaly
+        for gm in backend.graphs:
+            # print('gm', gm)
+            pass
 
     def test_pt2_nots(self):
         self._test_pt2_impl(use_no_tensor_subclass=True)

@@ -192,10 +192,13 @@ class Float8LinearNoTensorSubclass(Float8Linear):
     traceable in PT2.0.
     """
     def forward(self, x):
-        is_amax_initialized = torch.any(self.amax_initialized)
+        is_amax_initialized_this_iteration = self.is_amax_initialized
+        self.is_amax_initialized = True
         scale_fn_name = self.recipe.scale_fn_name
+
         _maybe_initialize_amaxes_for_float8_cast(
-            x, self.fp8_amax_x, self.fp8_amax_history_x, is_amax_initialized)
+            x, self.fp8_amax_x, self.fp8_amax_history_x, 
+            is_amax_initialized_this_iteration)
         x_scale = amax_history_to_scale(
             self.fp8_amax_history_x, torch.float8_e4m3fn,
             scale_fn_name)
@@ -205,7 +208,8 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             self.fp8_amax_x, self.fp8_amax_history_x)
 
         _maybe_initialize_amaxes_for_float8_cast(
-            self.weight, self.fp8_amax_w, self.fp8_amax_history_w, is_amax_initialized)
+            self.weight, self.fp8_amax_w, self.fp8_amax_history_w, 
+            is_amax_initialized_this_iteration)
         w_scale = amax_history_to_scale(
             self.fp8_amax_history_w, torch.float8_e4m3fn,
             scale_fn_name)
@@ -221,9 +225,6 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             self.fp8_amax_dL_dX, self.fp8_amax_history_dL_dX,
             self.fp8_amax_dL_dW, self.fp8_amax_history_dL_dW,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            is_amax_initialized, scale_fn_name)
-
-        if not is_amax_initialized:
-            self.amax_initialized.fill_(1)
+            is_amax_initialized_this_iteration, scale_fn_name)
 
         return y_fp32
