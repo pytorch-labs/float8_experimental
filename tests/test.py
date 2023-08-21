@@ -3,6 +3,7 @@ import itertools
 import random
 import unittest
 import pytest
+import warnings
 
 import torch
 import torch.nn as nn
@@ -127,6 +128,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("use_no_ts", [True, False])
     def test_linear_nobias(self, x_shape, use_no_ts: bool, emulate: bool):
+        if not emulate:
+            if not torch.cuda.is_available():
+                warnings.warn('CUDA not available')
+                pytest.skip()
+            elif torch.cuda.get_device_capability() < (9, 0):
+                warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0)')
+                pytest.skip()
+
         x = torch.randn(*x_shape, device='cuda')
         m_ref = nn.Linear(16, 32, bias=False, device='cuda')
         self._test_linear_impl(x, m_ref, use_no_ts, emulate)
@@ -135,6 +144,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("use_no_ts", [True, False])
     def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool):
+        if not emulate:
+            if not torch.cuda.is_available():
+                warnings.warn('CUDA not available')
+                pytest.skip()
+            elif torch.cuda.get_device_capability() < (9, 0):
+                warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0)')
+                pytest.skip()
+
         x = torch.randn(*x_shape, device='cuda')
         m_ref = nn.Linear(16, 32, bias=True, device='cuda')
         self._test_linear_impl(x, m_ref, use_no_ts, emulate)
