@@ -3,6 +3,13 @@
 This repository is a prototype of a float8 training UX written in native PyTorch. For now the goal is to move quickly and validate our design. Production 
 readiness, backwards compatibility, etc right now is an explicit non-goal at this point. Once we are farther along, we will discuss how to make this public.
 
+# installation
+
+```
+# install requirements
+pip install -r requirements.txt
+```
+
 # high level progress tracking
 
 ## M0: building blocks in core
