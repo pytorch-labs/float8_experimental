@@ -208,13 +208,19 @@ class Float8Linear(torch.nn.Linear):
         self.register_buffer('fp8_amax_history_dL_dW', torch.zeros(history_len))
         self.register_buffer('fp8_amax_dL_dY', torch.tensor(E5M2_MAX_POS))
         self.register_buffer('fp8_amax_history_dL_dY', torch.zeros(history_len))
-        self.register_buffer('amax_initialized', torch.tensor([0], dtype=torch.uint8))
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
 
+        # Note: is_amax_initialized is not a buffer to avoid data dependent
+        # control flow visible to dynamo
+        # TODO(future PR): add serialization for this flag
+        self.is_amax_initialized = False
+
     def forward(self, x):
-        is_amax_initialized = torch.any(self.amax_initialized)
+        is_amax_initialized_this_iteration = self.is_amax_initialized
+        self.is_amax_initialized = True
         scale_fn_name = self.recipe.scale_fn_name
+
         if not isinstance(x, Float8Tensor):
             # Duplicate the autocast logic for F.linear, so that the output
             # of our module has the right original precision
@@ -224,7 +230,8 @@ class Float8Linear(torch.nn.Linear):
                 x = x.to(torch.get_autocast_gpu_dtype())
 
             _maybe_initialize_amaxes_for_float8_cast(
-                x, self.fp8_amax_x, self.fp8_amax_history_x, is_amax_initialized)
+                x, self.fp8_amax_x, self.fp8_amax_history_x, 
+                is_amax_initialized_this_iteration)
             x_scale = amax_history_to_scale(
                 self.fp8_amax_history_x, torch.float8_e4m3fn, scale_fn_name)
             x_fp8 = Float8Tensor.to_float8(
@@ -235,7 +242,8 @@ class Float8Linear(torch.nn.Linear):
             x_fp8 = x
 
         _maybe_initialize_amaxes_for_float8_cast(
-            self.weight, self.fp8_amax_w, self.fp8_amax_history_w, is_amax_initialized)
+            self.weight, self.fp8_amax_w, self.fp8_amax_history_w, 
+            is_amax_initialized_this_iteration)
         w_scale = amax_history_to_scale(
             self.fp8_amax_history_w, torch.float8_e4m3fn, scale_fn_name)
         w_fp8 = Float8Tensor.to_float8(
@@ -248,15 +256,12 @@ class Float8Linear(torch.nn.Linear):
             self.fp8_amax_y, self.fp8_amax_history_y,
             self.fp8_amax_dL_dX, self.fp8_amax_history_dL_dX,
             self.fp8_amax_dL_dW, self.fp8_amax_history_dL_dW,
-            is_amax_initialized, scale_fn_name, self.emulate)
-
-        if not is_amax_initialized:
-            self.amax_initialized.fill_(1)
+            is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
 
         # Set up cast to fp8 in bw
         y_fp8 = _NoOpFwToFloat8E5M2Bw.apply(
             y_fp8, self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            is_amax_initialized, scale_fn_name)
+            is_amax_initialized_this_iteration, scale_fn_name)
 
         # For now, hardcode returning Float8Tensor (propagate as much as we can).
         # This can be changed to return a different dtype, if needed.
