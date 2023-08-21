@@ -94,7 +94,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
 
             y_scale = amax_history_to_scale(
                 fp8_amax_history_y, torch.float8_e4m3fn, recipe.scale_fn_name)
-            res_bits = torch.ops.aten.addmm_float8(
+            res_bits = torch.ops.aten.addmm_float8_emulated(
                 b, x_fp8_reshaped, x_fp8_scale, w_fp8_d.t(), w_fp8_scale,
                 fp8_amax_y, y_scale, torch.float8_e4m3fn)
             _update_history_with_new_amax(fp8_amax_y, fp8_amax_history_y)
