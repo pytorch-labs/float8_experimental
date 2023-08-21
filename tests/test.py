@@ -221,5 +221,5 @@ class TestScaledMM:
 
         torch.testing.assert_close(out_scaled_mm, out_emulated)
 
-if __name__ == '__main__':
-    unittest.main()
+if __name__ == "__main__":
+    pytest.main([__file__])
