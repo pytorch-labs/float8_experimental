@@ -182,7 +182,7 @@ class TestFloat8Linear:
         # TODO(future): switch back to tensor subclass based UX once the PT
         # support is there
         if use_no_tensor_subclass:
-            m = Float8LinearNoTensorSubclass.from_float(m, emulate=False)
+            m = Float8LinearNoTensorSubclass.from_float(m, emulate=True)
         else:
             m = Float8Linear.from_float(m)
         m = torch.compile(m, backend=cnt, fullgraph=True)

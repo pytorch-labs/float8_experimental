@@ -192,6 +192,8 @@ class Float8LinearNoTensorSubclass(Float8Linear):
     traceable in PT2.0.
     """
     def forward(self, x):
+        assert self.emulate, 'only emulation is supported for now'
+
         is_amax_initialized_this_iteration = self.is_amax_initialized
         self.is_amax_initialized = True
         scale_fn_name = self.recipe.scale_fn_name
