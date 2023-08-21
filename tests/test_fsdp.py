@@ -9,6 +9,7 @@ later 1-4 can be repeated for fp16, various combinations of fp8, etc.
 """
 
 import os
+import warnings
 
 import fire
 
@@ -52,7 +53,7 @@ def setup(rank, world_size):
 def cleanup():
     dist.destroy_process_group()
 
-def get_model(K, N, is_fp8):
+def get_model(K, N, is_fp8, emulate):
     m = nn.Sequential(
         nn.Linear(K, N),
         # torch.float8_e4m3fn is not serializeable yet, for now
@@ -61,7 +62,7 @@ def get_model(K, N, is_fp8):
         nn.ReLU(),
     )
     if is_fp8:
-        swap_linear_with_float8_linear(m)
+        swap_linear_with_float8_linear(m, emulate=emulate)
     return m
 
 # taken from https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html
@@ -70,8 +71,8 @@ def fsdp_main(rank, world_size, args):
     setup(rank, world_size)
     torch.cuda.set_device(rank)
 
-    is_fp8, = args
-    model = get_model(K, N, is_fp8=is_fp8).to(rank)
+    is_fp8, emulate = args
+    model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).to(rank)
     model.load_state_dict(torch.load(sd_in_fname))
     model = FSDP(model)
     # Note: we need to multiply by world_size here to match single GPU 
@@ -113,17 +114,28 @@ def fsdp_main(rank, world_size, args):
     cleanup()
 
 def run(mode: str, is_fp8: bool):
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    emulate = False
+    if is_fp8:
+        if not torch.cuda.is_available():
+            warnings.warn('CUDA not available, running in emulation_mode')
+            emulate = True
+        elif torch.cuda.get_device_capability() < (9, 0):
+            warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0), running in emulation mode')
+            emulate = True
 
     if mode == 'generate':
         # generate reference input
         ref_input = torch.randn(B, M, K).cuda()
-        model = get_model(K, N, is_fp8=is_fp8).cuda()
+        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).cuda()
         torch.save(ref_input, input_fname)
         torch.save(model.state_dict(), sd_in_fname)
 
     elif mode == 'single_gpu':
         ref_input = torch.load(input_fname)
-        model = get_model(K, N, is_fp8=is_fp8).cuda()
+        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).cuda()
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
         optimizer.zero_grad()
@@ -136,7 +148,7 @@ def run(mode: str, is_fp8: bool):
 
     elif mode == 'fsdp':
         WORLD_SIZE = torch.cuda.device_count()
-        args = (is_fp8,)
+        args = (is_fp8, emulate)
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == 'analyze':

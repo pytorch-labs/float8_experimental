@@ -74,7 +74,7 @@ class float8_linear(torch.autograd.Function):
                 fp8_amax_history_y, torch.float8_e4m3fn, recipe.scale_fn_name)
             res_bits = addmm_float8(
                 b, x_fp8_reshaped, w_fp8.t(), fp8_amax_y, y_scale,
-                torch.float8_e4m3fn)
+                torch.float8_e4m3fn, emulate=emulate)
             _update_history_with_new_amax(fp8_amax_y, fp8_amax_history_y)
 
         else:
