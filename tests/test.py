@@ -121,8 +121,7 @@ class TestFloat8Linear:
             assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
 
         # verify initialization buffers got updated
-        assert (m_fp8.fw_amax_initialized[0] == 1)
-        assert (m_fp8.bw_amax_initialized[0] == 1)
+        assert (m_fp8.amax_initialized[0] == 1)
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
