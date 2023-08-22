@@ -154,9 +154,6 @@ class TestFloat8Linear:
             elif use_no_ts:
                 warnings.warn('use_no_ts does not support real compute yet')
                 pytest.skip()
-            elif not use_no_ts:
-                warnings.warn('real compute with bias needs fixing, skip for now')
-                pytest.skip()
 
         x = torch.randn(*x_shape, device='cuda')
         m_ref = nn.Linear(16, 32, bias=True, device='cuda')

@@ -196,9 +196,9 @@ class Float8Linear(torch.nn.Linear):
         
         # Currently scaled_mm does not support fp32 bias the defualt gpu type is half
         # TODO This is casting at every forward, we should only do this once
-        casted_bias = self.bias.to(torch.float16)
+        casted_bias = self.bias.to(torch.float16) if self.bias is not None else None
         y = float8_linear.apply(
-            x_fp8, w_fp8, self.casted_bias,
+            x_fp8, w_fp8, casted_bias,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.fp8_noop_amax, self.fp8_noop_scale,
             is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
