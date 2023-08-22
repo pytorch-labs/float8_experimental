@@ -46,6 +46,7 @@ def addmm_float8_emulated(
     # TODO(future): hook up to real kernel
     m1_fp32 = m1.float() / s1
     m2_fp32 = m2.float() / s2
+    inp1 = inp1.float()
     m3_fp32 = torch.addmm(inp1, m1_fp32, m2_fp32)
 
     amax3.fill_(tensor_to_amax(m3_fp32))

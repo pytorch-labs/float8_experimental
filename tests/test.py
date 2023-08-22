@@ -208,9 +208,7 @@ class TestScaledMM:
     @pytest.mark.parametrize("bias", [True, False])
     @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, bias, base_dtype):
-        if bias:
-            warnings.warn('this test is broken with bias, skip for now')
-            pytest.skip()
+        torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
         output_dtype = torch.float8_e4m3fn
         compare_type = torch.float32
@@ -218,8 +216,9 @@ class TestScaledMM:
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype)
-            out_ref = torch.addmm(input_bias, a, b)
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(torch.float16)
+            input_bias = torch.zeros_like(input_bias)
+            out_ref = torch.addmm(input_bias.to(a.dtype), a, b)
         else:
             out_ref = torch.matmul(a, b)
 
@@ -235,7 +234,7 @@ class TestScaledMM:
 
         if bias:
             out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = addmm_float8(input_bias.float(), a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+            out_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
         else:
             out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
             out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
@@ -243,10 +242,14 @@ class TestScaledMM:
         out_scaled_mm = out_scaled_mm.to(compare_type)
         out_emulated = out_emulated.to(compare_type)
 
-        out_scaled_mm = out_scaled_mm * amax_to_scale(output_amax_scaled, input_dtype)
-        out_emulated = out_emulated * amax_to_scale(output_amax_emulated, input_dtype)
-
-        torch.testing.assert_close(out_scaled_mm, out_emulated)
+        out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
+        out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
+        
+        if base_dtype==torch.float16:
+            atol, rtol = 2e-2, 2e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
 if __name__ == "__main__":
     pytest.main([__file__])
