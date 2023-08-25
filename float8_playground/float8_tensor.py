@@ -1,6 +1,6 @@
 from enum import Enum
 import torch
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 
 from float8_utils import (
     tensor_to_amax,
@@ -16,14 +16,14 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     @staticmethod
     def forward(
-        ctx, 
-        tensor, 
-        scale: float=None, 
-        float8_dtype=torch.float8_e4m3fn, 
+        ctx,
+        tensor,
+        scale: float=None,
+        float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
     ):
         # In TransformerEngine, the casts to float8 are fused with calculating
-        # the new amax value. In this codebase, the eager mode code for those 
+        # the new amax value. In this codebase, the eager mode code for those
         # two things is colocated in this function. We expect PT2.0 to fuse it
         # for us.
         if amax_buffer is not None:
@@ -51,7 +51,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        return Float8Tensor.to_float8(g), None, None
+        return _to_float8(g), None, None
 
 
 class Float8Tensor(torch.Tensor):
@@ -74,6 +74,7 @@ class Float8Tensor(torch.Tensor):
     """
 
     def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
+        import pdb; pdb.set_trace()
         # This is a non-differentiable constructor!
         assert not data.requires_grad
         assert scale.nelement() == 1
@@ -88,11 +89,13 @@ class Float8Tensor(torch.Tensor):
             requires_grad=data.requires_grad,
             device=data.device,
         )
+        return self
+
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
+        import pdb; pdb.set_trace()
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-
-        return self
 
     def __repr__(self):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
@@ -102,22 +105,39 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def to_float8(cls, tensor, scale, float8_dtype, amax_buffer=None):
-        return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer)
+        out = ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer)
+        import pdb; pdb.set_trace()
+        return out
+
+    def __tensor_flatten__(self):
+        import pdb; pdb.set_trace()
+        return ["_data", "_scale"], self._orig_dtype
+        self._data = data
+        self._scale = scale
+        self._orig_dtype = orig_dtype
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, orig_dtype):
+        assert type(orig_dtype) == torch.dtype
+        data, scale = inner_tensors["_data"], inner_tensors["_scale"]
+        return Float8Tensor(data, scale, orig_dtype)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        if func is aten.view.default:
-            orig_tensor, view_args = args
+        if kwargs is None:
+            kwargs = {}
+
+        # Some ops like mm can remove the subclass-ness of Float8Tensor (and return a plain torch.Tensor)
+        # but views should always return another Float8Tensor.
+        if func.is_view:
+            unwrapped_args = tree_map_only(Float8Tensor, lambda x: x._data, args)
+            unwrapped_view = func(*unwrapped_args, **kwargs)
             new_tensor = Float8Tensor(
-                orig_tensor._data.view(*view_args), orig_tensor._scale,
-                orig_tensor._orig_dtype)
+                unwrapped_view, args[0]._scale,
+                args[0]._orig_dtype)
+            # TODO: need to use return_and_correct_aliasing once https://github.com/pytorch/pytorch/pull/107915 lands.
             return new_tensor
-        elif func is aten.t.default:
-            orig_tensor, = args
-            new_tensor = Float8Tensor(
-                orig_tensor._data.t(), orig_tensor._scale,
-                orig_tensor._orig_dtype)
-            return new_tensor
+
 
         # for all ops that get here, fall back to original precision
         def unwrap(t):
@@ -126,10 +146,18 @@ class Float8Tensor(torch.Tensor):
             return t
 
         args = tree_map(unwrap, args)
-        if kwargs is not None:
-            kwargs = tree_map(unwrap, kwargs)
-        out = super().__torch_dispatch__(func, types, args, kwargs)
+        kwargs = tree_map(unwrap, kwargs)
+        # Re-run the function as normal
+        # (don't manually call __torch_dispatch__, since this won't give any modes
+        #  a chance to run)
+        out = func(*args, **kwargs)
+        #out = super().__torch_dispatch__(func, types, args, kwargs)
         return out
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
+
+def _to_float8(tensor, scale, float8_dtype, amax_buffer=None):
+    return Float8Tensor.to_float8(tensor, scale, float8_dtype, amax_buffer)
+
+torch._dynamo.allow_in_graph(_to_float8)
