@@ -101,9 +101,6 @@ class TestFloat8Linear:
         amax_buffer_names = [
             'fp8_amax_x',
             'fp8_amax_w',
-            'fp8_amax_y',
-            'fp8_amax_dL_dX',
-            'fp8_amax_dL_dW',
             'fp8_amax_dL_dY',
         ]
         for buffer_name in amax_buffer_names:
@@ -115,9 +112,6 @@ class TestFloat8Linear:
         amax_history_buffer_names = [
             'fp8_amax_history_x',
             'fp8_amax_history_w',
-            'fp8_amax_history_y',
-            'fp8_amax_history_dL_dX',
-            'fp8_amax_history_dL_dW',
             'fp8_amax_history_dL_dY',
         ]
         for buffer_name in amax_history_buffer_names:
@@ -174,12 +168,12 @@ class TestFloat8Linear:
         # autocast off
         x = torch.randn(16, 32, device='cuda')
         y = m(x)
-        assert y._orig_dtype == torch.float, f"y._orig_dtype is {y._orig_dtype}, expected {torch.float}"
+        assert y.dtype == torch.float, f"y.dtype is {y.dtype}, expected {torch.float}"
 
         # autocast on
         with torch.autocast('cuda'):
             y = m(x)
-        assert y._orig_dtype == torch.half, f"y._orig_dtype is {y._orig_dtype}, expected {torch.half}"
+        assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
     def _test_pt2_impl(self, use_no_tensor_subclass):
 
