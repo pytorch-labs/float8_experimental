@@ -41,6 +41,7 @@ output_fsdp_fname = os.path.join(data_dir, 'output_fsdp.pt')
 
 B, M, K, N = 8, 8, 32, 32
 lr = 0.01
+N_ITER = 5
 
 
 def setup(rank, world_size):
@@ -78,7 +79,6 @@ def fsdp_main(rank, world_size, args):
     # Note: we need to multiply by world_size here to match single GPU 
     # optimizer update
     optimizer = torch.optim.SGD(model.parameters(), lr=lr * world_size)
-    optimizer.zero_grad()
 
     ref_input_global = torch.load(input_fname)
 
@@ -89,9 +89,11 @@ def fsdp_main(rank, world_size, args):
     bsz_local_end = int((rank + 1) / world_size * B)
     ref_input_local = ref_input_global[bsz_local_start:bsz_local_end].to(rank)
 
-    y_local = model(ref_input_local)
-    y_local.sum().backward()
-    optimizer.step()
+    for _ in range(N_ITER):
+        optimizer.zero_grad()
+        y_local = model(ref_input_local)
+        y_local.sum().backward()
+        optimizer.step()
 
     # get global y
     y_global = [torch.zeros(*y_local.shape).to(rank) for r in range(world_size)]
@@ -138,11 +140,13 @@ def run(mode: str, is_fp8: bool):
         model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).cuda()
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-        optimizer.zero_grad()
 
-        y = model(ref_input)
-        y.sum().backward()
-        optimizer.step()
+        for _ in range(N_ITER):
+            optimizer.zero_grad()
+            y = model(ref_input)
+            y.sum().backward()
+            optimizer.step()
+
         torch.save(y, output_single_gpu_fname)
         torch.save(model.state_dict(), sd_out_single_gpu_fname)
 
