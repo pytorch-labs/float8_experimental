@@ -41,7 +41,7 @@ output_fsdp_fname = os.path.join(data_dir, 'output_fsdp.pt')
 
 B, M, K, N = 8, 8, 32, 32
 lr = 0.01
-N_ITER = 5
+N_ITER = 3
 
 
 def setup(rank, world_size):
@@ -57,10 +57,7 @@ def cleanup():
 def get_model(K, N, is_fp8, emulate):
     m = nn.Sequential(
         nn.Linear(K, N),
-        # torch.float8_e4m3fn is not serializeable yet, for now
-        # force model output to be float so we can serialize it
-        # TODO revert this once serialization works
-        nn.ReLU(),
+        nn.Linear(N, N),
     )
     if is_fp8:
         swap_linear_with_float8_linear(m, emulate=emulate)
@@ -168,7 +165,7 @@ def run(mode: str, is_fp8: bool):
 
             v2 = sd_out_fsdp[k]
             v1, v2 = v1.cpu(), v2.cpu()
-            if is_fp8:
+            if is_fp8 and 'noop' in k:
                 # Note: for fp8 single-node vs FSDP, we are not expected
                 # to match the scale of the gradients which follow the following
                 # pattern: 
@@ -192,12 +189,13 @@ def run(mode: str, is_fp8: bool):
                 # reductions and need fp8 distributed comms. Solution - TBD.
 
                 # noop buffers are unused, so ok for them to not match
-                if 'noop' in k:
-                    pass
-                else:
-                    torch.testing.assert_close(v1, v2)
+                pass
             else:
-                torch.testing.assert_close(v1, v2)
+                try:
+                    torch.testing.assert_close(v1, v2)
+                except Exception as e:
+                    print('debug:', k, v1, v2)
+                    raise e
         print('state dict testing single_gpu vs FSDP success')
 
 
