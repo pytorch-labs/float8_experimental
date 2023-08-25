@@ -27,11 +27,8 @@ def mm_float8_emulated(
     m2_fp32 = m2.float() / s2
     m3_fp32 = torch.mm(m1_fp32, m2_fp32)
 
-    # TODO(future): switch to delayed scaling
     amax3.fill_(tensor_to_amax(m3_fp32))
-
-    m3_fp32_scaled = m3_fp32 * s3
-    return to_fp8_saturated(m3_fp32_scaled, dtype3)
+    return m3_fp32.to(dtype3)
 
 
 # TODO naming of these vars is weird
@@ -51,11 +48,8 @@ def addmm_float8_emulated(
     m2_fp32 = m2.float() / s2
     m3_fp32 = torch.addmm(inp1, m1_fp32, m2_fp32)
 
-    # TODO(future): switch to delayed scaling
     amax3.fill_(tensor_to_amax(m3_fp32))
-
-    m3_fp32_scaled = m3_fp32 * s3
-    return to_fp8_saturated(m3_fp32_scaled, dtype3)
+    return m3_fp32.to(dtype3)
 
 
 #

@@ -166,23 +166,29 @@ def run(mode: str, is_fp8: bool):
             v1, v2 = v1.cpu(), v2.cpu()
             if is_fp8:
                 # Note: for fp8 single-node vs FSDP, we are not expected
-                # to match the scale of the weight gradient. Because of this,
-                # we also cannot match the weight gradient, and therefore
-                # after the first optimizer update we won't be able to match
-                # anything.
+                # to match the scale of the gradients which follow the following
+                # pattern: 
                 #
-                # Reasoning is the order of operations of calculating dL/dW:
+                #   `op(g_prev, out_scale) -> g_fp8 -> cast -> g_fp16 -> reduce`. 
+                #
+                # Reasoning is the order of operations of calculating the above:
                 # a. single node:
-                #    1. calculate dL_dW and s_dL_dW
+                #    1. calculate dL_dValue and s_dL_dValue
                 #    2. you're done
                 # b. FSDP:
-                #    1. calculate dL_dW and s_dL_dW of each slice
+                #    1. calculate dL_dValue and s_dL_dValue of each slice
                 #    2. reduce using summation
                 #
                 # a and b cannot always match because calculating the scale 
                 # involves taking max(dL_dW), FSDP reduces the gradients, and 
                 # max(abs(a), abs(b)) != max(abs(a + b))
-                if ('weight' in k)  or ('dL_dW' in k):
+                #
+                # In today's codebase, we do not hit this yet. We expect to hit
+                # this if we implement TP with activation gradients that both need
+                # reductions and need fp8 distributed comms. Solution - TBD.
+
+                # noop buffers are unused, so ok for them to not match
+                if 'noop' in k:
                     pass
                 else:
                     torch.testing.assert_close(v1, v2)
