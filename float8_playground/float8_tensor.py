@@ -19,9 +19,10 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         ctx, 
         tensor, 
         scale: float=None, 
-        float8_dtype=torch.float8_e4m3fn, 
+        # float8_dtype=torch.float8_e4m3fn, 
         amax_buffer=None,
     ):
+        float8_dtype = torch.float8_e4m3fn
         # In TransformerEngine, the casts to float8 are fused with calculating
         # the new amax value. In this codebase, the eager mode code for those 
         # two things is colocated in this function. We expect PT2.0 to fuse it
@@ -31,12 +32,20 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
         tensor_scaled = tensor * scale
         bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-        return Float8Tensor(bits_fp8, scale, tensor.dtype)
+        config = {
+            'size': tensor_scaled.size(),
+            'strides': tensor_scaled.stride(),
+            # 'storage_offset': tensor_scaled.storage_offset(),
+        }
+        return Float8Tensor(bits_fp8, scale, tensor.dtype, config)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None
+          # print('g', g)
+          # return g.to_original_precision(), None, None, None
+            g = g._data.to(g._orig_dtype) / g._scale
+            return g, None, None, None
         else:
             return g, None, None, None
 
@@ -73,16 +82,20 @@ class Float8Tensor(torch.Tensor):
        convert to original precision in `__torch_dispatch__`.
     """
 
-    def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
+    @staticmethod
+    def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype, config):
         # This is a non-differentiable constructor!
-        assert not data.requires_grad
+        # assert not data.requires_grad
         assert scale.nelement() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
             cls,
-            data.size(),
-            strides=data.stride(),
-            storage_offset=data.storage_offset(),
+            config['size'],
+            strides=config['strides'],
+            # storage_offset=config['storage_offset'],
+            # data.size(),
+            # strides=data.stride(),
+            # storage_offset=data.storage_offset(),
             dtype=orig_dtype,
             layout=data.layout,
             requires_grad=data.requires_grad,
@@ -91,11 +104,23 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
+        self._config = config
 
         return self
 
     def __repr__(self):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
+
+    def __tensor_flatten__(self):
+        return (self._data,), (self._scale, self._orig_dtype, self._config)
+
+    @staticmethod
+    def __tensor_unflatten__(tensors, metadatas):
+        return Float8Tensor(
+            tensors[0],
+            metadatas[0],
+            metadatas[1],
+            metadatas[2])
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
@@ -106,12 +131,34 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        # TODO(before land): document the new way this function is used
+
+        print('func', func)
+
+        # We need to handle `clone` and `view` in order for TorchDynamo tracing
+        # to succeed.
+        if func == torch.ops.aten.clone.default:
+            # is this right? ideally this should work without special handling
+            return Float8Tensor(
+                args[0]._data.clone(), args[0]._scale, args[0]._orig_dtype, args[0]._config)
+        elif func == torch.ops.aten.view.default:
+            # is this right? ideally this should work without special handling
+            new_data = args[0]._data.view(*args[1:])
+            return Float8Tensor(
+                new_data, args[0]._scale, args[0]._orig_dtype, args[0]._config)
+
+        # No actual operations on this tensor are supported at the moment.
+        # TODO(future): revisit this once tensor subclass tracing is better
+        # supported in dynamo.
+        raise NotImplementedError()
+
         if func is aten.view.default:
             orig_tensor, view_args = args
             new_tensor = Float8Tensor(
                 orig_tensor._data.view(*view_args), orig_tensor._scale,
                 orig_tensor._orig_dtype)
             return new_tensor
+
         elif func is aten.t.default:
             orig_tensor, = args
             new_tensor = Float8Tensor(

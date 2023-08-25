@@ -29,8 +29,12 @@ from float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    to_fp8_saturated,
 )
-from float8_tensor import Float8Tensor
+from float8_tensor import (
+    Float8Tensor,
+    ToFloat8ConstrFunc,
+)
 
 class float8_linear(torch.autograd.Function):
     """
@@ -234,8 +238,17 @@ class Float8Linear(torch.nn.Linear):
                 is_amax_initialized_this_iteration)
             x_scale = amax_history_to_scale(
                 self.fp8_amax_history_x, torch.float8_e4m3fn, scale_fn_name)
-            x_fp8 = Float8Tensor.to_float8(
-                x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+            # x_fp8 = Float8Tensor.to_float8(
+            #     x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+            # x_fp8 = ToFloat8ConstrFunc.apply(
+            #     x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+            x_fp8 = ToFloat8ConstrFunc.apply(
+                x, x_scale, self.fp8_amax_x)
+
+            # tensor_scaled = x * x_scale
+            # bits_fp8 = to_fp8_saturated(tensor_scaled, torch.float8_e4m3fn)
+            # x_fp8 = Float8Tensor(bits_fp8, x_scale, x.dtype)
+
             _update_history_with_new_amax(
                 self.fp8_amax_x, self.fp8_amax_history_x)
         else:
@@ -246,8 +259,12 @@ class Float8Linear(torch.nn.Linear):
             is_amax_initialized_this_iteration)
         w_scale = amax_history_to_scale(
             self.fp8_amax_history_w, torch.float8_e4m3fn, scale_fn_name)
-        w_fp8 = Float8Tensor.to_float8(
-            self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+        # w_fp8 = Float8Tensor.to_float8(
+        #     self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+        # w_fp8 = ToFloat8ConstrFunc.apply(
+        #     self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+        w_fp8 = ToFloat8ConstrFunc.apply(
+            self.weight, w_scale, self.fp8_amax_w)
         _update_history_with_new_amax(
             self.fp8_amax_w, self.fp8_amax_history_w)
 

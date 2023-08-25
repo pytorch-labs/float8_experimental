@@ -193,7 +193,7 @@ class TestFloat8Linear:
         if use_no_tensor_subclass:
             m = Float8LinearNoTensorSubclass.from_float(m, emulate=True)
         else:
-            m = Float8Linear.from_float(m)
+            m = Float8Linear.from_float(m, emulate=True)
         m = torch.compile(m, backend=cnt, fullgraph=True)
         # verify things don't crash
         m(x)
@@ -205,8 +205,10 @@ class TestFloat8Linear:
     def test_pt2_nots(self):
         self._test_pt2_impl(use_no_tensor_subclass=True)
 
-    @unittest.skip("PT2.0 tracing subclasses does not work yet")
+    # @unittest.skip("PT2.0 tracing subclasses does not work yet")
     def test_pt2_ts(self):
+        from torch._dynamo import allow_in_graph
+        allow_in_graph(Float8Tensor)
         self._test_pt2_impl(use_no_tensor_subclass=False)
 
 class TestScaledMM:
