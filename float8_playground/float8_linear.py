@@ -27,6 +27,7 @@ from float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    bias_dtype_map
 )
 from float8_tensor import Float8Tensor
 
@@ -194,9 +195,8 @@ class Float8Linear(torch.nn.Linear):
         _update_history_with_new_amax(
             self.fp8_amax_w, self.fp8_amax_history_w)
         
-        # Currently scaled_mm does not support fp32 bias the defualt gpu type is half
         # TODO This is casting at every forward, we should only do this once
-        casted_bias = self.bias.to(torch.float16) if self.bias is not None else None
+        casted_bias = self.bias.to(bias_dtype_map(x.dtype)) if self.bias is not None else None
         y = float8_linear.apply(
             x_fp8, w_fp8, casted_bias,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,

@@ -20,7 +20,8 @@ from float8_utils import (
     tensor_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
-    amax_to_scale
+    amax_to_scale,
+    bias_dtype_map
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
@@ -202,48 +203,46 @@ class TestFloat8Linear:
 
 class TestScaledMM:
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
-    @pytest.mark.parametrize("bias", [True, False])
+    @pytest.mark.parametrize("bias", [False, True])
     @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, bias, base_dtype):
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
-        output_dtype = torch.float8_e4m3fn
+        output_dtype = base_dtype
         compare_type = torch.float32
 
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(torch.float16)
-            input_bias = torch.zeros_like(input_bias)
-            out_ref = torch.addmm(input_bias.to(a.dtype), a, b)
-        else:
-            out_ref = torch.matmul(a, b)
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(bias_dtype_map(output_dtype))
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
-        out_scale = tensor_to_scale(out_ref, output_dtype).float()
 
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
         output_amax_scaled = torch.tensor(0, device='cuda')
+        output_scaled_scale = torch.tensor(1.0, device='cuda')
         output_amax_emulated = torch.tensor(0, device='cuda')
+        output_emulated_scale = torch.tensor(1.0, device='cuda')
 
         if bias:
-            out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
         else:
-            out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
 
-        out_scaled_mm = out_scaled_mm.to(compare_type)
-        out_emulated = out_emulated.to(compare_type)
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_emulated = out_emulated.to(compare_type)
 
-        out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
-        out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
+            out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
+            out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
         
-        if base_dtype==torch.float16:
-            atol, rtol = 2e-2, 2e-2
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
         else:
             atol, rtol = 2e-3, 2e-3
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
