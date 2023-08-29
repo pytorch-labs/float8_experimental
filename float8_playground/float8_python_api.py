@@ -78,7 +78,9 @@ def addmm_float8(
     Returns:
         torch.Tensor: The result of the matrix multiplication and addition.
     """
-    assert input_bias.dtype in {torch.float32, torch.float16, torch.bfloat16}
+    assert input_bias.dtype in {torch.float16, torch.bfloat16}, "addmm_float8 only supports fp16/bf16 bias, you passed in {}".format(
+        input_bias.dtype
+    )
 
     if emulate:
         return torch.ops.aten.addmm_float8_emulated(
@@ -105,13 +107,6 @@ def addmm_float8(
         scale_b=b_inverse_scale,
         scale_result=output_scale,
     )
-    # dummy_amax = torch.tensor(0.0, dtype=output_amax.dtype, device='cuda')
-    # emulated = torch.ops.aten.addmm_float8_emulated(
-    #         input_bias.float(),
-    #         a._data, a._scale,
-    #         b._data, b._scale,
-    #         dummy_amax, output_scale, output_dtype)
 
-    # breakpoint()
     output_amax.fill_(updated_amax)
     return output

@@ -20,7 +20,8 @@ from float8_utils import (
     tensor_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
-    amax_to_scale
+    amax_to_scale,
+    output_dtype_to_addmm_bias_dtype
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
@@ -143,7 +144,8 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("use_no_ts", [True, False])
-    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool):
+    @pytest.mark.parametrize("linear_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool, linear_dtype: torch.dtype):
         if not emulate:
             if not torch.cuda.is_available():
                 warnings.warn('CUDA not available')
@@ -154,21 +156,21 @@ class TestFloat8Linear:
             elif use_no_ts:
                 warnings.warn('use_no_ts does not support real compute yet')
                 pytest.skip()
-            elif not use_no_ts:
-                warnings.warn('real compute with bias needs fixing, skip for now')
+            elif linear_dtype == torch.float32:
+                warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
                 pytest.skip()
 
-        x = torch.randn(*x_shape, device='cuda')
-        m_ref = nn.Linear(16, 32, bias=True, device='cuda')
+        x = torch.randn(*x_shape, device='cuda', dtype=linear_dtype)
+        m_ref = nn.Linear(16, 32, bias=True, device='cuda', dtype=linear_dtype)
         self._test_linear_impl(x, m_ref, use_no_ts, emulate)
 
-        m = nn.Linear(32, 16, device='cuda')
+        m = nn.Linear(32, 16, device='cuda', dtype=linear_dtype)
         m = Float8Linear.from_float(m, emulate)
 
         # autocast off
-        x = torch.randn(16, 32, device='cuda')
+        x = torch.randn(16, 32, device='cuda', dtype=linear_dtype)
         y = m(x)
-        assert y.dtype == torch.float, f"y.dtype is {y.dtype}, expected {torch.float}"
+        assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast('cuda'):
@@ -205,48 +207,52 @@ class TestFloat8Linear:
 
 class TestScaledMM:
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
-    @pytest.mark.parametrize("bias", [True, False])
+    @pytest.mark.parametrize("bias", [False, True])
     @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, bias, base_dtype):
-        if bias:
-            warnings.warn('this test is broken with bias, skip for now')
+        if base_dtype == torch.float32 and bias == True:
+            warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
             pytest.skip()
+        torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
-        output_dtype = torch.float8_e4m3fn
+        output_dtype = base_dtype
         compare_type = torch.float32
 
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype)
-            out_ref = torch.addmm(input_bias, a, b)
-        else:
-            out_ref = torch.matmul(a, b)
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype_to_addmm_bias_dtype(output_dtype))
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
-        out_scale = tensor_to_scale(out_ref, output_dtype).float()
 
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
         output_amax_scaled = torch.tensor(0, device='cuda')
+        output_scaled_scale = torch.tensor(1.0, device='cuda')
         output_amax_emulated = torch.tensor(0, device='cuda')
+        output_emulated_scale = torch.tensor(1.0, device='cuda')
 
         if bias:
-            out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = addmm_float8(input_bias.float(), a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
         else:
-            out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, out_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, out_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
 
-        out_scaled_mm = out_scaled_mm.to(compare_type)
-        out_emulated = out_emulated.to(compare_type)
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_emulated = out_emulated.to(compare_type)
 
-        out_scaled_mm = out_scaled_mm * amax_to_scale(output_amax_scaled, input_dtype)
-        out_emulated = out_emulated * amax_to_scale(output_amax_emulated, input_dtype)
-
-        torch.testing.assert_close(out_scaled_mm, out_emulated)
+            out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
+            out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
+        
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
 if __name__ == "__main__":
     pytest.main([__file__])

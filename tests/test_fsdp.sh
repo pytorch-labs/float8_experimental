@@ -8,9 +8,11 @@ launch() {
 
     # generate the test data
     python tests/test_fsdp.py --mode generate --is_fp8 $IS_FP8
+    echo "Success: ✅"
 
     # generate single GPU model output and updated state dict
     python tests/test_fsdp.py --mode single_gpu --is_fp8 $IS_FP8
+    echo "Success: ✅"
 
     # generate FSDP model output and updated state dict
     # the NCCL_DEBUG setting is to avoid log spew
@@ -22,8 +24,9 @@ launch() {
 
     # compare the outputs and state dicts and verify equivalence
     python tests/test_fsdp.py --mode analyze --is_fp8 $IS_FP8
+    echo "Success: ✅"
 
-    echo "done"
+    echo "✅ All Tests Passed ✅"
 }
 
 for IS_FP8 in False True

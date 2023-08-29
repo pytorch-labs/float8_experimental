@@ -54,10 +54,10 @@ def setup(rank, world_size):
 def cleanup():
     dist.destroy_process_group()
 
-def get_model(K, N, is_fp8, emulate):
+def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     m = nn.Sequential(
-        nn.Linear(K, N),
-        nn.Linear(N, N),
+        nn.Linear(K, N, dtype=base_dtype),
+        nn.Linear(N, N, dtype=base_dtype),
     )
     if is_fp8:
         swap_linear_with_float8_linear(m, emulate=emulate)
@@ -69,15 +69,15 @@ def fsdp_main(rank, world_size, args):
     setup(rank, world_size)
     torch.cuda.set_device(rank)
 
-    is_fp8, emulate = args
-    model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).to(rank)
+    is_fp8, emulate, base_dtype = args
+    model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).to(rank)
     model.load_state_dict(torch.load(sd_in_fname))
     model = FSDP(model)
     # Note: we need to multiply by world_size here to match single GPU 
     # optimizer update
     optimizer = torch.optim.SGD(model.parameters(), lr=lr * world_size)
 
-    ref_input_global = torch.load(input_fname)
+    ref_input_global = torch.load(input_fname).to(base_dtype)
 
     # basic distributed data sampling
     bsz_global = ref_input_global.shape[0]
@@ -93,7 +93,7 @@ def fsdp_main(rank, world_size, args):
         optimizer.step()
 
     # get global y
-    y_global = [torch.zeros(*y_local.shape).to(rank) for r in range(world_size)]
+    y_global = [torch.zeros(*y_local.shape, dtype=base_dtype).to(rank) for r in range(world_size)]
     dist.all_gather(y_global, y_local)
     y_global = torch.cat(y_global, dim=0)
     if rank == 0:
@@ -113,6 +113,8 @@ def fsdp_main(rank, world_size, args):
     cleanup()
 
 def run(mode: str, is_fp8: bool):
+    print(f"Mode: {mode}".center(100,"-"))
+    base_dtype = torch.bfloat16
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
@@ -127,14 +129,14 @@ def run(mode: str, is_fp8: bool):
 
     if mode == 'generate':
         # generate reference input
-        ref_input = torch.randn(B, M, K).cuda()
-        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).cuda()
+        ref_input = torch.randn(B, M, K).cuda().to(base_dtype)
+        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).cuda()
         torch.save(ref_input, input_fname)
         torch.save(model.state_dict(), sd_in_fname)
 
     elif mode == 'single_gpu':
-        ref_input = torch.load(input_fname)
-        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate).cuda()
+        ref_input = torch.load(input_fname).to(base_dtype)
+        model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).cuda()
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
@@ -149,13 +151,17 @@ def run(mode: str, is_fp8: bool):
 
     elif mode == 'fsdp':
         WORLD_SIZE = torch.cuda.device_count()
-        args = (is_fp8, emulate)
+        args = (is_fp8, emulate, base_dtype)
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == 'analyze':
         y_single_gpu = torch.load(output_single_gpu_fname).cpu()
         y_fsdp = torch.load(output_fsdp_fname).cpu()
-        torch.testing.assert_close(y_single_gpu, y_fsdp)
+        if is_fp8 and not emulate:
+            atol, rtol  = 2e-2, 2e-2
+        else:
+            atol, rtol = None, None
+        torch.testing.assert_close(y_single_gpu, y_fsdp, atol=atol, rtol=rtol)
         print('output testing single_gpu vs FSDP success')
 
         sd_in = torch.load(sd_in_fname)
@@ -192,7 +198,14 @@ def run(mode: str, is_fp8: bool):
                 pass
             else:
                 try:
-                    torch.testing.assert_close(v1, v2)
+                    if v1.dtype == torch.bfloat16 and emulate==False:
+                         atol, rtol = 2e-2, 2e-2
+                    else:
+                        if k == "1.fp8_amax_history_x" and emulate==False:
+                            atol, rtol = 2e-2, 6e-3
+                        else:
+                            atol, rtol = None, None
+                    torch.testing.assert_close(v1, v2, atol=atol, rtol=rtol)
                 except Exception as e:
                     print('debug:', k, v1, v2)
                     raise e

@@ -27,6 +27,7 @@ from float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    output_dtype_to_addmm_bias_dtype
 )
 from float8_tensor import Float8Tensor
 
@@ -193,9 +194,11 @@ class Float8Linear(torch.nn.Linear):
             self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
         _update_history_with_new_amax(
             self.fp8_amax_w, self.fp8_amax_history_w)
-
+        
+        # TODO This is casting at every forward, we should only do this once
+        casted_bias = self.bias.to(output_dtype_to_addmm_bias_dtype(x.dtype)) if self.bias is not None else None
         y = float8_linear.apply(
-            x_fp8, w_fp8, self.bias,
+            x_fp8, w_fp8, casted_bias,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.fp8_noop_amax, self.fp8_noop_scale,
             is_amax_initialized_this_iteration, scale_fn_name, self.emulate)

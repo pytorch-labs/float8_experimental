@@ -60,3 +60,11 @@ def compute_error(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+def output_dtype_to_addmm_bias_dtype(output_dtype: torch.dtype) -> torch.dtype:
+    """  specific bias dtype depending on output dtype
+    """
+    if output_dtype == torch.float32:
+        return torch.bfloat16
+    else:
+        return output_dtype
