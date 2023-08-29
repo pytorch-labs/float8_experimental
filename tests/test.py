@@ -144,7 +144,8 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16),(2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("use_no_ts", [True, False])
-    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool):
+    @pytest.mark.parametrize("linear_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool, linear_dtype: torch.dtype):
         if not emulate:
             if not torch.cuda.is_available():
                 warnings.warn('CUDA not available')
@@ -155,18 +156,21 @@ class TestFloat8Linear:
             elif use_no_ts:
                 warnings.warn('use_no_ts does not support real compute yet')
                 pytest.skip()
+            elif linear_dtype == torch.float32:
+                warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
+                pytest.skip()
 
-        x = torch.randn(*x_shape, device='cuda')
-        m_ref = nn.Linear(16, 32, bias=True, device='cuda')
+        x = torch.randn(*x_shape, device='cuda', dtype=linear_dtype)
+        m_ref = nn.Linear(16, 32, bias=True, device='cuda', dtype=linear_dtype)
         self._test_linear_impl(x, m_ref, use_no_ts, emulate)
 
-        m = nn.Linear(32, 16, device='cuda')
+        m = nn.Linear(32, 16, device='cuda', dtype=linear_dtype)
         m = Float8Linear.from_float(m, emulate)
 
         # autocast off
-        x = torch.randn(16, 32, device='cuda')
+        x = torch.randn(16, 32, device='cuda', dtype=linear_dtype)
         y = m(x)
-        assert y.dtype == torch.float, f"y.dtype is {y.dtype}, expected {torch.float}"
+        assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast('cuda'):
@@ -206,6 +210,9 @@ class TestScaledMM:
     @pytest.mark.parametrize("bias", [False, True])
     @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, bias, base_dtype):
+        if base_dtype == torch.float32 and bias == True:
+            warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
+            pytest.skip()
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
         output_dtype = base_dtype
