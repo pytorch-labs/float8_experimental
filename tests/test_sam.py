@@ -27,12 +27,12 @@ class Float8SAMIntegrationTest(unittest.TestCase):
         # for now just test the encoder to simplify things
         encoder_ref = model.vision_encoder
         encoder_fp8 = copy.deepcopy(encoder_ref)
-        swap_linear_with_float8_linear(encoder_fp8, emulate=True)
+        swap_linear_with_float8_linear(encoder_fp8, emulate=False)
 
         # an image 
         # Note: bsz==4 or a larger power of 2 for this model is needed to 
         # ensure all matmuls have arguments with dimensions divisible by 16
-        data = torch.randn(1, 3, 1024, 1024).to(data_dtype).cuda()
+        data = torch.randn(4, 3, 1024, 1024).to(data_dtype).cuda()
 
         encoder_ref_out = encoder_ref(data)
         last_hidden_ref = encoder_ref_out.last_hidden_state
