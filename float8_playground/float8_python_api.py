@@ -107,13 +107,6 @@ def addmm_float8(
         scale_b=b_inverse_scale,
         scale_result=output_scale,
     )
-    # dummy_amax = torch.tensor(0.0, dtype=output_amax.dtype, device='cuda')
-    # emulated = torch.ops.aten.addmm_float8_emulated(
-    #         input_bias.float(),
-    #         a._data, a._scale,
-    #         b._data, b._scale,
-    #         dummy_amax, output_scale, output_dtype)
 
-    # breakpoint()
     output_amax.fill_(updated_amax)
     return output
