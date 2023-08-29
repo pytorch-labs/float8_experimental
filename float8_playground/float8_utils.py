@@ -61,8 +61,8 @@ def compute_error(x, y):
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
 
-def bias_dtype_map(output_dtype: torch.dtype) -> torch.dtype:
-    """ CublasLT requries specific bias dtype depending on output dtype
+def output_dtype_to_addmm_bias_dtype(output_dtype: torch.dtype) -> torch.dtype:
+    """  specific bias dtype depending on output dtype
     """
     if output_dtype == torch.float32:
         return torch.bfloat16

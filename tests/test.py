@@ -21,7 +21,7 @@ from float8_utils import (
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     amax_to_scale,
-    bias_dtype_map
+    output_dtype_to_addmm_bias_dtype
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
@@ -221,7 +221,7 @@ class TestScaledMM:
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(bias_dtype_map(output_dtype))
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype_to_addmm_bias_dtype(output_dtype))
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()

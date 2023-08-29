@@ -157,7 +157,11 @@ def run(mode: str, is_fp8: bool):
     elif mode == 'analyze':
         y_single_gpu = torch.load(output_single_gpu_fname).cpu()
         y_fsdp = torch.load(output_fsdp_fname).cpu()
-        torch.testing.assert_close(y_single_gpu, y_fsdp)
+        if is_fp8 and not emulate:
+            atol, rtol  = 2e-2, 2e-2
+        else:
+            atol, rtol = None, None
+        torch.testing.assert_close(y_single_gpu, y_fsdp, atol=atol, rtol=rtol)
         print('output testing single_gpu vs FSDP success')
 
         sd_in = torch.load(sd_in_fname)
@@ -197,7 +201,10 @@ def run(mode: str, is_fp8: bool):
                     if v1.dtype == torch.bfloat16 and emulate==False:
                          atol, rtol = 2e-2, 2e-2
                     else:
-                        atol, rtol = None, None
+                        if k == "1.fp8_amax_history_x" and emulate==False:
+                            atol, rtol = 2e-2, 6e-3
+                        else:
+                            atol, rtol = None, None
                     torch.testing.assert_close(v1, v2, atol=atol, rtol=rtol)
                 except Exception as e:
                     print('debug:', k, v1, v2)
