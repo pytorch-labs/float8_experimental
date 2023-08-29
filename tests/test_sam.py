@@ -20,18 +20,19 @@ torch.manual_seed(0)
 class Float8SAMIntegrationTest(unittest.TestCase):
 
     def test_encoder_fw_bw(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-base").cuda()
+        data_dtype = torch.bfloat16
+        model = SamModel.from_pretrained("facebook/sam-vit-base").to(data_dtype).cuda()
         # print(model)
 
         # for now just test the encoder to simplify things
         encoder_ref = model.vision_encoder
         encoder_fp8 = copy.deepcopy(encoder_ref)
-        # TODO(future): enable real compute, but may need a different model
-        # as the shapes need to be divisible by 16
         swap_linear_with_float8_linear(encoder_fp8, emulate=True)
 
         # an image 
-        data = torch.randn(1, 3, 1024, 1024).cuda()
+        # Note: bsz==4 or a larger power of 2 for this model is needed to 
+        # ensure all matmuls have arguments with dimensions divisible by 16
+        data = torch.randn(1, 3, 1024, 1024).to(data_dtype).cuda()
 
         encoder_ref_out = encoder_ref(data)
         last_hidden_ref = encoder_ref_out.last_hidden_state
@@ -49,10 +50,8 @@ class Float8SAMIntegrationTest(unittest.TestCase):
         for name, param in encoder_fp8.named_parameters():
             ref_grad = ref_name_to_grad[name]
             cur_grad = param.grad
-            # For now below is for debugging only, numerical values of
-            # fp32 baseline vs fp8 for grads are not that close for a lot
-            # of the layers in this network
             sqnr = compute_error(ref_grad, cur_grad)
+            self.assertTrue(sqnr > 14.0)
 
 
 if __name__ == '__main__':

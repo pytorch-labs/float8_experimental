@@ -106,7 +106,7 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        if func is aten.view.default:
+        if func in (aten.view.default, aten._unsafe_view.default):
             orig_tensor, view_args = args
             new_tensor = Float8Tensor(
                 orig_tensor._data.view(*view_args), orig_tensor._scale,
@@ -117,6 +117,12 @@ class Float8Tensor(torch.Tensor):
             new_tensor = Float8Tensor(
                 orig_tensor._data.t(), orig_tensor._scale,
                 orig_tensor._orig_dtype)
+            return new_tensor
+        elif func is aten.clone.default:
+            orig_tensor, = args
+            new_data = func(orig_tensor._data, **kwargs)
+            new_tensor = Float8Tensor(
+                new_data, orig_tensor._scale, orig_tensor._orig_dtype)
             return new_tensor
 
         # for all ops that get here, fall back to original precision
