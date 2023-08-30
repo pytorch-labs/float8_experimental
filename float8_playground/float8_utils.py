@@ -9,22 +9,36 @@ import torch.distributed as dist
 E4M3_MAX_POS = 448.0
 E5M2_MAX_POS = 57344.0
 
+FP16_MAX_POS = 65504.0
+
 # avoid division by zero when calculating scale
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
 EPS = 1e-12
 
 @torch.no_grad()
-def amax_to_scale(amax, dtype):
-    if dtype == torch.float8_e4m3fn:
-        return E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+def amax_to_scale(amax, float8_dtype, orig_dtype):
+    if float8_dtype == torch.float8_e4m3fn:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     else:  # e5m2
-        return E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+
+    # Ensure that the scale is representable in float16,
+    # this helps when amax is small. We are assuming that we don't need
+    # to care about this for float32/bfloat16.
+    if orig_dtype is torch.float16:
+        res = torch.clamp(res, max=FP16_MAX_POS) 
+    return res
 
 @torch.no_grad()
-def amax_history_to_scale(amax_history, float8_dtype, history_to_scale_fn_type):
+def amax_history_to_scale(
+    amax_history, 
+    float8_dtype, 
+    orig_dtype,
+    history_to_scale_fn_type,
+):
     if history_to_scale_fn_type == 'max':
         amax = torch.max(amax_history)
-        return amax_to_scale(amax, float8_dtype)
+        return amax_to_scale(amax, float8_dtype, orig_dtype)
     raise NotImplementedError()
 
 @torch.no_grad()
@@ -39,9 +53,9 @@ def tensor_to_amax(x):
     return amax
 
 @torch.no_grad()
-def tensor_to_scale(x, dtype):
+def tensor_to_scale(x, float8_dtype):
     amax = tensor_to_amax(x)
-    return amax_to_scale(amax, dtype)
+    return amax_to_scale(amax, float8_dtype, x.dtype)
 
 def to_fp8_saturated(x, float8_dtype):
     # The default behavior in PyTorch for casting to `float8_e4m3fn`

@@ -84,7 +84,8 @@ class float8_linear(torch.autograd.Function):
             go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, 
             is_amax_initialized)
         go_scale = amax_history_to_scale(
-            fp8_amax_history_dL_dY, torch.float8_e5m2, scale_fn_name)
+            fp8_amax_history_dL_dY, torch.float8_e5m2, go.dtype,
+            scale_fn_name)
         go_fp8 = Float8Tensor.to_float8(
             go, go_scale, torch.float8_e5m2, fp8_amax_dL_dY)
         _update_history_with_new_amax(
@@ -178,7 +179,8 @@ class Float8Linear(torch.nn.Linear):
             x, self.fp8_amax_x, self.fp8_amax_history_x, 
             is_amax_initialized_this_iteration)
         x_scale = amax_history_to_scale(
-            self.fp8_amax_history_x, torch.float8_e4m3fn, scale_fn_name)
+            self.fp8_amax_history_x, torch.float8_e4m3fn, x.dtype,
+            scale_fn_name)
         x_fp8 = Float8Tensor.to_float8(
             x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
         _update_history_with_new_amax(
@@ -188,7 +190,8 @@ class Float8Linear(torch.nn.Linear):
             self.weight, self.fp8_amax_w, self.fp8_amax_history_w, 
             is_amax_initialized_this_iteration)
         w_scale = amax_history_to_scale(
-            self.fp8_amax_history_w, torch.float8_e4m3fn, scale_fn_name)
+            self.fp8_amax_history_w, torch.float8_e4m3fn, self.weight.dtype,
+            scale_fn_name)
         w_fp8 = Float8Tensor.to_float8(
             self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
         _update_history_with_new_amax(

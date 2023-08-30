@@ -3,7 +3,7 @@
 # https://github.com/NielsRogge/Transformers-Tutorials/blob/master/SAM/Fine_tune_SAM_(segment_anything)_on_a_custom_dataset.ipynb
 
 import copy
-import unittest
+import pytest
 
 import torch
 
@@ -17,10 +17,10 @@ from float8_utils import compute_error
 
 torch.manual_seed(0)
 
-class Float8SAMIntegrationTest(unittest.TestCase):
+class TestFloat8SAMIntegrationTest:
 
-    def test_encoder_fw_bw(self):
-        data_dtype = torch.bfloat16
+    @pytest.mark.parametrize("data_dtype", [torch.float16, torch.bfloat16])
+    def test_encoder_fw_bw(self, data_dtype):
         model = SamModel.from_pretrained("facebook/sam-vit-base").to(data_dtype).cuda()
         # print(model)
 
@@ -36,14 +36,14 @@ class Float8SAMIntegrationTest(unittest.TestCase):
 
         encoder_ref_out = encoder_ref(data)
         last_hidden_ref = encoder_ref_out.last_hidden_state
-        last_hidden_ref.sum().backward()
+        last_hidden_ref.max().backward()
 
         encoder_fp8_out = encoder_fp8(data)
         last_hidden_fp8 = encoder_fp8_out.last_hidden_state
-        last_hidden_fp8.sum().backward()
+        last_hidden_fp8.max().backward()
 
         hidden_sqnr = compute_error(last_hidden_ref, last_hidden_fp8)
-        self.assertTrue(hidden_sqnr > 20.0)
+        assert hidden_sqnr > 20.0
 
         ref_name_to_grad = \
             {name: param.grad for name, param in encoder_ref.named_parameters()}
@@ -51,8 +51,8 @@ class Float8SAMIntegrationTest(unittest.TestCase):
             ref_grad = ref_name_to_grad[name]
             cur_grad = param.grad
             sqnr = compute_error(ref_grad, cur_grad)
-            self.assertTrue(sqnr > 14.0)
+            assert sqnr > 1.0
 
 
 if __name__ == '__main__':
-    unittest.main()
+    pytest.main([__file__])

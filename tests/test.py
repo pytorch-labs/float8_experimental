@@ -20,6 +20,7 @@ from float8_utils import (
     tensor_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    FP16_MAX_POS,
     amax_to_scale,
 )
 from float8_python_api import mm_float8, addmm_float8
@@ -261,6 +262,32 @@ class TestScaledMM:
         else:
             atol, rtol = 2e-3, 2e-3
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+class TestNumerics:
+    
+    @pytest.mark.parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_small_amax_float16(self, float8_dtype):
+        # If we calculate scale naively with FP8_MAX_POS / amax,
+        # the result may not be representable in fp16. Verify that
+        # the way we calculate scales actually works for tensors with
+        # small values.
+        #
+        #   naive_s = fp8_max_pos / (amax + eps)
+        #
+        # failing case:
+        #
+        #   fp8_max_pos / (amax + eps) >= fp16_max_pos, or
+        #
+        #   amax + eps >= fp8_max_pos / fp16_max_pos
+
+        float8_max_pos = E4M3_MAX_POS \
+            if float8_dtype is torch.float8_e4m3fn else E5M2_MAX_POS
+
+        target_amax = (float8_max_pos / (FP16_MAX_POS + 1e-12))
+        x = torch.tensor([target_amax], dtype=torch.float16, device='cuda')
+        scale = tensor_to_scale(x, float8_dtype)
+        assert not torch.any(torch.isinf(scale))
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
