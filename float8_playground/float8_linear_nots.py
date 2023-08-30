@@ -13,7 +13,6 @@ from float8_utils import (
     to_fp8_saturated,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
-    output_dtype_to_addmm_bias_dtype
 )
 from float8_linear import Float8Linear
 from float8_python_api import addmm_float8_unwrapped
@@ -70,7 +69,6 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         is_amax_initialized,
         scale_fn_name,
         emulate: bool,
-        output_dtype: torch.dtype,
     ):
         ctx.save_for_backward(
             x_fp8_d, x_fp8_scale, w_fp8_d, w_fp8_scale, b,
@@ -78,6 +76,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
             fp8_noop_amax, fp8_noop_scale)
         ctx.scale_fn_name = scale_fn_name
         ctx.emulate = emulate
+        output_dtype = b.dtype if b is not None else torch.float32
         ctx.output_dtype = output_dtype
         ctx.is_amax_initialized = is_amax_initialized
         orig_shape = x_fp8_d.shape
@@ -170,7 +169,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
                 go_fp8_reshaped, dL_dY_scale,
                 fp8_noop_amax, fp8_noop_scale, output_dtype).t()
 
-        empty_grads = None, None, None, None, None, None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX_bits, None, dL_dW_bits, None, go, *empty_grads
         else:
@@ -215,12 +214,12 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             self.fp8_amax_w, self.fp8_amax_history_w)
 
         # TODO This is casting at every forward, we should only do this once
-        casted_bias = self.bias.to(output_dtype_to_addmm_bias_dtype(x.dtype)) if self.bias is not None else None
+        casted_bias = self.bias.to(x.dtype) if self.bias is not None else None
         y_fp32 = float8_linear_no_tensor_subclass.apply(
             x_fp8_d, x_scale, w_fp8_d, w_scale,
             casted_bias,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.fp8_noop_amax, self.fp8_noop_scale,
-            is_amax_initialized_this_iteration, scale_fn_name, self.emulate, x.dtype)
+            is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
 
         return y_fp32

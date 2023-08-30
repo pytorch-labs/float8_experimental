@@ -102,7 +102,7 @@ def addmm_float8(
     Returns:
         torch.Tensor: The result of the matrix multiplication and addition.
     """
-    assert input_bias.dtype in {torch.float16, torch.bfloat16}, "addmm_float8 only supports fp16/bf16 bias, you passed in {}".format(
+    assert input_bias.dtype in {torch.float16, torch.bfloat16, torch.float32}, "addmm_float8 only supports fp32/fp16/bf16 bias, you passed in {}".format(
         input_bias.dtype
     )
 

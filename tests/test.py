@@ -21,7 +21,6 @@ from float8_utils import (
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     amax_to_scale,
-    output_dtype_to_addmm_bias_dtype
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
@@ -195,9 +194,15 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("device", ["cpu", "cuda"])
     def test_pt2_nots(self, emulate: bool, device: torch.device):
-        if not emulate and device == "cpu":
-            warnings.warn("_scaled_mm is not supported on cpu")
-            pytest.skip()
+        if not emulate:
+            if device == "cpu":
+                warnings.warn("_scaled_mm is not supported on cpu")
+                pytest.skip()
+            if device =="cuda":
+                warnings.warn("torch._dynamo.exc.Unsupported: speculate_subgraph: "
+                              "while introspecting the user-defined autograd.Function,"
+                              " we were unable to trace function `trampoline_autograd_bwd`")
+                pytest.skip()
         self._test_pt2_impl(use_no_tensor_subclass=True, emulate=emulate, device=device)
 
     @unittest.skip("PT2.0 tracing subclasses does not work yet")
@@ -224,7 +229,7 @@ class TestScaledMM:
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype_to_addmm_bias_dtype(output_dtype))
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype)
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
