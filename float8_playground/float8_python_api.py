@@ -8,6 +8,7 @@ import torch
 from float8_tensor import Float8Tensor
 import float8_aten_api
 import warnings
+from typing import Optional
 
 def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
     """ Cublas requires row_major @ column major tensors"""
@@ -19,6 +20,37 @@ def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
         return tensor.t().contiguous().t()
     return tensor
 
+
+def addmm_float8_unwrapped(
+        input_bias: Optional[torch.Tensor],
+        a_data: torch.Tensor, 
+        a_scale: torch.Tensor, 
+        b_data: torch.Tensor, 
+        b_scale: torch.tensor, 
+        output_amax: torch.Tensor, 
+        output_scale: torch.Tensor, 
+        output_dtype: torch.dtype) -> torch.Tensor:
+    """ This is the unwrapped version of addmm_float8, which does not take in Float8Tensors 
+        as inputs. This is used to standardize the logic between subclassed and non subclassed
+        versions of the linear module.
+    """
+    temp_a = layout_helper(a_data, row_major=True)
+    temp_b = layout_helper(b_data, row_major=False)
+
+    a_inverse_scale = 1 / a_scale
+    b_inverse_scale = 1 / b_scale
+    output, updated_amax = torch._scaled_mm(
+        temp_a,
+        temp_b,
+        bias=input_bias,
+        out_dtype=output_dtype,
+        scale_a=a_inverse_scale,
+        scale_b=b_inverse_scale,
+        scale_result=output_scale,
+    )
+    output_amax.fill_(updated_amax)
+    return output
+    
 # [Note] Usage of scales
 # The meaning of scale in this library can be found in the definition of the Float8Tensor
 # Cublas defines scale to always mean a multiplicative factor for the respective matrices
@@ -37,21 +69,13 @@ def mm_float8(
             a._data, a._scale,
             b._data, b._scale,
             output_amax, output_scale, output_dtype)
-    temp_a = layout_helper(a._data, row_major=True)
-    temp_b = layout_helper(b._data, row_major=False)
-
-    a_inverse_scale = 1 / a._scale
-    b_inverse_scale = 1 / b._scale
-    output, updated_amax = torch._scaled_mm(
-        temp_a,
-        temp_b,
-        out_dtype=output_dtype,
-        scale_a=a_inverse_scale,
-        scale_b=b_inverse_scale,
-        scale_result=output_scale,
+    
+    return addmm_float8_unwrapped(
+        None, # input_bias
+        a._data, a._scale,
+        b._data, b._scale,
+        output_amax, output_scale, output_dtype
     )
-    output_amax.fill_(updated_amax)
-    return output
 
 # See [Note] Usage of scales
 def addmm_float8(
@@ -78,7 +102,7 @@ def addmm_float8(
     Returns:
         torch.Tensor: The result of the matrix multiplication and addition.
     """
-    assert input_bias.dtype in {torch.float16, torch.bfloat16}, "addmm_float8 only supports fp16/bf16 bias, you passed in {}".format(
+    assert input_bias.dtype in {torch.float16, torch.bfloat16, torch.float32}, "addmm_float8 only supports fp32/fp16/bf16 bias, you passed in {}".format(
         input_bias.dtype
     )
 
@@ -93,20 +117,9 @@ def addmm_float8(
         warnings.warn("addmm_float8 does not support fp32 bias, using fp16 instead")
         input_bias = input_bias.to(torch.float16)
 
-    temp_a = layout_helper(a._data, row_major=True)
-    temp_b = layout_helper(b._data, row_major=False)
-
-    a_inverse_scale = 1 / a._scale
-    b_inverse_scale = 1 / b._scale
-    output, updated_amax = torch._scaled_mm(
-        temp_a,
-        temp_b,
-        bias=input_bias,
-        out_dtype=output_dtype,
-        scale_a=a_inverse_scale,
-        scale_b=b_inverse_scale,
-        scale_result=output_scale,
+    return addmm_float8_unwrapped(
+        input_bias, # input_bias
+        a._data, a._scale,
+        b._data, b._scale,
+        output_amax, output_scale, output_dtype
     )
-
-    output_amax.fill_(updated_amax)
-    return output

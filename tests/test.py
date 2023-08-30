@@ -21,7 +21,6 @@ from float8_utils import (
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     amax_to_scale,
-    output_dtype_to_addmm_bias_dtype
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
@@ -133,9 +132,6 @@ class TestFloat8Linear:
             elif torch.cuda.get_device_capability() < (9, 0):
                 warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0)')
                 pytest.skip()
-            elif use_no_ts:
-                warnings.warn('use_no_ts does not support real compute yet')
-                pytest.skip()
 
         x = torch.randn(*x_shape, device='cuda')
         m_ref = nn.Linear(16, 32, bias=False, device='cuda')
@@ -152,9 +148,6 @@ class TestFloat8Linear:
                 pytest.skip()
             elif torch.cuda.get_device_capability() < (9, 0):
                 warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0)')
-                pytest.skip()
-            elif use_no_ts:
-                warnings.warn('use_no_ts does not support real compute yet')
                 pytest.skip()
             elif linear_dtype == torch.float32:
                 warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
@@ -177,17 +170,17 @@ class TestFloat8Linear:
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
-    def _test_pt2_impl(self, use_no_tensor_subclass):
+    def _test_pt2_impl(self, use_no_tensor_subclass: bool, emulate: bool, device: torch.device):
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
-        m = nn.Linear(4, 4, device='cpu', bias=False)
-        x = torch.randn(4, 4, device='cpu')
+        m = nn.Linear(48, 32, device=device, bias=False)
+        x = torch.randn(16, 48, device=device)
         # TODO(future): switch back to tensor subclass based UX once the PT
         # support is there
         if use_no_tensor_subclass:
-            m = Float8LinearNoTensorSubclass.from_float(m, emulate=True)
+            m = Float8LinearNoTensorSubclass.from_float(m, emulate=emulate)
         else:
             m = Float8Linear.from_float(m)
         m = torch.compile(m, backend=cnt, fullgraph=True)
@@ -198,12 +191,27 @@ class TestFloat8Linear:
             # print('gm', gm)
             pass
 
-    def test_pt2_nots(self):
-        self._test_pt2_impl(use_no_tensor_subclass=True)
+    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    def test_pt2_nots(self, emulate: bool, device: torch.device):
+        if not emulate:
+            if device == "cpu":
+                warnings.warn("_scaled_mm is not supported on cpu")
+                pytest.skip()
+            if device =="cuda":
+                warnings.warn("torch._dynamo.exc.Unsupported: speculate_subgraph: "
+                              "while introspecting the user-defined autograd.Function,"
+                              " we were unable to trace function `trampoline_autograd_bwd`")
+                pytest.skip()
+        self._test_pt2_impl(use_no_tensor_subclass=True, emulate=emulate, device=device)
 
     @unittest.skip("PT2.0 tracing subclasses does not work yet")
-    def test_pt2_ts(self):
-        self._test_pt2_impl(use_no_tensor_subclass=False)
+    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("device", ["cpu", "cuda"])
+    def test_pt2_ts(self, emulate: bool, device: torch.device):
+        warnings.warn("_scaled_mm is not supported on cpu")
+        pytest.skip()
+        self._test_pt2_impl(use_no_tensor_subclass=False, emulate=emulate, device=device)
 
 class TestScaledMM:
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
@@ -221,7 +229,7 @@ class TestScaledMM:
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
         if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype_to_addmm_bias_dtype(output_dtype))
+            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype)
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
