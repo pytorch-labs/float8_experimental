@@ -56,16 +56,20 @@ class float8_linear(torch.autograd.Function):
         ctx.scale_fn_name = scale_fn_name
         ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
-        x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
+        x_fp8_reshaped = Float8Tensor(
+            x_fp8._data.reshape(-1, orig_shape[-1]), x_fp8._scale, x_fp8._orig_dtype)
         ctx.is_amax_initialized = is_amax_initialized
+
+        w_fp8_t = Float8Tensor(
+            w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
 
         if b is not None:
             res_bits = addmm_float8(
-                b, x_fp8_reshaped, w_fp8.t(), fp8_noop_amax, fp8_noop_scale,
+                b, x_fp8_reshaped, w_fp8_t, fp8_noop_amax, fp8_noop_scale,
                 output_dtype=x_fp8._orig_dtype, emulate=emulate)
         else:
             res_bits = mm_float8(
-                x_fp8_reshaped, w_fp8.t(), fp8_noop_amax, fp8_noop_scale,
+                x_fp8_reshaped, w_fp8_t, fp8_noop_amax, fp8_noop_scale,
                 output_dtype=x_fp8._orig_dtype, emulate=emulate)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
@@ -92,7 +96,9 @@ class float8_linear(torch.autograd.Function):
             fp8_amax_dL_dY, fp8_amax_history_dL_dY)
 
         go_fp8_orig_shape = go_fp8._data.shape
-        go_fp8_reshaped = go_fp8.reshape(-1, go_fp8_orig_shape[-1])
+        go_fp8_reshaped = Float8Tensor(
+            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]), go_fp8._scale, 
+            go_fp8._orig_dtype)
 
         #
         # calculate dL/dX
@@ -103,13 +109,15 @@ class float8_linear(torch.autograd.Function):
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8._data.shape
-        x_fp8_reshaped = x_fp8.reshape(-1, x_fp8_orig_shape[-1])
+        x_fp8_reshaped_t = Float8Tensor(
+            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t(), x_fp8._scale,
+            x_fp8._orig_dtype)
 
         #
         # calculate dL/dW
         #
         dL_dW = mm_float8(
-            x_fp8_reshaped.t(), go_fp8_reshaped, fp8_noop_amax,
+            x_fp8_reshaped_t, go_fp8_reshaped, fp8_noop_amax,
             fp8_noop_scale, output_dtype=x_fp8._orig_dtype, emulate=emulate).t()
 
         empty_grads = None, None, None, None, None, None, None, None
