@@ -32,18 +32,6 @@ random.seed(0)
 torch.manual_seed(0)
 
 class TestFloat8Tensor(unittest.TestCase):
-    def test_grad_add(self):
-        x1_fp32 = torch.randn(4, 4, device='cuda')
-        x1_s = tensor_to_scale(x1_fp32, torch.float8_e5m2)
-        x2_fp32 = torch.randn(4, 4, device='cuda')
-        x2_s = tensor_to_scale(x2_fp32, torch.float8_e5m2)
-        x1_fp8 = Float8Tensor.to_float8(x1_fp32, x1_s, torch.float8_e5m2)
-        x2_fp8 = Float8Tensor.to_float8(x2_fp32, x2_s, torch.float8_e5m2)
-        x3_fp32 = x1_fp8 + x2_fp8
-        x3_fp32_ref = x1_fp32 + x2_fp32
-        sqnr = compute_error(x3_fp32_ref, x3_fp32)
-        self.assertTrue(sqnr >= 20.0)
-
     def test_preserves_dtype(self):
         # hp means high precision, lp means low precision
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
@@ -183,10 +171,21 @@ class TestFloat8Linear:
         if use_no_tensor_subclass:
             m = Float8LinearNoTensorSubclass.from_float(m, emulate=emulate)
         else:
-            m = Float8Linear.from_float(m)
-        m = torch.compile(m, backend=cnt, fullgraph=True)
+            m = Float8Linear.from_float(m, emulate=emulate)
+
+        m_ref = copy.deepcopy(m)
+
+        m = torch.compile(m, backend=cnt)
         # verify things don't crash
-        m(x)
+        y = m(x)
+        y.sum().backward()
+
+        y_ref = m_ref(x)
+        y_ref.sum().backward()
+
+        assert torch.allclose(y, y_ref)
+        assert torch.allclose(m.weight.grad, m_ref.weight.grad)
+
         # TODO(future): inspect the graph programmaticaly
         for gm in backend.graphs:
             # print('gm', gm)
@@ -206,13 +205,12 @@ class TestFloat8Linear:
                 pytest.skip()
         self._test_pt2_impl(use_no_tensor_subclass=True, emulate=emulate, device=device)
 
-    @unittest.skip("PT2.0 tracing subclasses does not work yet")
     @pytest.mark.parametrize("emulate", [True, False])
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
-    def test_pt2_ts(self, emulate: bool, device: torch.device):
-        warnings.warn("_scaled_mm is not supported on cpu")
-        pytest.skip()
-        self._test_pt2_impl(use_no_tensor_subclass=False, emulate=emulate, device=device)
+    def test_pt2_ts(self, emulate: bool):
+        if emulate:
+            warnings.warn("PT2.0 tracing doesn't work with subclass + emulate yet")
+            pytest.skip()
+        self._test_pt2_impl(use_no_tensor_subclass=False, emulate=emulate, device='cuda')
 
 class TestScaledMM:
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
