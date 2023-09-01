@@ -43,25 +43,6 @@ class TestFloat8Tensor(unittest.TestCase):
             x3_hp = x2_lp.to_original_precision()
             self.assertTrue(x3_hp.dtype == hp_dtype)
 
-    def test_reshape(self):
-        x1_fp32 = torch.randn(4, 4, device='cuda')
-        x1_s = tensor_to_scale(x1_fp32, torch.float8_e4m3fn)
-        x1_fp8 = Float8Tensor.to_float8(x1_fp32, x1_s, torch.float8_e4m3fn)
-        new_shape = (2, -1)
-        x2_fp32 = x1_fp32.reshape(*new_shape)
-        x2_fp8 = x1_fp8.reshape(*new_shape)
-        self.assertTrue(x2_fp8.shape == x2_fp32.shape)
-        self.assertTrue(type(x2_fp8) == Float8Tensor)
-
-    def test_transpose(self):
-        x1_fp32 = torch.randn(4, 4, device='cuda')
-        x1_s = tensor_to_scale(x1_fp32, torch.float8_e4m3fn)
-        x1_fp8 = Float8Tensor.to_float8(x1_fp32, x1_s, torch.float8_e4m3fn)
-        x2_fp32 = x1_fp32.t()
-        x2_fp8 = x1_fp8.t()
-        self.assertTrue(x2_fp8.shape == x2_fp32.shape)
-        self.assertTrue(type(x2_fp8) == Float8Tensor)
-
 
 class TestFloat8Linear:
     def _test_linear_impl(self, x, m_ref, use_no_tensor_subclass: bool, emulate: bool):

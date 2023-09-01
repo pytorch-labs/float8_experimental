@@ -1,6 +1,7 @@
 from enum import Enum
 import torch
 from torch.utils._pytree import tree_map
+from torch._subclasses.fake_tensor import is_fake
 
 from float8_utils import (
     tensor_to_amax,
@@ -116,29 +117,32 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        # TODO(before land): document the new way this function is used
-        
-        # We need to handle a couple of ops in order for 
-        # TorchDynamo tracing to succeed. This is not intended to be used
-        # by user code.
-        # TODO(future): some of these things are in fact being used by
-        # user code, we should move it out once we start working on aot_autograd
-        # support.
+        # 1. tracing through __torch_function__ logic is not supported yet in 
+        # PT2.0, so we explicitly disallow it here for callsites from user code.
+        # 2. We do need to handle a couple of ops in order for 
+        # TorchDynamo tracing to succeed.
+        not_supported_msg = \
+            'Float8Tensor.__torch_dispatch__ for user code is not supported'
         if func == torch.ops.aten.clone.default:
+            assert is_fake(args[0]), not_supported_msg
             return Float8Tensor(
                 args[0]._data.clone(**kwargs), args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten.view.default:
+            assert is_fake(args[0]), not_supported_msg
             new_data = args[0]._data.view(*args[1:])
             return Float8Tensor(
                 new_data, args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten._unsafe_view.default:
+            assert is_fake(args[0]), not_supported_msg
             new_data = torch.ops.aten._unsafe_view(args[0]._data, *args[1:], **kwargs)
             return Float8Tensor(
                 new_data, args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten.t.default:
+            assert is_fake(args[0]), not_supported_msg
             return Float8Tensor(
                 args[0]._data.t(), args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten.as_strided.default:
+            assert is_fake(args[0]), not_supported_msg
             return Float8Tensor(
                 args[0]._data.as_strided(*args[1:], **kwargs), args[0]._scale, 
                 args[0]._orig_dtype)
