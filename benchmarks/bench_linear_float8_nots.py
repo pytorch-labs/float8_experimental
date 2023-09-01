@@ -1,15 +1,18 @@
-import torch
-from dataclasses import dataclass
-from transformer_nuggets.utils import benchmark_torch_function_in_microseconds
-from typing import Tuple, Optional, List
-import context
-from itertools import product
-import copy
-from tqdm import tqdm
-from pathlib import Path
 import argparse
-from float8_linear_nots import Float8LinearNoTensorSubclass
+import copy
 import csv
+from dataclasses import dataclass
+from itertools import product
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+from tqdm import tqdm
+
+import context
+import torch
+from float8_linear_nots import Float8LinearNoTensorSubclass
+from transformer_nuggets.utils import benchmark_torch_function_in_microseconds
+
 # estimating TOPs for matmuls in fp32, fp16, fp8
 # assuming A * B = C, with A being M * K, B being K * N, C being M * N
 
@@ -89,9 +92,8 @@ def main(sweep_path: Path):
 
 
 if __name__ == '__main__':
-    # argparse for the sweep path
     parser = argparse.ArgumentParser()
-    parser.add_argument('--sweep_path', type=str, required=True)
+    parser.add_argument('-o', '--output_path', type=str, required=True)
     args = parser.parse_args()
-    sweep_path = Path(args.sweep_path)
-    main(sweep_path)
+    output_path = Path(args.output_path)
+    main(output_path)
