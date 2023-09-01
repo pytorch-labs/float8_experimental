@@ -99,14 +99,14 @@ class Float8Tensor(torch.Tensor):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
-        return ("_data",), (self._scale, self._orig_dtype)
+        return ("_data", "_scale"), (self._orig_dtype,)
  
     @staticmethod
     def __tensor_unflatten__(tensors, metadatas):
         return Float8Tensor(
             tensors["_data"],
-            metadatas[0],
-            metadatas[1])
+            tensors["_scale"],
+            metadatas[0],)
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)

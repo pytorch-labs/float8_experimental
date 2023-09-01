@@ -156,7 +156,8 @@ class TestFloat8Linear:
 
         m_ref = copy.deepcopy(m)
 
-        m = torch.compile(m, backend=cnt)
+        # m = torch.compile(m, backend=cnt)
+        m = torch.compile(m, backend='aot_eager')
         # verify things don't crash
         y = m(x)
         y.sum().backward()
