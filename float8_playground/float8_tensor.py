@@ -97,6 +97,16 @@ class Float8Tensor(torch.Tensor):
     def __repr__(self):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
 
+    def __tensor_flatten__(self):
+        return ("_data",), (self._scale, self._orig_dtype)
+ 
+    @staticmethod
+    def __tensor_unflatten__(tensors, metadatas):
+        return Float8Tensor(
+            tensors["_data"],
+            metadatas[0],
+            metadatas[1])
+
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
 
@@ -106,36 +116,38 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        if func in (aten.view.default, aten._unsafe_view.default):
-            orig_tensor, view_args = args
-            new_tensor = Float8Tensor(
-                orig_tensor._data.view(*view_args), orig_tensor._scale,
-                orig_tensor._orig_dtype)
-            return new_tensor
-        elif func is aten.t.default:
-            orig_tensor, = args
-            new_tensor = Float8Tensor(
-                orig_tensor._data.t(), orig_tensor._scale,
-                orig_tensor._orig_dtype)
-            return new_tensor
-        elif func is aten.clone.default:
-            orig_tensor, = args
-            new_data = func(orig_tensor._data, **kwargs)
-            new_tensor = Float8Tensor(
-                new_data, orig_tensor._scale, orig_tensor._orig_dtype)
-            return new_tensor
-
-        # for all ops that get here, fall back to original precision
-        def unwrap(t):
-            if isinstance(t, Float8Tensor):
-                return t.to_original_precision()
-            return t
-
-        args = tree_map(unwrap, args)
-        if kwargs is not None:
-            kwargs = tree_map(unwrap, kwargs)
-        out = super().__torch_dispatch__(func, types, args, kwargs)
-        return out
+        # TODO(before land): document the new way this function is used
+        
+        # We need to handle a couple of ops in order for 
+        # TorchDynamo tracing to succeed. This is not intended to be used
+        # by user code.
+        # TODO(future): some of these things are in fact being used by
+        # user code, we should move it out once we start working on aot_autograd
+        # support.
+        if func == torch.ops.aten.clone.default:
+            return Float8Tensor(
+                args[0]._data.clone(**kwargs), args[0]._scale, args[0]._orig_dtype)
+        elif func == torch.ops.aten.view.default:
+            new_data = args[0]._data.view(*args[1:])
+            return Float8Tensor(
+                new_data, args[0]._scale, args[0]._orig_dtype)
+        elif func == torch.ops.aten._unsafe_view.default:
+            new_data = torch.ops.aten._unsafe_view(args[0]._data, *args[1:], **kwargs)
+            return Float8Tensor(
+                new_data, args[0]._scale, args[0]._orig_dtype)
+        elif func == torch.ops.aten.t.default:
+            return Float8Tensor(
+                args[0]._data.t(), args[0]._scale, args[0]._orig_dtype)
+        elif func == torch.ops.aten.as_strided.default:
+            return Float8Tensor(
+                args[0]._data.as_strided(*args[1:], **kwargs), args[0]._scale, 
+                args[0]._orig_dtype)
+        
+        raise NotImplementedError()
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
+
+# In order for dynamo to successfuly trace our tensor subclass, we need
+# to be able to represent it in the graph.
+torch._dynamo.allow_in_graph(Float8Tensor)
