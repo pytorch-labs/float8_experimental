@@ -66,13 +66,14 @@ class float8_linear(torch.autograd.Function):
             w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
 
         if b is not None:
-            res_bits = addmm_float8(
-                b, x_fp8_reshaped, w_fp8_t, fp8_noop_amax, fp8_noop_scale,
+            res_bits, output_amax = addmm_float8(
+                b, x_fp8_reshaped, w_fp8.t(), fp8_noop_scale,
                 output_dtype=x_fp8._orig_dtype, emulate=emulate)
         else:
-            res_bits = mm_float8(
-                x_fp8_reshaped, w_fp8_t, fp8_noop_amax, fp8_noop_scale,
+            res_bits, output_amax = mm_float8(
+                x_fp8_reshaped, w_fp8.t(), fp8_noop_scale,
                 output_dtype=x_fp8._orig_dtype, emulate=emulate)
+        fp8_noop_amax.fill_(output_amax)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
 
@@ -87,9 +88,12 @@ class float8_linear(torch.autograd.Function):
         is_amax_initialized = ctx.is_amax_initialized
 
         # cast incoming gradient to fp8
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
-            scale_fn_name, torch.float8_e5m2, is_amax_initialized)
+        _maybe_initialize_amaxes_for_float8_cast(
+            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, 
+            is_amax_initialized)
+        go_scale = amax_history_to_scale(
+            fp8_amax_history_dL_dY, torch.float8_e5m2, go.dtype,
+            scale_fn_name)
         go_fp8 = Float8Tensor.to_float8(
             go, fp8_scale_dL_dY, torch.float8_e5m2, fp8_amax_dL_dY)
 
@@ -101,9 +105,10 @@ class float8_linear(torch.autograd.Function):
         #
         # calculate dL/dX
         #
-        dL_dX = mm_float8(
-            go_fp8_reshaped, w_fp8, fp8_noop_amax, fp8_noop_scale, 
+        dL_dX, dL_dX_amax = mm_float8(
+            go_fp8_reshaped, w_fp8, fp8_noop_scale,
             output_dtype=x_fp8._orig_dtype, emulate=emulate)
+        fp8_noop_amax.fill_(dL_dX_amax)
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8._data.shape
@@ -115,10 +120,10 @@ class float8_linear(torch.autograd.Function):
         # calculate dL/dW
         #
         dL_dW = mm_float8(
-            x_fp8_reshaped_t, go_fp8_reshaped, fp8_noop_amax,
+            x_fp8_reshaped.t(), go_fp8_reshaped, fp8_noop_amax,
             fp8_noop_scale, output_dtype=x_fp8._orig_dtype, emulate=emulate).t()
 
-        empty_grads = None, None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX, dL_dW, go, *empty_grads
         else:

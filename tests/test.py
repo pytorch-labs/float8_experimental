@@ -236,17 +236,15 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        output_amax_scaled = torch.tensor(0, device='cuda')
         output_scaled_scale = torch.tensor(1.0, device='cuda')
-        output_amax_emulated = torch.tensor(0, device='cuda')
         output_emulated_scale = torch.tensor(1.0, device='cuda')
 
         if bias:
-            out_scaled_mm = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm, output_amax_scaled = addmm_float8(input_bias, a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated, output_amax_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
         else:
-            out_scaled_mm = mm_float8(a_fp8, b_fp8, output_amax_scaled, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated = mm_float8(a_fp8, b_fp8, output_amax_emulated, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
+            out_scaled_mm, output_amax_scaled = mm_float8(a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+            out_emulated, output_amax_emulated = mm_float8(a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)
@@ -254,7 +252,7 @@ class TestScaledMM:
 
             out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
             out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
-        
+
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
         else:
@@ -262,7 +260,7 @@ class TestScaledMM:
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
 class TestNumerics:
-    
+
     @pytest.mark.parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_small_amax_float16(self, float8_dtype):
         # If we calculate scale naively with FP8_MAX_POS / amax,
