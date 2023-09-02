@@ -8,7 +8,10 @@ import context
 import torch
 from float8_linear_nots import Float8LinearNoTensorSubclass
 from transformer_nuggets.utils import ProfileConfig, profile_function
+# Setting to unblock for calling contiguous in backwards
+from torch._dynamo import config
 
+config._autograd_backward_strict_mode_banned_ops = []
 
 @dataclass(frozen=True)
 class LinearParams:
@@ -27,12 +30,16 @@ def main(profile_path: Path):
         K=8192,
         N=7168,
         input_bias=False,
-        ref_dtype=torch.float16
+        ref_dtype=torch.float16,
+        torch_compile=True
         )
 
     linear_ref = torch.nn.Linear(params.K, params.N, bias=params.input_bias, device='cuda', dtype=params.ref_dtype)
+    linear_ref = torch.compile(linear_ref) if params.torch_compile else linear_ref
     linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+    linear_float8 = torch.compile(linear_float8) if params.torch_compile else linear_float8
     input_tensor = torch.randn(params.M, params.K, device='cuda', dtype=params.ref_dtype, requires_grad=True)
+
     ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
     float8_forw_backward = lambda : linear_float8(input_tensor).sum().backward()
 
