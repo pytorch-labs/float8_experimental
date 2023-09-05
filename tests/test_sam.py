@@ -12,7 +12,10 @@ from transformers import SamModel
 # set up float8 path
 import context
 
-from float8_linear import swap_linear_with_float8_linear
+from float8_linear import (
+    swap_linear_with_float8_linear, 
+    sync_float8_amax_and_scale_history,
+)
 from float8_utils import compute_error
 
 torch.manual_seed(0)
@@ -38,6 +41,7 @@ class TestFloat8SAMIntegrationTest:
         last_hidden_ref = encoder_ref_out.last_hidden_state
         last_hidden_ref.max().backward()
 
+        sync_float8_amax_and_scale_history(encoder_fp8)
         encoder_fp8_out = encoder_fp8(data)
         last_hidden_fp8 = encoder_fp8_out.last_hidden_state
         last_hidden_fp8.max().backward()

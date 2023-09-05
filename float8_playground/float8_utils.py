@@ -42,14 +42,16 @@ def amax_history_to_scale(
     raise NotImplementedError()
 
 @torch.no_grad()
-def tensor_to_amax(x):
+def tensor_to_amax(x, distributed_reduction=False):
     amax = torch.max(torch.abs(x))
     amax_copy = amax.detach().clone()
-    # Hack: inline the distributed logic, just for testing numerics
-    # with FSDP.
-    # TODO(future): better composability with distributed
-    if dist.is_initialized():
+
+    # If the user asked for distributed reduction, do it.
+    # If the user did not ask for it, assume that it will
+    # happen elsewhere.
+    if distributed_reduction and dist.is_initialized():
         dist.all_reduce(amax, op=dist.ReduceOp.MAX)
+
     return amax
 
 @torch.no_grad()

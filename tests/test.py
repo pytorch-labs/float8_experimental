@@ -25,7 +25,11 @@ from float8_utils import (
 )
 from float8_python_api import mm_float8, addmm_float8
 from float8_tensor import Float8Tensor
-from float8_linear import Float8Linear
+from float8_linear import (
+    Float8Linear, 
+    sync_float8_amax_and_scale_history,
+    swap_linear_with_float8_linear,
+)
 from float8_linear_nots import Float8LinearNoTensorSubclass
 
 random.seed(0)
@@ -52,10 +56,13 @@ class TestFloat8Linear:
         else:
             m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref), emulate)
 
-        y_fp8 = m_fp8(x)
-        y_fp8.sum().backward()
-        y_ref = m_ref(x)
-        y_ref.sum().backward()
+        
+        for _ in range(2):
+            sync_float8_amax_and_scale_history(m_fp8)
+            y_fp8 = m_fp8(x)
+            y_fp8.sum().backward()
+            y_ref = m_ref(x)
+            y_ref.sum().backward()
 
         assert (y_ref.shape == y_fp8.shape)
 
@@ -132,11 +139,13 @@ class TestFloat8Linear:
 
         # autocast off
         x = torch.randn(16, 32, device='cuda', dtype=linear_dtype)
+        sync_float8_amax_and_scale_history(m)
         y = m(x)
         assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast('cuda'):
+            sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
