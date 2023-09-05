@@ -95,6 +95,16 @@ class TestFloat8Linear:
             buffer_value = getattr(m_fp8, buffer_name)
             assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
 
+        # verify all of the scale buffers got updated
+        scale_buffer_names = [
+            'fp8_scale_x',
+            'fp8_scale_w',
+            'fp8_scale_dL_dY',
+        ]
+        for buffer_name in scale_buffer_names:
+            buffer_value = getattr(m_fp8, buffer_name)
+            assert torch.ne(buffer_value, torch.tensor(1.0)), f"{buffer_name} not filled, current value {buffer_value}"
+
         # verify initialization flags got updated
         assert (m_fp8.is_amax_initialized == True)
 
