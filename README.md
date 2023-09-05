@@ -42,29 +42,29 @@ optimizer.step()
 ## M0: building blocks in core
 
 * [done] float8 dtypes in core
-* [in progress] torch._scaled_mm in core
+* [done] torch._scaled_mm in core
 * [not started] saturated casts to float8 in core
 
 ## M1: fp8 enabled linear with correct numerics
 
 * [done] Float8Linear with emulation and just-in-time scaling
-* [in progress] swap to real fp8 compute
-* [in progress] swap to delayed scaling
+* [done] swap to real fp8 compute
+* [done] swap to delayed scaling
 
 Note that performance is a non-goal for this milestone
 
 ## M2: single GPU performance
 
-* [starting] PT2.0 compatibility of this repository
-* [not started] inductor support for fp8 matmul
-* [not started] inductor support for fusing amax calculations into surrounding ops
+* [in progress] PT2.0 compatibility of this repository: dynamo
+* [in progress] PT2.0 compatibility of this repository: aot_autograd
+* [in progress] PT2.0 compatibility of this repository: inductor
 * [not started] e2e benchmarking
 
 ## M3: distributed
 
 * [in progress] validate FSDP with fp16 weight all-gather still works
 * [in progress] design for FSDP with fp8 weight all-gather
-* [not started] implementation for FSDP with fp8 weight all-gather
+* [design] implementation for FSDP with fp8 weight all-gather
 
 # high level design
 
