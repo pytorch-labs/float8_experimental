@@ -10,6 +10,33 @@ readiness, backwards compatibility, etc right now is an explicit non-goal at thi
 pip install -r requirements.txt
 ```
 
+# single GPU user API (not final)
+
+```
+from float8_linear import (
+    swap_linear_with_float8_linear,
+    sync_float8_amax_and_scale_history,
+)
+
+# create fp32 model
+m = Model(...)
+
+# convert linears to float8
+swap_linear_with_float8_linear(m)
+
+# training loop
+optimizer.zero_grad()
+# specific to float8: separate step to sync scales/amaxes
+# in the future, this may move to a context manager
+sync_float8_amax_and_scale_history(model)
+# run forward
+y = m(x)
+# run backward
+y.sum().backward()
+# update weights
+optimizer.step()
+```
+
 # high level progress tracking
 
 ## M0: building blocks in core

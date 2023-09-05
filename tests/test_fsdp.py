@@ -26,7 +26,10 @@ from torch.distributed.fsdp import (
 # set up float8 path
 import context
 
-from float8_linear import swap_linear_with_float8_linear
+from float8_linear import (
+    swap_linear_with_float8_linear,
+    sync_float8_amax_and_scale_history,
+)
 
 torch.manual_seed(0)
 
@@ -42,6 +45,7 @@ output_fsdp_fname = os.path.join(data_dir, 'output_fsdp.pt')
 B, M, K, N = 8, 8, 32, 32
 lr = 0.01
 N_ITER = 3
+N_ITER = 1
 
 
 def setup(rank, world_size):
@@ -90,6 +94,7 @@ def fsdp_main(rank, world_size, args):
         optimizer.zero_grad()
         y_local = model(ref_input_local)
         y_local.sum().backward()
+        sync_float8_amax_and_scale_history(model)
         optimizer.step()
 
     # get global y
@@ -144,6 +149,7 @@ def run(mode: str, is_fp8: bool):
             optimizer.zero_grad()
             y = model(ref_input)
             y.sum().backward()
+            sync_float8_amax_and_scale_history(model)
             optimizer.step()
 
         torch.save(y, output_single_gpu_fname)

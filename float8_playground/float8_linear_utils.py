@@ -13,7 +13,9 @@ def _maybe_initialize_amaxes_for_float8_cast(x, cur_amax, amax_history, is_initi
     if is_initialized:
         return
     with torch.no_grad():
-        new_amax = tensor_to_amax(x)
+        # Note: we need to enable distributed reduction here in order
+        # to match numerics between single GPU and multi GPU code
+        new_amax = tensor_to_amax(x, distributed_reduction=True)
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
 
