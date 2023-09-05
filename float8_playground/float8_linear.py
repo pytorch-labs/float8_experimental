@@ -14,7 +14,7 @@ import torch.distributed as dist
 from typing import Optional
 
 from float8_linear_utils import (
-    _maybe_initialize_amaxes_for_float8_cast,
+    _maybe_initialize_amaxes_scales_for_float8_cast,
     _update_history_with_new_amax,
 )
 
@@ -44,6 +44,7 @@ class float8_linear(torch.autograd.Function):
         b,
         fp8_amax_dL_dY,
         fp8_amax_history_dL_dY,
+        fp8_scale_dL_dY,
         fp8_noop_amax,
         fp8_noop_scale,
         is_amax_initialized,
@@ -53,7 +54,7 @@ class float8_linear(torch.autograd.Function):
         ctx.save_for_backward(
             x_fp8, w_fp8, b,
             fp8_amax_dL_dY, fp8_amax_history_dL_dY,
-            fp8_noop_amax, fp8_noop_scale)
+            fp8_scale_dL_dY, fp8_noop_amax, fp8_noop_scale)
         ctx.scale_fn_name = scale_fn_name
         ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
@@ -78,21 +79,19 @@ class float8_linear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, go):
         x_fp8, w_fp8, b_fp8, \
-            fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_noop_amax, fp8_noop_scale = \
+            fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY, \
+            fp8_noop_amax, fp8_noop_scale = \
                 ctx.saved_tensors
         scale_fn_name = ctx.scale_fn_name
         emulate = ctx.emulate
         is_amax_initialized = ctx.is_amax_initialized
 
         # cast incoming gradient to fp8
-        _maybe_initialize_amaxes_for_float8_cast(
-            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, 
-            is_amax_initialized)
-        go_scale = amax_history_to_scale(
-            fp8_amax_history_dL_dY, torch.float8_e5m2, go.dtype,
-            scale_fn_name)
+        _maybe_initialize_amaxes_scales_for_float8_cast(
+            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
+            scale_fn_name, torch.float8_e5m2, is_amax_initialized)
         go_fp8 = Float8Tensor.to_float8(
-            go, go_scale, torch.float8_e5m2, fp8_amax_dL_dY)
+            go, fp8_scale_dL_dY, torch.float8_e5m2, fp8_amax_dL_dY)
 
         go_fp8_orig_shape = go_fp8._data.shape
         go_fp8_reshaped = Float8Tensor(
@@ -119,7 +118,7 @@ class float8_linear(torch.autograd.Function):
             x_fp8_reshaped_t, go_fp8_reshaped, fp8_noop_amax,
             fp8_noop_scale, output_dtype=x_fp8._orig_dtype, emulate=emulate).t()
 
-        empty_grads = None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX, dL_dW, go, *empty_grads
         else:
@@ -153,10 +152,13 @@ class Float8Linear(torch.nn.Linear):
 
         self.register_buffer('fp8_amax_x', torch.tensor(E4M3_MAX_POS))
         self.register_buffer('fp8_amax_history_x', torch.zeros(history_len))
+        self.register_buffer('fp8_scale_x', torch.tensor(1.0))
         self.register_buffer('fp8_amax_w', torch.tensor(E4M3_MAX_POS))
         self.register_buffer('fp8_amax_history_w', torch.zeros(history_len))
+        self.register_buffer('fp8_scale_w', torch.tensor(1.0))
         self.register_buffer('fp8_amax_dL_dY', torch.tensor(E5M2_MAX_POS))
         self.register_buffer('fp8_amax_history_dL_dY', torch.zeros(history_len))
+        self.register_buffer('fp8_scale_dL_dY', torch.tensor(1.0))
         # The two buffers below are noops, we have them because 
         # torch.scaled_mm requires arguments in case the output of the matmul
         # is float8.
@@ -174,6 +176,10 @@ class Float8Linear(torch.nn.Linear):
         # flag is here to enforce that the user does not forget to do this.
         self.amax_and_scale_synced = False
 
+        # This is needed to properly handle autocast in the amax/scale
+        # update function
+        self.last_seen_input_dtype = None
+
     def forward(self, x):
         if self.is_amax_initialized and (not self.amax_and_scale_synced):
             raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
@@ -181,7 +187,7 @@ class Float8Linear(torch.nn.Linear):
         is_amax_initialized_this_iteration = self.is_amax_initialized
         self.is_amax_initialized = True
         scale_fn_name = self.recipe.scale_fn_name
-
+        self.last_seen_input_dtype = x.dtype
 
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
@@ -190,30 +196,26 @@ class Float8Linear(torch.nn.Linear):
             # if we need CPU support in the future, we can add it
             x = x.to(torch.get_autocast_gpu_dtype())
 
-        _maybe_initialize_amaxes_for_float8_cast(
+        _maybe_initialize_amaxes_scales_for_float8_cast(
             x, self.fp8_amax_x, self.fp8_amax_history_x, 
+            self.fp8_scale_x, scale_fn_name, torch.float8_e4m3fn,
             is_amax_initialized_this_iteration)
-        x_scale = amax_history_to_scale(
-            self.fp8_amax_history_x, torch.float8_e4m3fn, x.dtype,
-            scale_fn_name)
         x_fp8 = Float8Tensor.to_float8(
-            x, x_scale, torch.float8_e4m3fn, self.fp8_amax_x)
+            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x)
 
-        _maybe_initialize_amaxes_for_float8_cast(
+        _maybe_initialize_amaxes_scales_for_float8_cast(
             self.weight, self.fp8_amax_w, self.fp8_amax_history_w, 
+            self.fp8_scale_w, scale_fn_name, torch.float8_e4m3fn,
             is_amax_initialized_this_iteration)
-        w_scale = amax_history_to_scale(
-            self.fp8_amax_history_w, torch.float8_e4m3fn, self.weight.dtype,
-            scale_fn_name)
         w_fp8 = Float8Tensor.to_float8(
-            self.weight, w_scale, torch.float8_e4m3fn, self.fp8_amax_w)
+            self.weight, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
 
         # TODO This is casting at every forward, we should only do this once
         casted_bias = self.bias.to(x.dtype) if self.bias is not None else None
         y = float8_linear.apply(
             x_fp8, w_fp8, casted_bias,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            self.fp8_noop_amax, self.fp8_noop_scale,
+            self.fp8_scale_dL_dY, self.fp8_noop_amax, self.fp8_noop_scale,
             is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
 
         # Ensure that calling forward again will fail until the user syncs
@@ -262,7 +264,8 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
     following:
     1. in distributed contexts, syncs amax values across workers
     2. adds the `amax` values to history
-    3. sets the `amax_and_scale_synced` flag on the Float8Linear modules
+    3. calculates the scales to be used for next iteration
+    4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
        to signal that they have been synced
 
     TODO(future): design the UX for this (context manager, etc)
@@ -298,7 +301,25 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
             _update_history_with_new_amax(
                 child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY)
 
+            #
+            # 3. calculate the scales
+            #
+            # TODO what to do with x_dtype
+            x_dtype = child.last_seen_input_dtype
+            new_scale = amax_history_to_scale(
+                child.fp8_amax_history_x, torch.float8_e4m3fn,
+                x_dtype, child.recipe.scale_fn_name)
+            child.fp8_scale_x.copy_(new_scale)
+            new_scale = amax_history_to_scale(
+                child.fp8_amax_history_w, torch.float8_e4m3fn,
+                x_dtype, child.recipe.scale_fn_name)
+            child.fp8_scale_w.copy_(new_scale)
+            new_scale = amax_history_to_scale(
+                child.fp8_amax_history_dL_dY, torch.float8_e5m2,
+                x_dtype, child.recipe.scale_fn_name)
+            child.fp8_scale_dL_dY.copy_(new_scale)
+
         #
-        # 3. set a flag to signal amaxes/scales are ready
+        # 4. set a flag to signal amaxes/scales are ready
         #
         child.amax_and_scale_synced = True

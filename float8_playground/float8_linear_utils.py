@@ -3,9 +3,18 @@ import torch
 from float8_utils import (
     tensor_to_amax,
     amax_to_scale,
+    amax_history_to_scale,
 )
 
-def _maybe_initialize_amaxes_for_float8_cast(x, cur_amax, amax_history, is_initialized):
+def _maybe_initialize_amaxes_scales_for_float8_cast(
+    x, 
+    cur_amax, 
+    amax_history, 
+    scale,
+    scale_fn_name,
+    float8_dtype,
+    is_initialized,
+):
     """
     If x is about to be cast to `float8` and the amax buffers are not initialized,
     initializes them inplace.
@@ -18,6 +27,10 @@ def _maybe_initialize_amaxes_for_float8_cast(x, cur_amax, amax_history, is_initi
         new_amax = tensor_to_amax(x, distributed_reduction=True)
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
+        new_scale = amax_history_to_scale(
+            amax_history, float8_dtype, x.dtype,
+            scale_fn_name)
+        scale.copy_(new_scale)
 
 def _update_history_with_new_amax(new_amax, amax_history):
     """
