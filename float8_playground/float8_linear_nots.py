@@ -132,9 +132,6 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         go_scaled = go * dL_dY_scale
         go_fp8_d = to_fp8_saturated(go_scaled, torch.float8_e5m2)
 
-        _update_history_with_new_amax(
-            fp8_amax_dL_dY, fp8_amax_history_dL_dY)
-
         go_fp8_orig_shape = go_fp8_d.shape
         go_fp8_reshaped = go_fp8_d.reshape(-1, go_fp8_orig_shape[-1])
 
@@ -187,6 +184,9 @@ class Float8LinearNoTensorSubclass(Float8Linear):
     traceable in PT2.0.
     """
     def forward(self, x):
+        if self.is_amax_initialized and (not self.amax_and_scale_synced):
+            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward') 
+
         is_amax_initialized_this_iteration = self.is_amax_initialized
         self.is_amax_initialized = True
         scale_fn_name = self.recipe.scale_fn_name
@@ -199,8 +199,6 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             scale_fn_name)
         x_fp8_d = ToFloat8E4M3FNConstrFuncDecomposed.apply(
             x, x_scale, self.fp8_amax_x)
-        _update_history_with_new_amax(
-            self.fp8_amax_x, self.fp8_amax_history_x)
 
         _maybe_initialize_amaxes_for_float8_cast(
             self.weight, self.fp8_amax_w, self.fp8_amax_history_w,
@@ -210,8 +208,6 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             scale_fn_name)
         w_fp8_d = ToFloat8E4M3FNConstrFuncDecomposed.apply(
             self.weight, w_scale, self.fp8_amax_w)
-        _update_history_with_new_amax(
-            self.fp8_amax_w, self.fp8_amax_history_w)
 
         # TODO This is casting at every forward, we should only do this once
         casted_bias = self.bias.to(x.dtype) if self.bias is not None else None
@@ -221,5 +217,9 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.fp8_noop_amax, self.fp8_noop_scale,
             is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
+
+        # Ensure that calling forward again will fail until the user syncs
+        # amaxes and scales
+        self.amax_and_scale_synced = False
 
         return y_fp32
