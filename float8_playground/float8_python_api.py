@@ -16,9 +16,7 @@ def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
     if row_major:
         return tensor.contiguous()
     # We need it to be column major
-    if tensor.is_contiguous():
-        return tensor.t().contiguous().t()
-    return tensor
+    return tensor.t().contiguous().t()
 
 
 def addmm_float8_unwrapped(
