@@ -135,11 +135,7 @@ class DelayedScalingRecipe:
     # TODO(future): add other functions as needed, hardcoded or user defined
     scale_fn_name = 'max'
 
-class Float8Linear(torch.nn.Linear):
-    """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
-    scales in way friendly to delayed scaling.
-    """
+class Float8LinearMixin(object):
     def __init__(self, *args, **kwargs):
         delayed_scaling_recipe = kwargs.pop('delayed_scaling_recipe', DelayedScalingRecipe())
         super().__init__(*args, **kwargs)
@@ -180,15 +176,7 @@ class Float8Linear(torch.nn.Linear):
         # update function
         self.last_seen_input_dtype = None
 
-    def forward(self, x):
-        if self.is_amax_initialized and (not self.amax_and_scale_synced):
-            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
-
-        is_amax_initialized_this_iteration = self.is_amax_initialized
-        self.is_amax_initialized = True
-        scale_fn_name = self.recipe.scale_fn_name
-        self.last_seen_input_dtype = x.dtype
-
+    def cast_x_to_float8(self, x, is_amax_initialized):
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
         if torch.is_autocast_enabled():
@@ -196,32 +184,65 @@ class Float8Linear(torch.nn.Linear):
             # if we need CPU support in the future, we can add it
             x = x.to(torch.get_autocast_gpu_dtype())
 
+        scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             x, self.fp8_amax_x, self.fp8_amax_history_x, 
             self.fp8_scale_x, scale_fn_name, torch.float8_e4m3fn,
-            is_amax_initialized_this_iteration)
+            is_amax_initialized)
         x_fp8 = Float8Tensor.to_float8(
             x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x)
 
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            self.weight, self.fp8_amax_w, self.fp8_amax_history_w, 
-            self.fp8_scale_w, scale_fn_name, torch.float8_e4m3fn,
-            is_amax_initialized_this_iteration)
-        w_fp8 = Float8Tensor.to_float8(
-            self.weight, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
+        return x_fp8
 
-        # TODO This is casting at every forward, we should only do this once
-        casted_bias = self.bias.to(x.dtype) if self.bias is not None else None
+    def cast_w_to_float8(self, w, is_amax_initialized):
+        scale_fn_name = self.recipe.scale_fn_name
+        _maybe_initialize_amaxes_scales_for_float8_cast(
+            w, self.fp8_amax_w, self.fp8_amax_history_w, 
+            self.fp8_scale_w, scale_fn_name, torch.float8_e4m3fn,
+            is_amax_initialized)
+        w_fp8 = Float8Tensor.to_float8(
+            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
+        return w_fp8
+
+    def float8_addmm(self, x_fp8, w_fp8, b, is_amax_initialized):
+        scale_fn_name = self.recipe.scale_fn_name
         y = float8_linear.apply(
-            x_fp8, w_fp8, casted_bias,
+            x_fp8, w_fp8, b,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
             self.fp8_scale_dL_dY, self.fp8_noop_amax, self.fp8_noop_scale,
-            is_amax_initialized_this_iteration, scale_fn_name, self.emulate)
+            is_amax_initialized, scale_fn_name, self.emulate)
 
+        return y
+
+    def float8_pre_forward(self, x):
+        if self.is_amax_initialized and (not self.amax_and_scale_synced):
+            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
+        self.last_seen_input_dtype = x.dtype
+
+    def float8_post_forward(self):
         # Ensure that calling forward again will fail until the user syncs
         # amaxes and scales
+        self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
+class Float8Linear(Float8LinearMixin, torch.nn.Linear):
+    """
+    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
+    scales in way friendly to delayed scaling.
+    """
+
+    def forward(self, x):
+        self.float8_pre_forward(x)
+
+        x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(
+            self.weight, self.is_amax_initialized)
+        # TODO This is casting at every forward, we should only do this once
+        casted_bias = self.bias.to(x_fp8._orig_dtype) if self.bias is not None else None
+        y = self.float8_addmm(
+            x_fp8, w_fp8, casted_bias, self.is_amax_initialized)
+        
+        self.float8_post_forward()
         return y
 
     @classmethod
