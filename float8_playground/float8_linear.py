@@ -176,6 +176,10 @@ class Float8LinearMixin(object):
         # update function
         self.last_seen_input_dtype = None
 
+        # If true, this enables TP+SP style distributed comms in TP primitives
+        # Note: this is not used in non-TP code.
+        self.use_sequence_parallel = False
+
     def cast_x_to_float8(self, x, is_amax_initialized):
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
