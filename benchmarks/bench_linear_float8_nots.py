@@ -68,7 +68,7 @@ def main(sweep_path: Path):
     input_bias = False
     ref_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     experiment_list: List[Experiment] = []
-    for (K, N), dtype in tqdm(product(name_to_shapes_70b.values(), ref_dtypes)):
+    for (K, N), dtype in tqdm(list(product(name_to_shapes_70b.values(), ref_dtypes))):
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
         linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
         bsz, seq_len = 4, 4096
