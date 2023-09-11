@@ -25,10 +25,45 @@ from float8_python_api import (
 from float8_utils import (
     tensor_to_amax,
     amax_history_to_scale,
+    to_fp8_saturated,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
 )
 from float8_tensor import Float8Tensor
+
+
+class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
+    """
+    Forward: no-op
+    Backward: convert to float8_e5m2, initialize if needed
+    """
+    @staticmethod
+    def forward(
+        ctx, tensor, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
+        scale_fn_name, is_amax_initialized,
+    ):
+        ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
+        ctx.scale_fn_name = scale_fn_name
+        ctx.is_amax_initialized = is_amax_initialized
+        return tensor
+
+    @staticmethod
+    def backward(ctx, go):
+        fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY = ctx.saved_tensors
+        scale_fn_name = ctx.scale_fn_name
+        is_amax_initialized = ctx.is_amax_initialized
+
+        _maybe_initialize_amaxes_scales_for_float8_cast(
+            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
+            scale_fn_name, torch.float8_e5m2, is_amax_initialized)
+
+        fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+        go_scaled = go * fp8_scale_dL_dY
+        bits_fp8 = to_fp8_saturated(go_scaled, torch.float8_e5m2)
+        empty_grads = None, None, None, None, None
+        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype)
+        return res, *empty_grads
+
 
 class float8_linear(torch.autograd.Function):
     """
@@ -40,9 +75,6 @@ class float8_linear(torch.autograd.Function):
         ctx,
         x_fp8,
         w_fp8,
-        fp8_amax_dL_dY,
-        fp8_amax_history_dL_dY,
-        fp8_scale_dL_dY,
         fp8_noop_amax,
         fp8_noop_scale,
         is_amax_initialized,
@@ -51,8 +83,7 @@ class float8_linear(torch.autograd.Function):
     ):
         ctx.save_for_backward(
             x_fp8, w_fp8,
-            fp8_amax_dL_dY, fp8_amax_history_dL_dY,
-            fp8_scale_dL_dY, fp8_noop_amax, fp8_noop_scale)
+            fp8_noop_amax, fp8_noop_scale)
         ctx.scale_fn_name = scale_fn_name
         ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
@@ -71,21 +102,13 @@ class float8_linear(torch.autograd.Function):
         return res_bits
 
     @staticmethod
-    def backward(ctx, go):
+    def backward(ctx, go_fp8):
         x_fp8, w_fp8, \
-            fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY, \
             fp8_noop_amax, fp8_noop_scale = \
                 ctx.saved_tensors
         scale_fn_name = ctx.scale_fn_name
         emulate = ctx.emulate
         is_amax_initialized = ctx.is_amax_initialized
-
-        # cast incoming gradient to fp8
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
-            scale_fn_name, torch.float8_e5m2, is_amax_initialized)
-        go_fp8 = Float8Tensor.to_float8(
-            go, fp8_scale_dL_dY, torch.float8_e5m2, fp8_amax_dL_dY)
 
         go_fp8_orig_shape = go_fp8._data.shape
         go_fp8_reshaped = Float8Tensor(
@@ -202,12 +225,17 @@ class Float8LinearMixin(object):
             w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
         return w_fp8
 
+    def cast_y_to_float8_in_bw(self, y):
+        scale_fn_name = self.recipe.scale_fn_name
+        y = NoopFwToFloat8E5M2Bw.apply(
+            y, self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY, 
+            self.fp8_scale_dL_dY, scale_fn_name, self.is_amax_initialized)
+        return y
+
     def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
         y = float8_linear.apply(
-            x_fp8, w_fp8,
-            self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            self.fp8_scale_dL_dY, self.fp8_noop_amax, self.fp8_noop_scale,
+            x_fp8, w_fp8, self.fp8_noop_amax, self.fp8_noop_scale,
             is_amax_initialized, scale_fn_name, self.emulate)
 
         return y
@@ -237,6 +265,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
             self.weight, self.is_amax_initialized)
         y = self.float8_mm(
             x_fp8, w_fp8, self.is_amax_initialized)
+        y = self.cast_y_to_float8_in_bw(y)
 
         if self.bias is not None:
             y = y + self.bias.to(x_fp8._orig_dtype)

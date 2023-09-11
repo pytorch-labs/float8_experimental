@@ -75,8 +75,6 @@ class Float8Tensor(torch.Tensor):
     """
 
     def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
-        # This is a non-differentiable constructor!
-        assert not data.requires_grad
         assert scale.nelement() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
@@ -147,7 +145,7 @@ class Float8Tensor(torch.Tensor):
                 args[0]._data.as_strided(*args[1:], **kwargs), args[0]._scale, 
                 args[0]._orig_dtype)
         
-        raise NotImplementedError()
+        raise NotImplementedError(f'attempting to run {func}, this is not supported')
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl

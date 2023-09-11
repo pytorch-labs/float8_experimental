@@ -53,6 +53,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         # Matrix multiply.
         output_parallel = self.float8_mm(
             input_parallel_fp8, w_fp8, self.is_amax_initialized)
+        output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
 
         if self.bias is not None:
             output_parallel = output_parallel + self.bias.to(output_parallel.dtype)
@@ -134,6 +135,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         # output_parallel = F.linear(input_parallel, self.weight)
         output_parallel = self.float8_mm(
             input_parallel_fp8, w_fp8, self.is_amax_initialized)
+        output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
 
         # adding zero below is a hack
         # without this hack, we see the following error: https://gist.github.com/vkuzo/0ed84e35081c8c7d20d0f46ed4322704
