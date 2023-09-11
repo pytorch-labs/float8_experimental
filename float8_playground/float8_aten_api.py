@@ -18,7 +18,6 @@ def mm_float8_emulated(
     s1,  # input 1 scale
     m2,  # input 2 data
     s2,  # input 2 scale
-    amax3,  # amax buffer of output, updated inplace in this function
     s3,  # output scale
     dtype3,  # output dtype
 ):
@@ -27,8 +26,7 @@ def mm_float8_emulated(
     m2_fp32 = m2.float() / s2
     m3_fp32 = torch.mm(m1_fp32, m2_fp32)
 
-    amax3.fill_(tensor_to_amax(m3_fp32))
-    return m3_fp32.to(dtype3)
+    return m3_fp32.to(dtype3), tensor_to_amax(m3_fp32)
 
 
 # TODO naming of these vars is weird
@@ -38,7 +36,6 @@ def addmm_float8_emulated(
     s1,  # input 1 scale
     m2,  # input 2 data
     s2,  # input 2 scale
-    amax3,  # amax buffer of output, updated inplace in this function
     s3,  # output scale
     dtype3,  # output dtype
 ):
@@ -49,8 +46,7 @@ def addmm_float8_emulated(
     inp1 = inp1.float()
     m3_fp32 = torch.addmm(inp1, m1_fp32, m2_fp32)
 
-    amax3.fill_(tensor_to_amax(m3_fp32))
-    return m3_fp32.to(dtype3)
+    return m3_fp32.to(dtype3), tensor_to_amax(m3_fp32)
 
 
 #
@@ -61,10 +57,10 @@ def addmm_float8_emulated(
 # These are mostly placeholder and might need to be implemented in c++ as needed
 lib = Library("aten", "FRAGMENT")
 
-lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
+lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, ScalarType dtype3) -> (Tensor, Tensor)")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
 
-lib.define("addmm_float8_emulated(Tensor inp1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor amax3, Tensor s3, ScalarType dtype3) -> Tensor")
+lib.define("addmm_float8_emulated(Tensor inp1, Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, ScalarType dtype3) -> (Tensor, Tensor)")
 lib.impl("addmm_float8_emulated", addmm_float8_emulated, "CPU")
 lib.impl("addmm_float8_emulated", addmm_float8_emulated, "CUDA")

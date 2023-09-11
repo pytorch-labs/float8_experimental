@@ -84,30 +84,33 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
 
         if b is not None:
             if emulate:
-                res_bits = torch.ops.aten.addmm_float8_emulated(
+                res_bits, output_amax = torch.ops.aten.addmm_float8_emulated(
                     b, x_fp8_reshaped, x_fp8_scale, w_fp8_d.t(), w_fp8_scale,
-                    fp8_noop_amax, fp8_noop_scale, output_dtype)
+                    fp8_noop_scale, output_dtype)
+
             else:
-                res_bits = addmm_float8_unwrapped(
+                res_bits, output_amax = addmm_float8_unwrapped(
                     b,
                     x_fp8_reshaped, x_fp8_scale,
                     w_fp8_d.t(), w_fp8_scale,
-                    fp8_noop_amax, fp8_noop_scale, output_dtype)
+                    fp8_noop_scale, output_dtype)
         else:
             if emulate:
-                res_bits = torch.ops.aten.mm_float8_emulated(
+                res_bits, output_amax = torch.ops.aten.mm_float8_emulated(
                     x_fp8_reshaped, x_fp8_scale,
                     w_fp8_d.t(), w_fp8_scale,
-                    fp8_noop_amax, fp8_noop_scale,
+                    fp8_noop_scale,
                     output_dtype)
             else:
-                res_bits = addmm_float8_unwrapped(
+                res_bits, output_amax = addmm_float8_unwrapped(
                     None, # Input bias
                     x_fp8_reshaped, x_fp8_scale,
                     w_fp8_d.t(), w_fp8_scale,
-                    fp8_noop_amax, fp8_noop_scale,
+                    fp8_noop_scale,
                     output_dtype
                 )
+        # Currently this line breaks torch_compile, this is still functionally correct however 
+        # fp8_noop_amax.fill_(output_amax)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
 
@@ -137,14 +140,15 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         #
         # calculate dL/dX, update relevant buffers along the way
         if emulate:
-            dL_dX_bits = torch.ops.aten.mm_float8_emulated(
+            dL_dX_bits, dL_dX_amax = torch.ops.aten.mm_float8_emulated(
                 go_fp8_reshaped, fp8_scale_dL_dY,
-                w_fp8_d, w_fp8_scale, fp8_noop_amax, fp8_noop_scale, output_dtype)
+                w_fp8_d, w_fp8_scale, fp8_noop_scale, output_dtype)
         else:
-            dL_dX_bits = addmm_float8_unwrapped(
+            dL_dX_bits, dL_dX_amax = addmm_float8_unwrapped(
                 None, # Input bias
                 go_fp8_reshaped, fp8_scale_dL_dY,
-                w_fp8_d, w_fp8_scale, fp8_noop_amax, fp8_noop_scale, output_dtype)
+                w_fp8_d, w_fp8_scale, fp8_noop_scale, output_dtype)
+        fp8_noop_amax.fill_(dL_dX_amax)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
 
         x_fp8_orig_shape = x_fp8_d.shape
@@ -154,17 +158,19 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         # calculate dL/dW, update relevant buffers along the way
         #
         if emulate:
-            dL_dW_bits = torch.ops.aten.mm_float8_emulated(
+            dL_dW_bits, dL_dW_amax = torch.ops.aten.mm_float8_emulated(
                 x_fp8_reshaped.t(), x_fp8_scale,
                 go_fp8_reshaped, fp8_scale_dL_dY,
-                fp8_noop_amax, fp8_noop_scale, output_dtype).t()
+                fp8_noop_scale, output_dtype)
+            dL_dW_bits = dL_dW_bits.t()
         else:
-            dL_dW_bits = addmm_float8_unwrapped(
+            dL_dW_bits, dL_dW_amax = addmm_float8_unwrapped(
                 None, # Input bias
                 x_fp8_reshaped.t(), x_fp8_scale,
                 go_fp8_reshaped, fp8_scale_dL_dY,
-                fp8_noop_amax, fp8_noop_scale, output_dtype).t()
-
+                fp8_noop_scale, output_dtype)
+            dL_dW_bits = dL_dW_bits.t()
+        fp8_noop_amax.fill_(dL_dW_amax)
         empty_grads = None, None, None, None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX_bits, None, dL_dW_bits, None, go, *empty_grads
