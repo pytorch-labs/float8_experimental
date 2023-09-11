@@ -15,7 +15,7 @@ from fairscale.nn.model_parallel.mappings import (
 from float8_linear import Float8LinearMixin, float8_linear
 
 from distributed_utils import (
-    _AllGatherFwReduceScatterBw,
+    _AllGatherFloat8FwReduceScatterBw,
     _ReduceScatterFwAllGatherBw,
 )
 
@@ -34,17 +34,18 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
             #   TODO(future PR): implement this
             # backward: reduce-scatter
             #   Float8 comms: none, because we can't reduce in float8
-            input_parallel = _AllGatherFwReduceScatterBw.apply(input_)
+            # cast activation and weight to float8
+            input_fp8_ = self.cast_x_to_float8(input_, self.is_amax_initialized)
+            input_parallel_fp8 = _AllGatherFloat8FwReduceScatterBw.apply(input_fp8_)
         else:
             # forward: no-op
             #   Float8 comms: no
             # backward: all-reduce
             #   Float8 comms: no, because we can't reduce in float8
             input_parallel = copy_to_model_parallel_region(input_)
+            input_parallel_fp8 = self.cast_x_to_float8(
+                input_parallel, self.is_amax_initialized)
 
-        # cast activation and weight to float8
-        input_parallel_fp8 = self.cast_x_to_float8(
-            input_parallel, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(
             self.weight, self.is_amax_initialized)
 
