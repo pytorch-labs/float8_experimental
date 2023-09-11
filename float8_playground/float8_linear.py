@@ -116,11 +116,13 @@ class float8_linear(torch.autograd.Function):
         #
         # calculate dL/dW
         #
-        dL_dW = mm_float8(
-            x_fp8_reshaped_t, go_fp8_reshaped, fp8_noop_amax,
-            fp8_noop_scale, output_dtype=x_fp8._orig_dtype, emulate=emulate).t()
+        dL_dW, dL_dW_amax = mm_float8(
+            x_fp8_reshaped_t, go_fp8_reshaped,
+            fp8_noop_scale, output_dtype=x_fp8._orig_dtype, emulate=emulate)
+        dL_dW = dL_dW.t()
+        fp8_noop_amax.fill_(dL_dW_amax)
 
-        empty_grads = None, None, None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None, None, None
         if b_fp8 is not None:
             return dL_dX, dL_dW, go, *empty_grads
         else:
