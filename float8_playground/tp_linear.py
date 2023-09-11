@@ -16,7 +16,7 @@ from float8_linear import Float8LinearMixin, float8_linear
 
 from distributed_utils import (
     _AllGatherFloat8FwReduceScatterBw,
-    _ReduceScatterFwAllGatherBw,
+    _ReduceScatterFwAllGatherFloat8Bw,
 )
 
 
@@ -30,8 +30,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
 
         if self.use_sequence_parallel:
             # forward: all-gather
-            #   Float8 comms: can be done in float8
-            #   TODO(future PR): implement this
+            #   Float8 comms: yes
             # backward: reduce-scatter
             #   Float8 comms: none, because we can't reduce in float8
             # cast activation and weight to float8
@@ -49,7 +48,6 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         w_fp8 = self.cast_w_to_float8(
             self.weight, self.is_amax_initialized)
 
-        # Float8: TODO(part 1) move this to float8
         # Matrix multiply.
         output_parallel = self.float8_mm(
             input_parallel_fp8, w_fp8, self.is_amax_initialized)
@@ -130,34 +128,33 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         w_fp8 = self.cast_w_to_float8(
             self.weight, self.is_amax_initialized)
 
-        # Float8: TODO(part 1) move this to float8
         # Matrix multiply.
-        # output_parallel = F.linear(input_parallel, self.weight)
         output_parallel = self.float8_mm(
             input_parallel_fp8, w_fp8, self.is_amax_initialized)
-        output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
-
-        # adding zero below is a hack
-        # without this hack, we see the following error: https://gist.github.com/vkuzo/0ed84e35081c8c7d20d0f46ed4322704
-        # pointing to autograd internals: https://fburl.com/code/eiipnnty
-        # it seems like there are some issues within chaining torch.autograd.Function instances
-        # together
-        # TODO(future) figure out a workaround
-        output_parallel = output_parallel + 0.0
 
         if self.use_sequence_parallel:
             # forward: reduce-scatter
             #   Float8 comms: none
             # backward: all-gather
-            #   Float8 comms: possible
-            #   TODO(future PR): implement this
-            output_ = _ReduceScatterFwAllGatherBw.apply(output_parallel)
+            #   Float8 comms: yes
+            output_ = _ReduceScatterFwAllGatherFloat8Bw.apply(output_parallel)
+            output_ = self.cast_y_to_float8_in_bw(output_)
         else:
             # All-reduce across all the partitions.
             # forward: reduce
             #   Float8 comms: none
             # backward: no-op
             #   Float8 comms: none
+            output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
+
+            # adding zero below is a hack
+            # without this hack, we see the following error: https://gist.github.com/vkuzo/0ed84e35081c8c7d20d0f46ed4322704
+            # pointing to autograd internals: https://fburl.com/code/eiipnnty
+            # it seems like there are some issues within chaining torch.autograd.Function instances
+            # together
+            # TODO(future) figure out a workaround
+            output_parallel = output_parallel + 0.0
+
             output_ = reduce_from_model_parallel_region(output_parallel)
 
         if self.bias is not None:

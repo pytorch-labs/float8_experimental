@@ -85,7 +85,7 @@ class _AllGatherFloat8FwReduceScatterBw(torch.autograd.Function):
     def backward(ctx, grad_output):
         return _reduce_scatter(ctx, grad_output)
 
-class _ReduceScatterFwAllGatherBw(torch.autograd.Function):
+class _ReduceScatterFwAllGatherFloat8Bw(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_):
         return _reduce_scatter(ctx, input_)
