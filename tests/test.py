@@ -23,7 +23,7 @@ from float8_utils import (
     FP16_MAX_POS,
     amax_to_scale,
 )
-from float8_python_api import mm_float8, addmm_float8
+from float8_python_api import mm_float8
 from float8_tensor import Float8Tensor
 from float8_linear import (
     Float8Linear, 
@@ -214,12 +214,8 @@ class TestFloat8Linear:
 
 class TestScaledMM:
     @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "CUDA not available")
-    @pytest.mark.parametrize("bias", [False, True])
     @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_scaled_mm_vs_emulated(self, bias, base_dtype):
-        if base_dtype == torch.float32 and bias == True:
-            warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
-            pytest.skip()
+    def test_scaled_mm_vs_emulated(self, base_dtype):
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
         output_dtype = base_dtype
@@ -227,8 +223,6 @@ class TestScaledMM:
 
         a = torch.randn(16, 16, device='cuda', dtype=base_dtype)
         b = torch.randn(32, 16, device='cuda', dtype=base_dtype).t()
-        if bias:
-            input_bias = torch.randn(32, device='cuda', dtype=base_dtype).to(output_dtype)
 
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
@@ -239,12 +233,8 @@ class TestScaledMM:
         output_scaled_scale = torch.tensor(1.0, device='cuda')
         output_emulated_scale = torch.tensor(1.0, device='cuda')
 
-        if bias:
-            out_scaled_mm, output_amax_scaled = addmm_float8(input_bias, a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated, output_amax_emulated = addmm_float8(input_bias, a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
-        else:
-            out_scaled_mm, output_amax_scaled = mm_float8(a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
-            out_emulated, output_amax_emulated = mm_float8(a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
+        out_scaled_mm, output_amax_scaled = mm_float8(a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
+        out_emulated, output_amax_emulated = mm_float8(a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)

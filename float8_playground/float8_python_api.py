@@ -19,15 +19,14 @@ def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
     return tensor.t().contiguous().t()
 
 
-def addmm_float8_unwrapped(
-        input_bias: Optional[torch.Tensor],
+def mm_float8_unwrapped(
         a_data: torch.Tensor,
         a_scale: torch.Tensor,
         b_data: torch.Tensor,
         b_scale: torch.tensor,
         output_scale: torch.Tensor,
         output_dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
-    """ This is the unwrapped version of addmm_float8, which does not take in Float8Tensors
+    """ This is the unwrapped version of mm_float8, which does not take in Float8Tensors
         as inputs. This is used to standardize the logic between subclassed and non subclassed
         versions of the linear module.
     """
@@ -39,7 +38,7 @@ def addmm_float8_unwrapped(
     output, output_amax = torch._scaled_mm(
         temp_a,
         temp_b,
-        bias=input_bias,
+        bias=None,
         out_dtype=output_dtype,
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
@@ -59,60 +58,26 @@ def mm_float8(
     output_dtype: torch.dtype,  # output dtype
     emulate: bool = False,  # whether to emulate the operation using fp32
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Performs a matrix multiplication of two Float8Tensors `a` and `b`.
+
+    Args:
+        a: The first matrix multiplication term.
+        b: The second matrix multiplication term.
+        output_scale: The output tensor's scale, precomputed.
+        output_dtype: The output tensor's dtype.
+        emulate: Whether to emulate the operation using fp32.
+
+    Returns:
+        torch.Tensor: The result of the matrix multiplication.
+    """
     if emulate:
         return torch.ops.aten.mm_float8_emulated(
             a._data, a._scale,
             b._data, b._scale,
             output_scale, output_dtype)
 
-    return addmm_float8_unwrapped(
-        None, # input_bias
-        a._data, a._scale,
-        b._data, b._scale,
-        output_scale, output_dtype
-    )
-
-# See [Note] Usage of scales
-def addmm_float8(
-    input_bias: torch.Tensor,
-    a: Float8Tensor,
-    b: Float8Tensor,
-    output_scale: torch.Tensor,
-    output_dtype: torch.dtype,
-    emulate: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Performs a matrix multiplication of two Float8Tensors `a` and `b`, adds an additional input tensor `input`.
-
-    Args:
-        input_bias: The addition term tensor, in fp32/fp16/bf16 format (no fp8 support).
-        a: The first matrix multiplication term.
-        b: The second matrix multiplication term.
-        output_amax: The output tensor's amax, updated inplace in this function.
-        output_scale: The output tensor's scale, precomputed.
-        output_dtype: The output tensor's dtype.
-        emulate: Whether to emulate the operation using fp32.
-
-    Returns:
-        torch.Tensor: The result of the matrix multiplication and addition.
-    """
-    assert input_bias.dtype in {torch.float16, torch.bfloat16, torch.float32}, "addmm_float8 only supports fp32/fp16/bf16 bias, you passed in {}".format(
-        input_bias.dtype
-    )
-
-    if emulate:
-        return torch.ops.aten.addmm_float8_emulated(
-            input_bias,
-            a._data, a._scale,
-            b._data, b._scale,
-            output_scale, output_dtype)
-
-    if input_bias.dtype == torch.float32:
-        warnings.warn("addmm_float8 does not support fp32 bias, using fp16 instead")
-        input_bias = input_bias.to(torch.float16)
-
-    return addmm_float8_unwrapped(
-        input_bias, # input_bias
+    return mm_float8_unwrapped(
         a._data, a._scale,
         b._data, b._scale,
         output_scale, output_dtype

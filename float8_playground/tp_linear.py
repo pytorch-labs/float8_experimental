@@ -51,10 +51,11 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
 
         # Float8: TODO(part 1) move this to float8
         # Matrix multiply.
-        # output_parallel = F.linear(input_parallel, self.weight, self.bias)
-        bias_none = None
-        output_parallel = self.float8_addmm(
-            input_parallel_fp8, w_fp8, bias_none, self.is_amax_initialized)
+        output_parallel = self.float8_mm(
+            input_parallel_fp8, w_fp8, self.is_amax_initialized)
+
+        if self.bias is not None:
+            output_parallel = output_parallel + self.bias.to(output_parallel.dtype)
 
         if self.gather_output:
             assert not self.use_sequence_parallel, 'unsupported'
@@ -131,9 +132,8 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         # Float8: TODO(part 1) move this to float8
         # Matrix multiply.
         # output_parallel = F.linear(input_parallel, self.weight)
-        bias_none = None
-        output_parallel = self.float8_addmm(
-            input_parallel_fp8, w_fp8, bias_none, self.is_amax_initialized)
+        output_parallel = self.float8_mm(
+            input_parallel_fp8, w_fp8, self.is_amax_initialized)
 
         # adding zero below is a hack
         # without this hack, we see the following error: https://gist.github.com/vkuzo/0ed84e35081c8c7d20d0f46ed4322704
@@ -159,14 +159,12 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
             output_ = reduce_from_model_parallel_region(output_parallel)
 
         if self.bias is not None:
-            output = output_ + self.bias
-        else:
-            output = output_
+            output_ = output_ + self.bias
 
         # Float8 bookkeeping
         self.float8_post_forward()
 
-        return output
+        return output_
 
     @classmethod
     def from_float(cls, mod, emulate=False):
