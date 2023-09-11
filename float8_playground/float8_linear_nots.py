@@ -109,6 +109,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
                     fp8_noop_scale,
                     output_dtype
                 )
+        # Currently this line breaks torch_compile, this is still functionally correct however 
         # fp8_noop_amax.fill_(output_amax)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
