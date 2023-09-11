@@ -14,6 +14,12 @@ from fairscale.nn.model_parallel.mappings import (
 
 from float8_linear import Float8LinearMixin, float8_linear
 
+from distributed_utils import (
+    _AllGatherFwReduceScatterBw,
+    _ReduceScatterFwAllGatherBw,
+)
+
+
 class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
     """
     Same as `ColumnParallelLinear`, but with single GPU compute in float8.
@@ -22,11 +28,19 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         # Float8 bookkeeping
         self.float8_pre_forward(input_)
 
-        # forward: no-op
-        #   Float8 comms: no
-        # backward: all-reduce
-        #   Float8 comms: no, because we can't reduce in float8
-        input_parallel = copy_to_model_parallel_region(input_)
+        if self.use_sequence_parallel:
+            # forward: all-gather
+            #   Float8 comms: can be done in float8
+            #   TODO(future PR): implement this
+            # backward: reduce-scatter
+            #   Float8 comms: none, because we can't reduce in float8
+            input_parallel = _AllGatherFwReduceScatterBw.apply(input_)
+        else:
+            # forward: no-op
+            #   Float8 comms: no
+            # backward: all-reduce
+            #   Float8 comms: no, because we can't reduce in float8
+            input_parallel = copy_to_model_parallel_region(input_)
 
         # cast activation and weight to float8
         input_parallel_fp8 = self.cast_x_to_float8(
@@ -42,6 +56,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
             input_parallel_fp8, w_fp8, bias_none, self.is_amax_initialized)
 
         if self.gather_output:
+            assert not self.use_sequence_parallel, 'unsupported'
             # All-gather across the partitions.
             # forward: gather
             #   Float8 comms: 
@@ -89,12 +104,12 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         # Float8 bookkeeping
         self.float8_pre_forward(input_)
 
-        # Float8: TODO(part 2) do this scatter in float8
         # Set up backprop all-reduce.
         if self.input_is_parallel:
             # no-op
             input_parallel = input_
         else:
+            assert not self.use_sequence_parallel, 'unsupported'
             # forward: split
             #   Float8 comms: none
             # backward: gather
@@ -127,12 +142,20 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         # TODO(future) figure out a workaround
         output_parallel = output_parallel + 0.0
 
-        # All-reduce across all the partitions.
-        # forward: reduce
-        #   Float8 comms: none
-        # backward: no-op
-        #   Float8 comms: none
-        output_ = reduce_from_model_parallel_region(output_parallel)
+        if self.use_sequence_parallel:
+            # forward: reduce-scatter
+            #   Float8 comms: none
+            # backward: all-gather
+            #   Float8 comms: possible
+            #   TODO(future PR): implement this
+            output_ = _ReduceScatterFwAllGatherBw.apply(output_parallel)
+        else:
+            # All-reduce across all the partitions.
+            # forward: reduce
+            #   Float8 comms: none
+            # backward: no-op
+            #   Float8 comms: none
+            output_ = reduce_from_model_parallel_region(output_parallel)
 
         if self.bias is not None:
             output = output_ + self.bias
