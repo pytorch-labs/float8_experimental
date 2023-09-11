@@ -4,6 +4,8 @@ import torch
 
 from fairscale.nn.model_parallel.initialize import get_model_parallel_group
 
+from float8_tensor import Float8Tensor
+
 # additional differentiable distributed primitives for SP which are not in
 # the Fairscale codebase
 
@@ -21,15 +23,28 @@ def _gather_along_first_dim(input_: torch.Tensor):
     rank = torch.distributed.get_rank(group=group)
     world_size = torch.distributed.get_world_size(group=group)
 
-    # tensors must be contiguous for all_gather to work
-    input_contig = input_.contiguous()
+    # If the input is a float8 tensor, we need to do the transformation on the
+    # inner tensor and then return a new wrapper.
+    def _transform(t):
+        # tensors must be contiguous for all_gather to work
+        input_contig = t.contiguous()
 
-    tensor_list = [torch.empty_like(input_contig) for _ in range(world_size)]
-    tensor_list[rank] = input_contig
-    torch.distributed.all_gather(tensor_list, input_contig, group=group)
+        tensor_list = [torch.empty_like(input_contig) for _ in range(world_size)]
+        tensor_list[rank] = input_contig
+        torch.distributed.all_gather(tensor_list, input_contig, group=group)
 
-    # Note: torch.cat already creates a contiguous tensor.
-    output = torch.cat(tensor_list, dim=first_dim).contiguous()
+        # Note: torch.cat already creates a contiguous tensor.
+        output = torch.cat(tensor_list, dim=first_dim).contiguous()
+        return output
+
+    if isinstance(input_, Float8Tensor):
+        new_data = input_._data
+        new_data = new_data.view(torch.int8)
+        new_data = _transform(new_data)
+        new_data = new_data.view(input_._data.dtype)
+        output = Float8Tensor(new_data, input_._scale, input_._orig_dtype)
+    else:
+        output = _transform(input_)
 
     return output
 
@@ -61,7 +76,7 @@ def _split_along_first_dim(input_: torch.Tensor):
     
     
 
-class _AllGatherFwReduceScatterBw(torch.autograd.Function):
+class _AllGatherFloat8FwReduceScatterBw(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_):
         return _gather_along_first_dim(input_)
