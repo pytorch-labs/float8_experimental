@@ -140,12 +140,12 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         # calculate dL/dX, update relevant buffers along the way
         if emulate:
             dL_dX_bits, dL_dX_amax = torch.ops.aten.mm_float8_emulated(
-                go_fp8_reshaped, dL_dY_scale,
+                go_fp8_reshaped, fp8_scale_dL_dY,
                 w_fp8_d, w_fp8_scale, fp8_noop_scale, output_dtype)
         else:
             dL_dX_bits, dL_dX_amax = addmm_float8_unwrapped(
                 None, # Input bias
-                go_fp8_reshaped, dL_dY_scale,
+                go_fp8_reshaped, fp8_scale_dL_dY,
                 w_fp8_d, w_fp8_scale, fp8_noop_scale, output_dtype)
         fp8_noop_amax.fill_(dL_dX_amax)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
@@ -159,14 +159,14 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         if emulate:
             dL_dW_bits, dL_dW_amax = torch.ops.aten.mm_float8_emulated(
                 x_fp8_reshaped.t(), x_fp8_scale,
-                go_fp8_reshaped, dL_dY_scale,
+                go_fp8_reshaped, fp8_scale_dL_dY,
                 fp8_noop_scale, output_dtype)
             dL_dW_bits = dL_dW_bits.t()
         else:
             dL_dW_bits, dL_dW_amax = addmm_float8_unwrapped(
                 None, # Input bias
                 x_fp8_reshaped.t(), x_fp8_scale,
-                go_fp8_reshaped, dL_dY_scale,
+                go_fp8_reshaped, fp8_scale_dL_dY,
                 fp8_noop_scale, output_dtype)
             dL_dW_bits = dL_dW_bits.t()
         fp8_noop_amax.fill_(dL_dW_amax)
