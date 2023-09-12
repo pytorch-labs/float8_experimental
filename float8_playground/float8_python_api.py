@@ -24,8 +24,8 @@ def mm_float8_unwrapped(
         a_scale: torch.Tensor,
         b_data: torch.Tensor,
         b_scale: torch.tensor,
-        output_scale: torch.Tensor,
-        output_dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
+        output_dtype: torch.dtype,
+        output_scale: Optional[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
     """ This is the unwrapped version of mm_float8, which does not take in Float8Tensors
         as inputs. This is used to standardize the logic between subclassed and non subclassed
         versions of the linear module.
@@ -54,8 +54,8 @@ def mm_float8_unwrapped(
 def mm_float8(
     a: Float8Tensor,  # input 1
     b: Float8Tensor,  # input 2
-    output_scale: torch.Tensor,  # output scale, precomputed
     output_dtype: torch.dtype,  # output dtype
+    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
     emulate: bool = False,  # whether to emulate the operation using fp32
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -64,21 +64,20 @@ def mm_float8(
     Args:
         a: The first matrix multiplication term.
         b: The second matrix multiplication term.
-        output_scale: The output tensor's scale, precomputed.
         output_dtype: The output tensor's dtype.
+        output_scale: The output tensor's scale, precomputed.
         emulate: Whether to emulate the operation using fp32.
 
     Returns:
         torch.Tensor: The result of the matrix multiplication.
     """
     if emulate:
+        assert output_scale is None, 'unsupported'
         return torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale,
-            b._data, b._scale,
-            output_scale, output_dtype)
+            a._data, a._scale, b._data, b._scale, output_dtype)
 
     return mm_float8_unwrapped(
         a._data, a._scale,
         b._data, b._scale,
-        output_scale, output_dtype
+        output_dtype, output_scale
     )
