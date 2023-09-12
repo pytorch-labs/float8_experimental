@@ -6,10 +6,11 @@ from itertools import product
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import torch
 from tqdm import tqdm
 
 import context
-import torch
+from float8_linear import sync_float8_amax_and_scale_history
 from float8_linear_nots import Float8LinearNoTensorSubclass
 from transformer_nuggets.utils import benchmark_torch_function_in_microseconds
 
@@ -35,6 +36,7 @@ class Experiment:
     ref_time_sec: float
     float8_time_sec: float
     dtype: torch.dtype
+    compiled: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
 
     # 3 Times since we are calculating forward backward
@@ -53,7 +55,7 @@ class Experiment:
     def float8_pct_top_peak(self):
         return self.float8_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
 
-def main(sweep_path: Path):
+def main(sweep_path: Path, compile: bool):
     device = 'cuda'
 
     # LLaMa 2 70B single-node weight shapes
@@ -75,25 +77,63 @@ def main(sweep_path: Path):
         M = bsz * seq_len
         input_tensor = torch.randn(M, K, device=device, dtype=dtype, requires_grad=True)
         ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
-        float8_forw_backward = lambda : linear_float8(input_tensor).sum().backward()
+        def float8_forw_backward():
+            sync_float8_amax_and_scale_history(linear_float8)
+            linear_float8(input_tensor).sum().backward()
+        if compile:
+            ref_forw_backward = torch.compile(ref_forw_backward)
+            float8_forw_backward = torch.compile(float8_forw_backward)
+            for _ in range(5):
+                ref_forw_backward()
+                float8_forw_backward()
         ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward)*1e-6
         float8_time = benchmark_torch_function_in_microseconds(float8_forw_backward)*1e-6
-        experiment = Experiment((M, K, N), ref_time, float8_time, dtype)
+        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile)
         experiment_list.append(experiment)
 
     # Update sweep path to have .csv suffix
-    sweep_path = sweep_path.with_suffix('.csv')
-    with open(sweep_path, mode='w') as file:
+    sweep_path = sweep_path.with_suffix(".csv")
+    with open(sweep_path, mode="w") as file:
         writer = csv.writer(file)
-        writer.writerow(['M', 'K', 'N', 'dtype', 'float_8_dtype', 'ref_time_sec', 'float8_time_sec', 'ref_tops_sec', 'ref_pct_top_peak', 'float8_tops_sec', 'float8_pct_top_peak'])
+        writer.writerow(
+            [
+                "M",
+                "K",
+                "N",
+                "dtype",
+                "compiled",
+                "float_8_dtype",
+                "ref_time_sec",
+                "float8_time_sec",
+                "ref_tops_sec",
+                "ref_pct_top_peak",
+                "float8_tops_sec",
+                "float8_pct_top_peak",
+            ]
+        )
         for experiment in experiment_list:
-            writer.writerow([experiment.shape[0], experiment.shape[1], experiment.shape[2], experiment.dtype, experiment.float_8_dtype, experiment.ref_time_sec, experiment.float8_time_sec, experiment.ref_tops_sec, experiment.ref_pct_top_peak, experiment.float8_tops_sec, experiment.float8_pct_top_peak])
-
+            writer.writerow(
+                [
+                    experiment.shape[0],
+                    experiment.shape[1],
+                    experiment.shape[2],
+                    experiment.dtype,
+                    experiment.compiled,
+                    experiment.float_8_dtype,
+                    experiment.ref_time_sec,
+                    experiment.float8_time_sec,
+                    experiment.ref_tops_sec,
+                    experiment.ref_pct_top_peak,
+                    experiment.float8_tops_sec,
+                    experiment.float8_pct_top_peak,
+                ]
+            )
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--output_path', type=str, required=True)
+    parser.add_argument('--compile', action='store_true')
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path)
+    main(output_path, args.compile)
