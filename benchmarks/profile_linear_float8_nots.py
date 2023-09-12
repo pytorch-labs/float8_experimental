@@ -22,7 +22,7 @@ class LinearParams:
     torch_compile: Optional[bool] = False
 
 
-def main(profile_path: Path):
+def main(profile_path: Path, compile: bool):
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
     params = LinearParams(
         M=4*4096,
@@ -30,7 +30,7 @@ def main(profile_path: Path):
         N=7168,
         input_bias=False,
         ref_dtype=torch.float16,
-        torch_compile=True
+        torch_compile=compile
         )
 
     linear_ref = torch.nn.Linear(params.K, params.N, bias=params.input_bias, device='cuda', dtype=params.ref_dtype)
@@ -75,6 +75,7 @@ def main(profile_path: Path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--output_path', type=str, required=True,help="Path to save folder")
+    parser.add_argument('--compile', action='store_true', help="Whether to torch compile the functions")
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path)
+    main(output_path, args.compile)
