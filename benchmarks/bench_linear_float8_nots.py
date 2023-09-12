@@ -117,13 +117,16 @@ def main(sweep_path: Path, compile: bool):
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
             float8_forw_backward = torch.compile(float8_forw_backward)
+            # Compiling TE_linear fails but they are already compiling under the hood
+            # if transformer_engine_installed:
+            #     te_forw_backward = torch.compile(te_forw_backward)
+
+        for _ in range(5):
+            ref_forw_backward()
+            float8_forw_backward()
             if transformer_engine_installed:
-                te_forw_backward = torch.compile(te_forw_backward)
-            for _ in range(5):
-                ref_forw_backward()
-                float8_forw_backward()
-                if transformer_engine_installed:
-                    te_forw_backward
+                te_forw_backward()
+
         ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward)*1e-6
         float8_time = benchmark_torch_function_in_microseconds(float8_forw_backward)*1e-6
         if transformer_engine_installed:

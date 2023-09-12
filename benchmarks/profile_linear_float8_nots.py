@@ -63,13 +63,15 @@ def main(profile_path: Path, compile: bool):
     if params.torch_compile:
         ref_forw_backward = torch.compile(ref_forw_backward)
         float8_forw_backward = torch.compile(float8_forw_backward)
+        # Compiling TE_linear fails but they are already compiling under the hood
+        # if transformer_engine_installed:
+        #     te_forw_backward = torch.compile(te_forw_backward)
+
+    for _ in range(5):
+        ref_forw_backward()
+        float8_forw_backward()
         if transformer_engine_installed:
-            te_forw_backward = torch.compile(te_forw_backward)
-        for _ in range(5):
-            ref_forw_backward()
-            float8_forw_backward()
-            if transformer_engine_installed:
-                te_forw_backward()
+            te_forw_backward()
 
     # Profile Reference Linear
     ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
