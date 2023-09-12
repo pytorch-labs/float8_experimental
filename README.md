@@ -26,13 +26,13 @@ swap_linear_with_float8_linear(m)
 
 # training loop
 optimizer.zero_grad()
-# specific to float8: separate step to sync scales/amaxes
-# in the future, this may move to a context manager
-sync_float8_amax_and_scale_history(model)
 # run forward
 y = m(x)
 # run backward
 y.sum().backward()
+# specific to float8: separate step to sync scales/amaxes
+# in the future, this may move to a context manager
+sync_float8_amax_and_scale_history(model)
 # update weights
 optimizer.step()
 ```
