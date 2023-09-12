@@ -18,7 +18,6 @@ def mm_float8_emulated(
     s1,  # input 1 scale
     m2,  # input 2 data
     s2,  # input 2 scale
-    s3,  # output scale
     dtype3,  # output dtype
 ):
     # naive implementation: dq -> op -> q
@@ -37,6 +36,6 @@ def mm_float8_emulated(
 # These are mostly placeholder and might need to be implemented in c++ as needed
 lib = Library("aten", "FRAGMENT")
 
-lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, Tensor s3, ScalarType dtype3) -> (Tensor, Tensor)")
+lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, ScalarType dtype3) -> (Tensor, Tensor)")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")

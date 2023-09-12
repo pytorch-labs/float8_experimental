@@ -230,11 +230,8 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        output_scaled_scale = torch.tensor(1.0, device='cuda')
-        output_emulated_scale = torch.tensor(1.0, device='cuda')
-
-        out_scaled_mm, output_amax_scaled = mm_float8(a_fp8, b_fp8, output_scale=output_scaled_scale, output_dtype=output_dtype, emulate=False)
-        out_emulated, output_amax_emulated = mm_float8(a_fp8, b_fp8, output_scale=output_emulated_scale, output_dtype=output_dtype, emulate=True)
+        out_scaled_mm, output_amax_scaled = mm_float8(a_fp8, b_fp8, output_dtype=output_dtype, emulate=False)
+        out_emulated, output_amax_emulated = mm_float8(a_fp8, b_fp8, output_dtype=output_dtype, emulate=True)
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)

@@ -75,15 +75,11 @@ class float8_linear(torch.autograd.Function):
         ctx,
         x_fp8,
         w_fp8,
-        fp8_noop_amax,
-        fp8_noop_scale,
         is_amax_initialized,
         scale_fn_name,
         emulate: bool,
     ):
-        ctx.save_for_backward(
-            x_fp8, w_fp8,
-            fp8_noop_amax, fp8_noop_scale)
+        ctx.save_for_backward(x_fp8, w_fp8)
         ctx.scale_fn_name = scale_fn_name
         ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
@@ -94,18 +90,15 @@ class float8_linear(torch.autograd.Function):
         w_fp8_t = Float8Tensor(
             w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
 
-        res_bits, output_amax = mm_float8(
-            x_fp8_reshaped, w_fp8_t, fp8_noop_scale,
-            output_dtype=x_fp8._orig_dtype, emulate=emulate)
-        fp8_noop_amax.fill_(output_amax)
+        res_bits, _output_amax = mm_float8(
+            x_fp8_reshaped, w_fp8_t, output_dtype=x_fp8._orig_dtype, 
+            emulate=emulate)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
 
     @staticmethod
     def backward(ctx, go_fp8):
-        x_fp8, w_fp8, \
-            fp8_noop_amax, fp8_noop_scale = \
-                ctx.saved_tensors
+        x_fp8, w_fp8 = ctx.saved_tensors
         scale_fn_name = ctx.scale_fn_name
         emulate = ctx.emulate
         is_amax_initialized = ctx.is_amax_initialized
@@ -118,10 +111,9 @@ class float8_linear(torch.autograd.Function):
         #
         # calculate dL/dX
         #
-        dL_dX, dL_dX_amax = mm_float8(
-            go_fp8_reshaped, w_fp8, fp8_noop_scale,
-            output_dtype=x_fp8._orig_dtype, emulate=emulate)
-        fp8_noop_amax.fill_(dL_dX_amax)
+        dL_dX, _dL_dX_amax = mm_float8(
+            go_fp8_reshaped, w_fp8, output_dtype=x_fp8._orig_dtype, 
+            emulate=emulate)
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8._data.shape
@@ -132,11 +124,10 @@ class float8_linear(torch.autograd.Function):
         #
         # calculate dL/dW
         #
-        dL_dW, dL_dW_amax = mm_float8(
-            x_fp8_reshaped_t, go_fp8_reshaped, fp8_noop_scale,
-            output_dtype=x_fp8._orig_dtype, emulate=emulate)
+        dL_dW, _dL_dW_amax = mm_float8(
+            x_fp8_reshaped_t, go_fp8_reshaped, output_dtype=x_fp8._orig_dtype, 
+            emulate=emulate)
         dL_dW = dL_dW.t()
-        fp8_noop_amax.fill_(dL_dW_amax)
 
         empty_grads = None, None, None, None, None, None, None, None, None
         return dL_dX, dL_dW, *empty_grads
@@ -172,11 +163,6 @@ class Float8LinearMixin(object):
         self.register_buffer('fp8_amax_dL_dY', torch.tensor(E5M2_MAX_POS))
         self.register_buffer('fp8_amax_history_dL_dY', torch.zeros(history_len))
         self.register_buffer('fp8_scale_dL_dY', torch.tensor(1.0))
-        # The two buffers below are noops, we have them because 
-        # torch.scaled_mm requires arguments in case the output of the matmul
-        # is float8.
-        self.register_buffer('fp8_noop_amax', torch.tensor(float('inf')))
-        self.register_buffer('fp8_noop_scale', torch.tensor(1.0))
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
 
@@ -235,9 +221,7 @@ class Float8LinearMixin(object):
     def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
         y = float8_linear.apply(
-            x_fp8, w_fp8, self.fp8_noop_amax, self.fp8_noop_scale,
-            is_amax_initialized, scale_fn_name, self.emulate)
-
+            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate)
         return y
 
     def float8_pre_forward(self, x):
