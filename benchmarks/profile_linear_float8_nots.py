@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import context
 import torch
+
+import context
+from float8_linear import sync_float8_amax_and_scale_history
 from float8_linear_nots import Float8LinearNoTensorSubclass
 from transformer_nuggets.utils import ProfileConfig, profile_function
 
@@ -32,13 +34,21 @@ def main(profile_path: Path):
         )
 
     linear_ref = torch.nn.Linear(params.K, params.N, bias=params.input_bias, device='cuda', dtype=params.ref_dtype)
-    linear_ref = torch.compile(linear_ref) if params.torch_compile else linear_ref
     linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
-    linear_float8 = torch.compile(linear_float8) if params.torch_compile else linear_float8
     input_tensor = torch.randn(params.M, params.K, device='cuda', dtype=params.ref_dtype, requires_grad=True)
 
     ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
-    float8_forw_backward = lambda : linear_float8(input_tensor).sum().backward()
+
+    def float8_forw_backward():
+            sync_float8_amax_and_scale_history(linear_float8)
+            linear_float8(input_tensor).sum().backward()
+
+    if params.torch_compile:
+            ref_forw_backward = torch.compile(ref_forw_backward)
+            float8_forw_backward = torch.compile(float8_forw_backward)
+            for _ in range(5):
+                ref_forw_backward()
+                float8_forw_backward()
 
     # Profile Reference Linear
     ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
