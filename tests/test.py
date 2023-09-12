@@ -136,9 +136,6 @@ class TestFloat8Linear:
             elif torch.cuda.get_device_capability() < (9, 0):
                 warnings.warn(f'CUDA capability {torch.cuda.get_device_capability()} < (9.0)')
                 pytest.skip()
-            elif linear_dtype == torch.float32:
-                warnings.warn("_scaled_mm does not support bias with float32 out_dtype")
-                pytest.skip()
 
         x = torch.randn(*x_shape, device='cuda', dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device='cuda', dtype=linear_dtype)
