@@ -43,7 +43,6 @@ optimizer.step()
 
 * [done] float8 dtypes in core
 * [done] torch._scaled_mm in core
-* [not started] saturated casts to float8 in core
 
 ## M1: fp8 enabled linear with correct numerics
 
@@ -58,12 +57,14 @@ Note that performance is a non-goal for this milestone
 * [in progress] PT2.0 compatibility of this repository: dynamo
 * [in progress] PT2.0 compatibility of this repository: aot_autograd
 * [in progress] PT2.0 compatibility of this repository: inductor
-* [not started] e2e benchmarking
+* [in progress] e2e benchmarking
 
 ## M3: distributed
 
-* [in progress] validate FSDP with fp16 weight all-gather still works
+* [done] validate FSDP with fp16 weight all-gather still works
+* [done] TP/SP primitives
 * [in progress] design for FSDP with fp8 weight all-gather
+* [in progress] e2e benchmarking
 * [design] implementation for FSDP with fp8 weight all-gather
 
 # high level design
@@ -91,13 +92,7 @@ More details TBD
 
 ### TP/SP
 
-For now, we plan to start with:
-1. moving the input/output casts out from `Float8Linear` and in to module hooks
-2. asking the user to apply the hooks to the right places in their model, to compose with the activation distributed primitives
-
-More details TBD.
-
-
+`Float8ColumnParallelLinear` and `Float8RowParallelLinear` are replacements for the non-float8 TP/SP primitives.
 
 # code tips
 
@@ -116,6 +111,9 @@ python tests/test_sam.py
 
 # run a two-GPU integration test on FSDP
 ./tests/test_fsdp.sh
+
+# run integration tests for TP/SP
+./tests/test_tp.sh
 
 # run all of these tests
 ./tests/run_everything.sh
