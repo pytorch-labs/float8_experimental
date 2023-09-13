@@ -11,7 +11,7 @@ import torch.utils.benchmark as benchmark
 from tqdm import tqdm
 
 import context
-from float8_linear import sync_float8_amax_and_scale_history
+from float8_linear import sync_float8_amax_and_scale_history, Float8Linear
 from float8_linear_nots import Float8LinearNoTensorSubclass
 
 # estimating TOPs for matmuls in fp32, fp16, fp8
@@ -81,13 +81,16 @@ def main(sweep_path: Path, compile: bool):
     experiment_list: List[Experiment] = []
     for (K, N), dtype in tqdm(list(product(name_to_shapes_70b.values(), ref_dtypes))):
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
-        linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+        # linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+        linear_float8 = Float8Linear.from_float(copy.deepcopy(linear_ref), emulate=False)
         bsz, seq_len = 4, 4096
         M = bsz * seq_len
         input_tensor = torch.randn(M, K, device=device, dtype=dtype, requires_grad=True)
-        ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
+        # ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
+        def ref_forw_backward():
+            linear_ref(input_tensor).sum().backward()
         def float8_forw_backward():
-            sync_float8_amax_and_scale_history(linear_float8)
+            # sync_float8_amax_and_scale_history(linear_float8)
             linear_float8(input_tensor).sum().backward()
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
@@ -99,6 +102,8 @@ def main(sweep_path: Path, compile: bool):
         float8_time = benchmark_torch_function_in_microseconds(float8_forw_backward)*1e-6
         experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile)
         experiment_list.append(experiment)
+        print(experiment)
+        break
 
     # Update sweep path to have .csv suffix
     sweep_path = sweep_path.with_suffix(".csv")
