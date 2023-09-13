@@ -4,15 +4,15 @@ import csv
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 
 import torch
+import torch.utils.benchmark as benchmark
 from tqdm import tqdm
 
 import context
 from float8_linear import sync_float8_amax_and_scale_history
 from float8_linear_nots import Float8LinearNoTensorSubclass
-from transformer_nuggets.utils import benchmark_torch_function_in_microseconds
 
 # estimating TOPs for matmuls in fp32, fp16, fp8
 # assuming A * B = C, with A being M * K, B being K * N, C being M * N
@@ -29,6 +29,15 @@ dtype_to_peak_tops = {
     torch.float8_e4m3fn: h100_peak_tops_float8_tc,
     torch.float8_e5m2: h100_peak_tops_float8_tc,
 }
+
+def benchmark_torch_function_in_microseconds(
+		func: Callable, *args, **kwargs,
+) -> float:
+    t0 = benchmark.Timer(
+        stmt="func(*args, **kwargs)", 
+        globals={"args": args, "kwargs": kwargs, "func": func}
+    )
+    return t0.blocked_autorange().median * 1e6
 
 @dataclass
 class Experiment:
