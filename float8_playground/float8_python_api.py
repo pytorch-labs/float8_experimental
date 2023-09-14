@@ -10,15 +10,6 @@ import float8_aten_api
 import warnings
 from typing import Optional, Tuple
 
-def layout_helper(tensor: torch.Tensor, row_major: bool) -> torch.Tensor:
-    """ Cublas requires row_major @ column major tensors"""
-    # TODO Figure out a better way of checking for correct layout
-    if row_major:
-        return tensor.contiguous()
-    # We need it to be column major
-    return tensor.t().contiguous().t()
-
-
 def mm_float8_unwrapped(
         a_data: torch.Tensor,
         a_scale: torch.Tensor,
@@ -30,14 +21,12 @@ def mm_float8_unwrapped(
         as inputs. This is used to standardize the logic between subclassed and non subclassed
         versions of the linear module.
     """
-    temp_a = layout_helper(a_data, row_major=True)
-    temp_b = layout_helper(b_data, row_major=False)
 
     a_inverse_scale = 1 / a_scale
     b_inverse_scale = 1 / b_scale
     output, output_amax = torch._scaled_mm(
-        temp_a,
-        temp_b,
+        a_data,
+        b_data,
         bias=None,
         out_dtype=output_dtype,
         scale_a=a_inverse_scale,
