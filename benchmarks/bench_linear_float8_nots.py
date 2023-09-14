@@ -14,6 +14,15 @@ import context
 from float8_linear import sync_float8_amax_and_scale_history
 from float8_linear_nots import Float8LinearNoTensorSubclass
 
+# Check if transformer_engine is installed
+transformer_engine_installed = False
+try:
+    import transformer_engine.pytorch as te
+    from transformer_engine.common import recipe
+    transformer_engine_installed = True
+except ImportError:
+    print("transformer_engine not installed and we won't compare against this")
+
 # estimating TOPs for matmuls in fp32, fp16, fp8
 # assuming A * B = C, with A being M * K, B being K * N, C being M * N
 
@@ -47,6 +56,7 @@ class Experiment:
     dtype: torch.dtype
     compiled: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
+    te_time: Optional[float] = None
 
     # 3 Times since we are calculating forward backward
     @property
@@ -63,6 +73,21 @@ class Experiment:
     @property
     def float8_pct_top_peak(self):
         return self.float8_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
+
+    @property
+    def te_tops_sec(self):
+        M, K, N = self.shape
+        if self.te_time is not None:
+            return float(3*(2* M * K * N)) / self.te_time
+        else:
+            return None
+
+    @property
+    def te_pct_top_peak(self):
+        if self.te_tops_sec is not None:
+            return self.te_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
+        else:
+            return None
 
 def main(sweep_path: Path, compile: bool):
     device = 'cuda'
@@ -89,15 +114,35 @@ def main(sweep_path: Path, compile: bool):
         def float8_forw_backward():
             sync_float8_amax_and_scale_history(linear_float8)
             linear_float8(input_tensor).sum().backward()
+
+        if transformer_engine_installed:
+            # Create an FP8 recipe. Note: All input args are optional.
+            fp8_recipe = recipe.DelayedScaling(margin=0, interval=1, fp8_format=recipe.Format.E4M3)
+            te_linear = te.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
+            def te_forw_backward():
+                with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+                    te_linear(input_tensor).sum().backward()
+
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
             float8_forw_backward = torch.compile(float8_forw_backward)
-            for _ in range(5):
-                ref_forw_backward()
-                float8_forw_backward()
+            # Compiling TE_linear fails but they are already compiling under the hood
+            # if transformer_engine_installed:
+            #     te_forw_backward = torch.compile(te_forw_backward)
+
+        for _ in range(5):
+            ref_forw_backward()
+            float8_forw_backward()
+            if transformer_engine_installed:
+                te_forw_backward()
+
         ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward)*1e-6
         float8_time = benchmark_torch_function_in_microseconds(float8_forw_backward)*1e-6
-        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile)
+        if transformer_engine_installed:
+            te_time = benchmark_torch_function_in_microseconds(te_forw_backward)*1e-6
+        else:
+            te_time = None
+        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile, te_time=te_time)
         experiment_list.append(experiment)
 
     # Update sweep path to have .csv suffix
@@ -114,10 +159,13 @@ def main(sweep_path: Path, compile: bool):
                 "float_8_dtype",
                 "ref_time_sec",
                 "float8_time_sec",
+                "te_time_sec",
                 "ref_tops_sec",
                 "ref_pct_top_peak",
                 "float8_tops_sec",
                 "float8_pct_top_peak",
+                "te_tops_sec",
+                "te_pct_top_peak",
             ]
         )
         for experiment in experiment_list:
@@ -131,10 +179,13 @@ def main(sweep_path: Path, compile: bool):
                     experiment.float_8_dtype,
                     experiment.ref_time_sec,
                     experiment.float8_time_sec,
+                    experiment.te_time,
                     experiment.ref_tops_sec,
                     experiment.ref_pct_top_peak,
                     experiment.float8_tops_sec,
                     experiment.float8_pct_top_peak,
+                    experiment.te_tops_sec,
+                    experiment.te_pct_top_peak,
                 ]
             )
 
