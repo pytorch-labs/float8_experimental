@@ -122,7 +122,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
         else:
             dL_dX_bits, _dL_dX_amax = mm_float8_unwrapped(
                 go_fp8_reshaped, fp8_scale_dL_dY,
-                w_fp8_d, w_fp8_scale, output_dtype, output_scale=None)
+                w_fp8_d.t().contiguous().t(), w_fp8_scale, output_dtype, output_scale=None)
         dL_dX_bits = dL_dX_bits.reshape(*go_fp8_orig_shape[:-1], dL_dX_bits.shape[-1])
 
         x_fp8_orig_shape = x_fp8_d.shape
@@ -138,8 +138,8 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
             dL_dW_bits = dL_dW_bits.t()
         else:
             dL_dW_bits, _dL_dW_amax = mm_float8_unwrapped(
-                x_fp8_reshaped.t(), x_fp8_scale,
-                go_fp8_reshaped, fp8_scale_dL_dY,
+                x_fp8_reshaped.t().contiguous(), x_fp8_scale,
+                go_fp8_reshaped.t().contiguous().t(), fp8_scale_dL_dY,
                 output_dtype, output_scale=None)
             dL_dW_bits = dL_dW_bits.t()
         empty_grads = None, None, None, None, None, None, None, None, None, None, None, None

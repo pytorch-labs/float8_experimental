@@ -108,24 +108,32 @@ class float8_linear(torch.autograd.Function):
             go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]), go_fp8._scale, 
             go_fp8._orig_dtype)
 
+        w_fp8_t_c_t = Float8Tensor(
+            w_fp8._data.t().contiguous().t(),
+            w_fp8._scale, w_fp8._orig_dtype)
+
         #
         # calculate dL/dX
         #
         dL_dX, _dL_dX_amax = mm_float8(
-            go_fp8_reshaped, w_fp8, output_dtype=x_fp8._orig_dtype, 
+            go_fp8_reshaped, w_fp8_t_c_t, output_dtype=x_fp8._orig_dtype, 
             emulate=emulate)
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8._data.shape
-        x_fp8_reshaped_t = Float8Tensor(
-            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t(), x_fp8._scale,
+        x_fp8_reshaped_t_c = Float8Tensor(
+            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(), x_fp8._scale,
             x_fp8._orig_dtype)
+
+        go_fp8_reshaped_t_c_t = Float8Tensor(
+            go_fp8_reshaped._data.t().contiguous().t(), go_fp8_reshaped._scale, 
+            go_fp8_reshaped._orig_dtype)
 
         #
         # calculate dL/dW
         #
         dL_dW, _dL_dW_amax = mm_float8(
-            x_fp8_reshaped_t, go_fp8_reshaped, output_dtype=x_fp8._orig_dtype, 
+            x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t, output_dtype=x_fp8._orig_dtype, 
             emulate=emulate)
         dL_dW = dL_dW.t()
 
