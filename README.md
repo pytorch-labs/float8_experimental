@@ -1,4 +1,4 @@
-# float8_playground
+# float8_experimental
 
 This repository is a prototype of a float8 training UX written in native PyTorch. For now the goal is to move quickly and validate our design. Production 
 readiness, backwards compatibility, etc right now is an explicit non-goal at this point. Once we are farther along, we will discuss how to make this public.
