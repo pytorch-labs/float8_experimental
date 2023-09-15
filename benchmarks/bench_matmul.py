@@ -7,9 +7,6 @@ import torch.utils.benchmark as benchmark
 
 # set up Float8 path
 import context
-# from float8_playground import (
-#     Float8Linear,
-# )
 
 import fire
 

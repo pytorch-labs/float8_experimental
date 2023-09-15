@@ -96,9 +96,9 @@ More details TBD
 
 # code tips
 
-* `float8_playground/float8_linear.py` - `Float8Linear` (user facing entry point), and custom fw/bw
-* `float8_playground/float8_tensor.py` - `Float8Tensor`, which contains syntactic sugar for passing float8 data + scale around and converting to/from fp8
-* `float8_playground/float8_python_apy.py` - interface between Python functions which know about `Float8Tensor` and aten functions which know about raw data + scale
+* `float8_experimental/float8_linear.py` - `Float8Linear` (user facing entry point), and custom fw/bw
+* `float8_experimental/float8_tensor.py` - `Float8Tensor`, which contains syntactic sugar for passing float8 data + scale around and converting to/from fp8
+* `float8_experimental/float8_python_apy.py` - interface between Python functions which know about `Float8Tensor` and aten functions which know about raw data + scale
 
 # testing
 
