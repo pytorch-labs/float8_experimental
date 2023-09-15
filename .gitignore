@@ -1,5 +1,5 @@
 benchmarks/__pycache__/*
-float8_playground/__pycache__/*
+float8_experimental/__pycache__/*
 finetune/__pycache__/*
 tests/__pycache__/*
 tmp/*

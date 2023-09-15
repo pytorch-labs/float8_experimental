@@ -33,7 +33,7 @@ from float8_linear import (
 
 torch.manual_seed(0)
 
-# assumes user is running the script from /data/users/{user}/float8_playground
+# assumes user is running the script from /data/users/{user}/float8_experimental
 data_dir = os.path.join(os.getcwd(), 'tmp')
 input_fname = os.path.join(data_dir, 'input.pt')
 sd_in_fname = os.path.join(data_dir, 'sd_in.pt')
