@@ -56,7 +56,7 @@ class Experiment:
     dtype: torch.dtype
     compiled: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
-    te_time: Optional[float] = None
+    te_time_sec: Optional[float] = None
 
     # 3 Times since we are calculating forward backward
     @property
@@ -77,8 +77,8 @@ class Experiment:
     @property
     def te_tops_sec(self):
         M, K, N = self.shape
-        if self.te_time is not None:
-            return float(3*(2* M * K * N)) / self.te_time
+        if self.te_time_sec is not None:
+            return float(3*(2* M * K * N)) / self.te_time_sec
         else:
             return None
 
@@ -89,7 +89,7 @@ class Experiment:
         else:
             return None
 
-def main(sweep_path: Path, compile: bool):
+def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None):
     device = 'cuda'
 
     # LLaMa 2 70B single-node weight shapes
@@ -104,7 +104,9 @@ def main(sweep_path: Path, compile: bool):
     input_bias = False
     ref_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     experiment_list: List[Experiment] = []
-    for (K, N), dtype in tqdm(list(product(name_to_shapes_70b.values(), ref_dtypes))):
+    for idx, ((K, N), dtype) in enumerate(tqdm(list(product(name_to_shapes_70b.values(), ref_dtypes)))):
+        if n_limit is not None and idx >= n_limit:
+            break
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
         linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
         bsz, seq_len = 4, 4096
@@ -121,7 +123,8 @@ def main(sweep_path: Path, compile: bool):
             te_linear = te.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
             def te_forw_backward():
                 with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                    te_linear(input_tensor).sum().backward()
+                    y = te_linear(input_tensor)
+                y.sum().backward()
 
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
@@ -139,14 +142,16 @@ def main(sweep_path: Path, compile: bool):
         ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward)*1e-6
         float8_time = benchmark_torch_function_in_microseconds(float8_forw_backward)*1e-6
         if transformer_engine_installed:
-            te_time = benchmark_torch_function_in_microseconds(te_forw_backward)*1e-6
+            te_time_sec = benchmark_torch_function_in_microseconds(te_forw_backward)*1e-6
         else:
-            te_time = None
-        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile, te_time=te_time)
+            te_time_sec = None
+        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile, te_time_sec=te_time_sec)
+        print(experiment)
+        print('float8 speedup', experiment.ref_time_sec / experiment.float8_time_sec)
+        if transformer_engine_installed:
+            print('te speedup', experiment.ref_time_sec / experiment.te_time_sec)
         experiment_list.append(experiment)
 
-    # Update sweep path to have .csv suffix
-    sweep_path = sweep_path.with_suffix(".csv")
     with open(sweep_path, mode="w") as file:
         writer = csv.writer(file)
         writer.writerow(
@@ -179,7 +184,7 @@ def main(sweep_path: Path, compile: bool):
                     experiment.float_8_dtype,
                     experiment.ref_time_sec,
                     experiment.float8_time_sec,
-                    experiment.te_time,
+                    experiment.te_time_sec,
                     experiment.ref_tops_sec,
                     experiment.ref_pct_top_peak,
                     experiment.float8_tops_sec,
@@ -194,6 +199,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--output_path', type=str, required=True)
     parser.add_argument('--compile', action='store_true')
+    parser.add_argument('-n', '--n_limit', type=int, required=False)
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path, args.compile)
+    main(output_path, args.compile, args.n_limit)
