@@ -32,6 +32,7 @@ class ToFloat8E4M3FNConstrFuncDecomposed(torch.autograd.Function):
         scale: float=None,
         amax_buffer=None,
     ):
+        ctx.orig_dtype = tensor.dtype
         # In TransformerEngine, the casts to float8 are fused with calculating
         # the new amax value. In this codebase, the eager mode code for those
         # two things is colocated in this function. We expect PT2.0 to fuse it
@@ -45,7 +46,8 @@ class ToFloat8E4M3FNConstrFuncDecomposed(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        return g.to(torch.float32), None, None, None
+        g = g.to(ctx.orig_dtype)
+        return g, None, None, None
 
 
 class float8_linear_no_tensor_subclass(torch.autograd.Function):
