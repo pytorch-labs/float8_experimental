@@ -1,15 +1,71 @@
 import argparse
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+import random
+from typing import Optional, Callable
 
 import torch
+from torch.profiler import ProfilerActivity, profile, record_function
 
 import context
 from float8_linear import sync_float8_amax_and_scale_history
 from float8_linear_nots import Float8LinearNoTensorSubclass
-from transformer_nuggets.utils import ProfileConfig, profile_function
+
+@dataclass
+class ProfileConfig:
+    file_path: Optional[str] = None
+    name: Optional[str] = None
+    cuda: bool = True
+    iters: int = 0
+    warmup_iters: int = 0
+    sync: bool = False
+    extra_kwargs: dict = field(default_factory=dict)
+    memory_profile_path: Optional[str] = None
+
+def profile_function(
+    config: ProfileConfig, func: Callable, *args, **kwargs
+) -> torch.profiler.profile:
+    """Profile a torch function and save the result to a file"""
+    seed = 123
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+    activities = [ProfilerActivity.CPU]
+    if config.cuda:
+        activities.append(ProfilerActivity.CUDA)
+
+    if config.warmup_iters >= 0:
+        for _ in range(config.warmup_iters):
+            func(*args, **kwargs)
+    if config.sync:
+        torch.cuda.synchronize()
+    name_context = nullcontext() if config.name is None else record_function(config.name)
+    profile_memory = config.memory_profile_path is not None
+    with profile(
+        activities=activities,
+        profile_memory=profile_memory,
+        record_shapes=profile_memory,
+        with_stack=profile_memory,
+        **config.extra_kwargs,
+    ) as prof:
+        for _ in range(config.iters):
+            with name_context:
+                func(*args, **kwargs)
+                if config.sync:
+                    torch.cuda.synchronize()
+
+    if config.file_path is not None:
+        prof.export_chrome_trace(config.file_path)
+
+    if profile_memory:
+        with open(config.memory_profile_path, "w") as f:
+            f.write(profile_plot(prof))
+
+    if config.file_path is None:
+        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+
+    return prof
 
 # Check if transformer_engine is installed
 transformer_engine_installed = False
