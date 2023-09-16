@@ -283,17 +283,28 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         return new_mod
 
 
-def swap_linear_with_float8_linear(model, emulate=False):
+def swap_linear_with_float8_linear(
+    model, 
+    emulate=False, 
+    skip_fqn_list=None,
+    cur_fqn='',
+):
     """
     Replaces all instances of torch.nn.Linear in the given model with Float8Linear.
 
     Args:
         model (torch.nn.Module): The model to modify.
         emulate (bool, optional): Whether to emulate the fp8 matmul logic in float32.
+        skip_fqn_list (List[str], optional): If specified, a list of FQNs to skip
+        cur_fqn (str, optional): Current fqn, used to implement skip_fqn_list
     """
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
-        if isinstance(child, torch.nn.Linear):
+        new_fqn = name if cur_fqn == '' else f'{cur_fqn}.{new_fqn}' 
+        if (
+            (skip_fqn_list is None) or
+            (new_fqn not in skip_fqn_list)
+        ) and isinstance(child, torch.nn.Linear):
             new_child = Float8Linear.from_float(child, emulate)
             setattr(model, name, new_child)
         else:
