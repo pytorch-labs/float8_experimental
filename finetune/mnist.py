@@ -11,7 +11,10 @@ from torch.optim.lr_scheduler import StepLR
 # set up float8 path
 import context
 
-from float8_linear import swap_linear_with_float8_linear
+from float8_linear import (
+    swap_linear_with_float8_linear, 
+    sync_float8_amax_and_scale_history,\
+)
 
 
 class Net(nn.Module):
@@ -43,7 +46,7 @@ class Net(nn.Module):
         return output
 
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(args, model, device, train_loader, optimizer, epoch, use_pt_fp8):
     """Training function."""
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -54,6 +57,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
         output = model(data)
         loss = F.nll_loss(output, target)
         loss.backward()
+        if use_pt_fp8:
+            sync_float8_amax_and_scale_history(model)
         optimizer.step()
         if batch_idx % args.log_interval == 0:
             print(
@@ -78,7 +83,7 @@ def calibrate(model, device, test_loader):
             #     output = model(data)
             output = model(data)
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, use_pt_fp8):
     """Testing function."""
     model.eval()
     test_loss = 0
@@ -89,6 +94,10 @@ def test(model, device, test_loader):
             # with te.fp8_autocast(enabled=use_fp8):
             #     output = model(data)
             output = model(data)
+            # TODO(future): figure out the scaling story for inference, for
+            # now just do what we do for training
+            if use_pt_fp8:
+                sync_float8_amax_and_scale_history(model)
             test_loss += F.nll_loss(
                 output, target, reduction="sum"
             ).item()  # sum up batch loss
@@ -193,15 +202,17 @@ def main():
 
     model = Net().to(device)
     if args.use_pt_fp8:
-        swap_linear_with_float8_linear(model)
+        # fc3 has oc == 10, this is not supported by cuBLASLt float8 matmul kernel
+        skip_fqn_list = ['fc3']
+        swap_linear_with_float8_linear(model, skip_fqn_list=skip_fqn_list)
     print('model', model)
 
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(model, device, test_loader)
+        train(args, model, device, train_loader, optimizer, epoch, args.use_pt_fp8)
+        test(model, device, test_loader, args.use_pt_fp8)
         scheduler.step()
 
     # if args.save_model or args.use_fp8_infer:
