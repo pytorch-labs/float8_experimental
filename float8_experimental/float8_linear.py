@@ -143,9 +143,7 @@ class float8_linear(torch.autograd.Function):
 @dataclasses.dataclass
 class DelayedScalingRecipe:
     # Controls the history length of amax buffers
-    # TODO(future): make default history_len more representative for real usage,
-    # current value is for debugging
-    history_len = 4
+    history_len = 16
 
     # Controls the way to calculate current scale from amax history
     # TODO(future): add other functions as needed, hardcoded or user defined
