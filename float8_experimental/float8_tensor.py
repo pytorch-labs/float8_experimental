@@ -3,7 +3,7 @@ import torch
 from torch.utils._pytree import tree_map
 from torch._subclasses.fake_tensor import is_fake
 
-from float8_utils import (
+from float8_experimental.float8_utils import (
     tensor_to_amax,
     to_fp8_saturated,
 )

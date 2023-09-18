@@ -5,8 +5,8 @@ to simplify the product code.
 """
 
 import torch
-from float8_tensor import Float8Tensor
-import float8_aten_api
+from float8_experimental.float8_tensor import Float8Tensor
+import float8_experimental.float8_aten_api
 import warnings
 from typing import Optional, Tuple
 

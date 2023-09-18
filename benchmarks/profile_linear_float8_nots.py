@@ -8,9 +8,8 @@ from typing import Optional, Callable
 import torch
 from torch.profiler import ProfilerActivity, profile, record_function
 
-import context
-from float8_linear import sync_float8_amax_and_scale_history
-from float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
 @dataclass
 class ProfileConfig:
