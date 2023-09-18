@@ -1,5 +1,7 @@
 import csv
-from tabulate import tabulate
+import itertools
+from typing import Optional
+import pandas as pd
 
 import torch
 import torch.nn as nn
@@ -41,7 +43,7 @@ def do_benchmarks(tops, peak_tops, f, *args, **kwargs):
     return time_sec, tops_sec, pct_top_peak
 
 @torch.inference_mode()
-def run():
+def run(n_limit: Optional[int] = None):
     device = 'cuda'
 
     # LLaMa 2 70B single-node weight shapes
@@ -55,17 +57,17 @@ def run():
     }
 
     headers = (
-        'name', 'shape', 'bf16_time_s', 'fp8_fw_time_s', 'fp8_fw_sp')
-    floatfmt = (
-        '', '', 
-        '.2E',
-        '.2E', '.2f')
+        'name', 'shape', 'dtype', 'ref_time_s', 'fp8_time_s', 'fp8_speedup')
     results = []
 
     name_to_shapes = name_to_shapes_70b
     bsz_and_seq_len = ((4, 4096),)
+    dtypes = torch.bfloat16, torch.float16
 
-    for name, (K, N) in name_to_shapes.items():
+    for idx, (dtype, (name, (K, N))) in \
+            enumerate(itertools.product(dtypes, name_to_shapes.items())):
+        if n_limit is not None and idx >= n_limit:
+            break
 
         # source: Xiao Sun, these are realistic for LLaMa 70B training
         bsz, seq_len = 4, 4096
@@ -75,42 +77,36 @@ def run():
         tops = 2 * M * N * K
         print(f'tops: {tops:.2E}')
 
-        # bfloat16
-
         # raw torch.mm
-        dtype = torch.bfloat16
         A = torch.randn(M, K, device=device, dtype=dtype)
-        m_bf16 = nn.Sequential(nn.Linear(K, N, dtype=dtype, device=device, bias=False))
-        bf16_time_sec, bf16_tops_sec, bf16_pct_top_peak = do_benchmarks(
-            tops, dtype_to_peak_tops[torch.bfloat16],
-            m_bf16, A)
-        print(f'bfloat16 time_sec {bf16_time_sec:.2E}, tops/sec {bf16_tops_sec:.2E}, pct_peak {bf16_pct_top_peak:.3f}')
+        m_ref = nn.Sequential(nn.Linear(K, N, dtype=dtype, device=device, bias=False))
+        ref_time_sec, ref_tops_sec, ref_pct_top_peak = do_benchmarks(
+            tops, dtype_to_peak_tops[dtype],
+            m_ref, A)
+        print(f'{dtype} time_sec {ref_time_sec:.2E}, tops/sec {ref_tops_sec:.2E}, pct_peak {ref_pct_top_peak:.3f}')
 
         del A
 
         # raw float8 matmul (upper bound for what we can achive in eager mode)
         # TODO(future): add e5m2
-        # forward
-        d1, d2, d3 = torch.float8_e4m3fn, torch.float8_e4m3fn, torch.float16
+        d1, d2, d3 = torch.float8_e4m3fn, torch.float8_e4m3fn, dtype
         A = torch.zeros(M, K, device=device, dtype=d1)
         B = torch.zeros(K, N, device=device, dtype=d2).t().contiguous().t()
         def do_matmul(A, B):
             return torch._scaled_mm(A, B, out_dtype=d3)
-        fp8_fw_time_sec, fp8_fw_tops_sec, fp8_fw_pct_top_peak = do_benchmarks(
+        fp8_time_sec, fp8_tops_sec, fp8_pct_top_peak = do_benchmarks(
             tops, dtype_to_peak_tops[d1],
             do_matmul, A, B)
-        print(f'fp8_fw time_sec {fp8_fw_time_sec:.2E}, tops/sec {fp8_fw_tops_sec:.2E}, pct_peak {fp8_fw_pct_top_peak:.3f}')
+        print(f'fp8 time_sec {fp8_time_sec:.2E}, tops/sec {fp8_tops_sec:.2E}, pct_peak {fp8_pct_top_peak:.3f}')
 
         del A, B
 
-        # TODO(future): add Float8Linear to include scaling and casting overhead
-
         results.append([
-            name, (M, K, N), bf16_time_sec,
-            fp8_fw_time_sec, bf16_time_sec / fp8_fw_time_sec])
+            name, (M, K, N), dtype, ref_time_sec,
+            fp8_time_sec, ref_time_sec / fp8_time_sec])
 
-
-    print(tabulate(results, headers=headers, floatfmt=floatfmt))
+    data_pd = pd.DataFrame(results, columns=headers)
+    print(data_pd)
 
 
 if __name__ == '__main__':
