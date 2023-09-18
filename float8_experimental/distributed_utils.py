@@ -4,7 +4,8 @@ import torch
 
 from fairscale.nn.model_parallel.initialize import get_model_parallel_group
 
-from float8_tensor import Float8Tensor
+# from float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor
 
 # additional differentiable distributed primitives for SP which are not in
 # the Fairscale codebase

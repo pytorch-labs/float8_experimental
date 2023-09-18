@@ -2,19 +2,19 @@ import dataclasses
 
 import torch
 
-from float8_linear_utils import (
+from float8_experimental.float8_linear_utils import (
     _maybe_initialize_amaxes_scales_for_float8_cast,
     _update_history_with_new_amax,
 )
 
-from float8_utils import (
+from float8_experimental.float8_utils import (
     tensor_to_amax,
     to_fp8_saturated,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
 )
-from float8_linear import Float8Linear
-from float8_python_api import mm_float8_unwrapped
+from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.float8_python_api import mm_float8_unwrapped
 
 def _to_float8_e4m3fn_decomposed(tensor, scale, amax_buffer):
     # In TransformerEngine, the casts to float8 are fused with calculating

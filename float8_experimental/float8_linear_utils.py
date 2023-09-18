@@ -1,6 +1,6 @@
 import torch
 
-from float8_utils import (
+from float8_experimental.float8_utils import (
     tensor_to_amax,
     amax_to_scale,
     amax_history_to_scale,

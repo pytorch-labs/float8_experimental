@@ -23,10 +23,7 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 
-# set up float8 path
-import context
-
-from float8_linear import (
+from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )

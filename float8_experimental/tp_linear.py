@@ -12,9 +12,9 @@ from fairscale.nn.model_parallel.mappings import (
     reduce_from_model_parallel_region,
 )
 
-from float8_linear import Float8LinearMixin, float8_linear
+from float8_experimental.float8_linear import Float8LinearMixin, float8_linear
 
-from distributed_utils import (
+from float8_experimental.distributed_utils import (
     _AllGatherFloat8FwReduceScatterBw,
     _ReduceScatterFwAllGatherFloat8Bw,
 )

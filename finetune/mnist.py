@@ -8,11 +8,8 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 
-# set up float8 path
-import context
-
-from float8_linear import (
-    swap_linear_with_float8_linear, 
+from float8_experimental.float8_linear import (
+    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,\
 )
 

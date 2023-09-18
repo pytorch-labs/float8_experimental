@@ -10,9 +10,8 @@ import torch
 import torch.utils.benchmark as benchmark
 from tqdm import tqdm
 
-import context
-from float8_linear import sync_float8_amax_and_scale_history
-from float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
 # Check if transformer_engine is installed
 transformer_engine_installed = False

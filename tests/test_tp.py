@@ -14,18 +14,15 @@ from fairscale.nn.model_parallel.layers import (
 )
 from fairscale.nn.model_parallel.initialize import initialize_model_parallel
 
-# set up float8 path
-import context
-
-from tp_linear import (
+from float8_experimental.tp_linear import (
     swap_tp_linear_with_float8_linear,
 )
 
-from float8_utils import (
+from float8_experimental.float8_utils import (
     compute_error,
 )
 
-from distributed_utils import (
+from float8_experimental.distributed_utils import (
     _AllGatherFwSplitBw,    
 )
 

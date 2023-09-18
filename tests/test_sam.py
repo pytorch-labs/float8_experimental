@@ -9,14 +9,12 @@ import torch
 
 from transformers import SamModel
 
-# set up float8 path
-import context
 
-from float8_linear import (
+from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear, 
     sync_float8_amax_and_scale_history,
 )
-from float8_utils import compute_error
+from float8_experimental.float8_utils import compute_error
 
 torch.manual_seed(0)
 

@@ -8,14 +8,12 @@ import warnings
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import (
-    EagerAndRecordGraphs, 
+    EagerAndRecordGraphs,
     CompileCounterWithBackend,
 )
 
-# set up float8 path
-import context
 
-from float8_utils import (
+from float8_experimental.float8_utils import (
     compute_error,
     tensor_to_scale,
     E4M3_MAX_POS,
@@ -23,14 +21,14 @@ from float8_utils import (
     FP16_MAX_POS,
     amax_to_scale,
 )
-from float8_python_api import mm_float8
-from float8_tensor import Float8Tensor
-from float8_linear import (
-    Float8Linear, 
+from float8_experimental.float8_python_api import mm_float8
+from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_linear import (
+    Float8Linear,
     sync_float8_amax_and_scale_history,
     swap_linear_with_float8_linear,
 )
-from float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
 random.seed(0)
 torch.manual_seed(0)
@@ -56,7 +54,6 @@ class TestFloat8Linear:
         else:
             m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref), emulate)
 
-        
         for _ in range(2):
             sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)

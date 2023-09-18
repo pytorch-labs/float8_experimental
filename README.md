@@ -11,9 +11,10 @@ an explicit non-goal at this point. Once we are farther along, we will discuss h
 
 # installation
 
-```bash
-# install requirements
-pip install -r requirements.txt
+```Shell
+pip install .
+# Optionally install editable
+pip install -e .
 ```
 
 # User API, subject to change
@@ -21,7 +22,7 @@ pip install -r requirements.txt
 ## single GPU
 
 ```python
-from float8_linear import (
+from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -48,7 +49,7 @@ for _ in range(N_ITER):
 ## multi GPU
 
 ```python
-from tp_linear import swap_tp_linear_with_float8_linear
+from float8_experimental.tp_linear import swap_tp_linear_with_float8_linear
 
 # swaps the fairscale `ColumnParallelLinear` with `Float8ColumnParallelLinear`,
 # and the fairscale `RowParallelLinear` with `Float8RowParallelLinear`
