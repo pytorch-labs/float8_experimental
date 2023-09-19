@@ -1,9 +1,9 @@
 import argparse
 import copy
-import csv
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
+import pandas as pd
 from typing import List, Optional, Tuple, Callable
 
 import torch
@@ -49,6 +49,7 @@ def benchmark_torch_function_in_microseconds(
 
 @dataclass
 class Experiment:
+    name: str
     shape: Tuple[int, int, int]
     ref_time_sec: float
     float8_time_sec: float
@@ -101,9 +102,10 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None):
         'ffn.w2': (3584, 8192),
     }
     input_bias = False
-    ref_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    ref_dtypes = [torch.bfloat16, torch.float16]
     experiment_list: List[Experiment] = []
-    for idx, ((K, N), dtype) in enumerate(tqdm(list(product(name_to_shapes_70b.values(), ref_dtypes)))):
+    for idx, (dtype, (name, (K, N))) in \
+            enumerate(tqdm(list(product(ref_dtypes, name_to_shapes_70b.items())))):
         if n_limit is not None and idx >= n_limit:
             break
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
@@ -144,54 +146,71 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None):
             te_time_sec = benchmark_torch_function_in_microseconds(te_forw_backward)*1e-6
         else:
             te_time_sec = None
-        experiment = Experiment((M, K, N), ref_time, float8_time, dtype, compile, te_time_sec=te_time_sec)
+        experiment = Experiment(name, (M, K, N), ref_time, float8_time, dtype, compile, te_time_sec=te_time_sec)
         print(experiment)
         print('float8 speedup', experiment.ref_time_sec / experiment.float8_time_sec)
         if transformer_engine_installed:
             print('te speedup', experiment.ref_time_sec / experiment.te_time_sec)
         experiment_list.append(experiment)
+        torch._dynamo.reset()
+
+    headers = [
+        "name",
+        "M",
+        "K",
+        "N",
+        "ref_dtype",
+        "compiled",
+        "fp8_dtype",
+        "ref_time_sec",
+        "pt_fp8_time_sec",
+        "te_fp8_time_sec",
+        "ref_tops_sec",
+        "ref_pct_top_peak",
+        "pt_fp8_tops_sec",
+        "pt_fp8_pct_top_peak",
+        "te_fp8_tops_sec",
+        "te_fp8_pct_top_peak",
+    ]
+    data = []
+    for experiment in experiment_list:
+        data.append([
+            experiment.name,
+            experiment.shape[0],
+            experiment.shape[1],
+            experiment.shape[2],
+            experiment.dtype,
+            experiment.compiled,
+            experiment.float_8_dtype,
+            experiment.ref_time_sec,
+            experiment.float8_time_sec,
+            experiment.te_time_sec,
+            experiment.ref_tops_sec,
+            experiment.ref_pct_top_peak,
+            experiment.float8_tops_sec,
+            experiment.float8_pct_top_peak,
+            experiment.te_tops_sec,
+            experiment.te_pct_top_peak,
+        ])
+
+    data_pd = pd.DataFrame(data, columns=headers)
+    data_pd['pt_fp8_speedup'] = data_pd['ref_time_sec'] / data_pd['pt_fp8_time_sec']
+    if transformer_engine_installed:
+        data_pd['te_fp8_speedup'] = data_pd['ref_time_sec'] / data_pd['te_fp8_time_sec']
+    else:
+        data_pd['te_fp8_speedup'] = -1.0
+    data_pd['shape'] = (
+        '(' + data_pd['M'].astype(str) + ', ' + 
+        data_pd['K'].astype(str) + ', ' + data_pd['N'].astype(str) + ')'
+    )
+
+    data_pd_simple = data_pd[[
+        'name', 'shape', 'ref_dtype', 'compiled', 'ref_time_sec', 
+        'pt_fp8_time_sec', 'te_fp8_time_sec', 'pt_fp8_speedup', 'te_fp8_speedup']]
+    print(data_pd_simple)
 
     with open(sweep_path, mode="w") as file:
-        writer = csv.writer(file)
-        writer.writerow(
-            [
-                "M",
-                "K",
-                "N",
-                "dtype",
-                "compiled",
-                "float_8_dtype",
-                "ref_time_sec",
-                "float8_time_sec",
-                "te_time_sec",
-                "ref_tops_sec",
-                "ref_pct_top_peak",
-                "float8_tops_sec",
-                "float8_pct_top_peak",
-                "te_tops_sec",
-                "te_pct_top_peak",
-            ]
-        )
-        for experiment in experiment_list:
-            writer.writerow(
-                [
-                    experiment.shape[0],
-                    experiment.shape[1],
-                    experiment.shape[2],
-                    experiment.dtype,
-                    experiment.compiled,
-                    experiment.float_8_dtype,
-                    experiment.ref_time_sec,
-                    experiment.float8_time_sec,
-                    experiment.te_time_sec,
-                    experiment.ref_tops_sec,
-                    experiment.ref_pct_top_peak,
-                    experiment.float8_tops_sec,
-                    experiment.float8_pct_top_peak,
-                    experiment.te_tops_sec,
-                    experiment.te_pct_top_peak,
-                ]
-            )
+        data_pd.to_csv(sweep_path)
 
 
 if __name__ == '__main__':
