@@ -15,6 +15,7 @@ from float8_experimental.float8_utils import (
 )
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_python_api import mm_float8_unwrapped
+from float8_experimental.te_utils import te_fp8_cast_transpose_fused, pt_fp8_cast_transpose
 
 def _to_float8_e4m3fn_decomposed(tensor, scale, amax_buffer):
     # In TransformerEngine, the casts to float8 are fused with calculating
@@ -55,16 +56,36 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
             x, fp8_amax_x, fp8_amax_history_x,
             fp8_scale_x, scale_fn_name, torch.float8_e4m3fn,
             is_amax_initialized)
-        x_fp8_d = _to_float8_e4m3fn_decomposed(x, fp8_scale_x, fp8_amax_x)
+        # x_fp8_d = _to_float8_e4m3fn_decomposed(x, fp8_scale_x, fp8_amax_x)
         # r_t_c means reshaped to 2d, then transpose-contiguous
-        x_fp8_d_r_t_c = x_fp8_d.reshape(-1, x_fp8_d.shape[-1]).t().contiguous()
+        # x_fp8_d_r_t_c = x_fp8_d.reshape(-1, x_fp8_d.shape[-1]).t().contiguous()
+
+        x_r = x.reshape(-1, x.shape[-1])
+        x_fp8_d, x_fp8_d_r_t_c = te_fp8_cast_transpose_fused(
+            x_r,
+            fp8_scale_x,
+            fp8_amax_history_x,
+            fp8_amax_x,
+            torch.float8_e4m3fn,
+        )
+        # reshape x_fp8_d back to original shape, because following
+        # code assumes original shape
+        # TODO: clean this up
+        x_fp8_d = x_fp8_d.reshape(x.shape)
 
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w, fp8_amax_w, fp8_amax_history_w,
             fp8_scale_w, scale_fn_name, torch.float8_e4m3fn,
             is_amax_initialized)
-        w_fp8_d = _to_float8_e4m3fn_decomposed(w, fp8_scale_w, fp8_amax_w)
-        w_fp8_d_t_c = w_fp8_d.t().contiguous()
+        # w_fp8_d = _to_float8_e4m3fn_decomposed(w, fp8_scale_w, fp8_amax_w)
+        # w_fp8_d_t_c = w_fp8_d.t().contiguous()
+        w_fp8_d, w_fp8_d_t_c = te_fp8_cast_transpose_fused(
+            w,
+            fp8_scale_w,
+            fp8_amax_history_w,
+            fp8_amax_w,
+            torch.float8_e4m3fn,
+        )
 
         ctx.save_for_backward(
             x_fp8_d, x_fp8_d_r_t_c, fp8_scale_x, w_fp8_d, w_fp8_d_t_c, fp8_scale_w,
@@ -105,13 +126,40 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
             go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, 
             fp8_scale_dL_dY, scale_fn_name, torch.float8_e5m2,
             is_amax_initialized)
-        fp8_amax_dL_dY.fill_(tensor_to_amax(go))
-        go_scaled = go * fp8_scale_dL_dY
-        go_fp8_d = to_fp8_saturated(go_scaled, torch.float8_e5m2)
+        # fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+        # go_scaled = go * fp8_scale_dL_dY
+        # go_fp8_d = to_fp8_saturated(go_scaled, torch.float8_e5m2)
 
-        go_fp8_orig_shape = go_fp8_d.shape
-        go_fp8_reshaped = go_fp8_d.reshape(-1, go_fp8_orig_shape[-1])
-        go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
+        # go_fp8_orig_shape = go_fp8_d.shape
+        # go_fp8_reshaped = go_fp8_d.reshape(-1, go_fp8_orig_shape[-1])
+        # go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
+
+        # reference path
+
+        # TE path
+        go_reshaped = go.reshape(-1, go.shape[-1])
+        go_fp8_orig_shape = go.shape
+
+        # go_fp8_reshaped_ref, go_fp8_reshaped_t_c_ref = pt_fp8_cast_transpose(
+        #     go_reshaped,
+        #     fp8_scale_dL_dY.clone(),
+        #     fp8_amax_history_dL_dY.clone(),
+        #     fp8_amax_dL_dY.clone(),
+        #     torch.float8_e5m2,
+        # )
+
+        go_fp8_reshaped, go_fp8_reshaped_t_c = te_fp8_cast_transpose_fused(
+            # Note: the contiguous call is needed to handle the case where we
+            # test with y.sum().backwards() - the first gradient from
+            # this usage pattern is not contiguous
+            go_reshaped.contiguous(),
+            fp8_scale_dL_dY,
+            fp8_amax_history_dL_dY,
+            fp8_amax_dL_dY,
+            torch.float8_e5m2,
+        )
+
+        go_fp8_reshaped_t_c_t = go_fp8_reshaped_t_c.t()
 
         #
         # calculate dL/dX, update relevant buffers along the way

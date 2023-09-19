@@ -29,6 +29,7 @@ from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear,
 )
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.te_utils import te_fp8_cast_transpose_fused, pt_fp8_cast_transpose
 
 random.seed(0)
 torch.manual_seed(0)
@@ -185,6 +186,7 @@ class TestFloat8Linear:
             # print('gm', gm)
             pass
 
+    @unittest.skip("torch.compile doesn't work with TE")
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("device", ["cpu", "cuda"])
     def test_pt2_nots(self, emulate: bool, device: torch.device):
@@ -264,6 +266,37 @@ class TestNumerics:
         x = torch.tensor([target_amax], dtype=torch.float16, device='cuda')
         scale = tensor_to_scale(x, float8_dtype)
         assert not torch.any(torch.isinf(scale))
+
+class TestTEWrapper:
+
+    @pytest.mark.parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_simple(self, float8_dtype):
+        x = torch.randn(8, 4, dtype=torch.float16, device='cuda')
+
+        def get_scales_amaxes():
+            scale = torch.ones(1, dtype=torch.float32, device='cuda').fill_(0.9)
+            amax_history = torch.zeros(
+                16,  # history_len
+                1,  # num_fp8_tensors
+                dtype=torch.float32, 
+                device='cuda',
+            )
+            amax = torch.zeros(1, 1, dtype=torch.float32, device='cuda')
+            return scale, amax_history, amax
+
+        scale_ref, amax_history_ref, amax_ref = get_scales_amaxes()
+        scale, amax_history, amax = get_scales_amaxes()
+
+        y_ref, y_t_c_ref = pt_fp8_cast_transpose(
+            x, scale_ref, amax_history_ref, amax_ref, float8_dtype)
+
+        y, y_t_c = te_fp8_cast_transpose_fused(
+            x, scale, amax_history, amax, float8_dtype)
+
+        # TODO(future): assert_close doesn't work for e5m2
+        # needs a fix in core
+        torch.testing.assert_close(y.float(), y_ref.float())
+        torch.testing.assert_close(y_t_c.float(), y_t_c_ref.float())
 
 
 if __name__ == "__main__":
