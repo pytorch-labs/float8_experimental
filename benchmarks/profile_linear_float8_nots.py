@@ -97,7 +97,7 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
 
     linear_ref = torch.nn.Linear(params.K, params.N, bias=params.input_bias, device='cuda', dtype=params.ref_dtype)
     if use_ts:
-            linear_float8 = Float8Linear.from_float(copy.deepcopy(linear_ref), emulate=False)
+        linear_float8 = Float8Linear.from_float(copy.deepcopy(linear_ref), emulate=False)
     else:
         linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
 
