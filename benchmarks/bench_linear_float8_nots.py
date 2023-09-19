@@ -56,6 +56,7 @@ class Experiment:
     float8_time_sec: float
     dtype: torch.dtype
     compiled: bool = False
+    use_ts: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
     te_time_sec: Optional[float] = None
 
@@ -151,7 +152,7 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts
             te_time_sec = benchmark_torch_function_in_microseconds(te_forw_backward)*1e-6
         else:
             te_time_sec = None
-        experiment = Experiment(name, (M, K, N), ref_time, float8_time, dtype, compile, te_time_sec=te_time_sec)
+        experiment = Experiment(name, (M, K, N), ref_time, float8_time, dtype, compile, use_ts=use_ts, te_time_sec=te_time_sec)
         print(experiment)
         print('float8 speedup', experiment.ref_time_sec / experiment.float8_time_sec)
         if transformer_engine_installed:
@@ -166,6 +167,7 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts
         "N",
         "ref_dtype",
         "compiled",
+        "use_ts",
         "fp8_dtype",
         "ref_time_sec",
         "pt_fp8_time_sec",
@@ -186,6 +188,7 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts
             experiment.shape[2],
             experiment.dtype,
             experiment.compiled,
+            experiment.use_ts,
             experiment.float_8_dtype,
             experiment.ref_time_sec,
             experiment.float8_time_sec,
