@@ -3,14 +3,15 @@ import copy
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-import pandas as pd
-from typing import List, Optional, Tuple, Callable
+from typing import Callable, List, Optional, Tuple
 
+import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from tqdm import tqdm
 
-from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear import (
+    Float8Linear, sync_float8_amax_and_scale_history)
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
 # Check if transformer_engine is installed
@@ -89,7 +90,7 @@ class Experiment:
         else:
             return None
 
-def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None):
+def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts: bool = False):
     device = 'cuda'
 
     # LLaMa 2 70B single-node weight shapes
@@ -109,7 +110,11 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None):
         if n_limit is not None and idx >= n_limit:
             break
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
-        linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+        if use_ts:
+            linear_float8 = Float8Linear.from_float(copy.deepcopy(linear_ref), emulate=False)
+        else:
+            linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+
         bsz, seq_len = 4, 4096
         M = bsz * seq_len
         input_tensor = torch.randn(M, K, device=device, dtype=dtype, requires_grad=True)
@@ -218,6 +223,7 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--output_path', type=str, required=True)
     parser.add_argument('--compile', action='store_true')
     parser.add_argument('-n', '--n_limit', type=int, required=False)
+    parser.add_argument('--use_ts', action='store_true', help='use tensor subclass')
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path, args.compile, args.n_limit)
+    main(output_path, args.compile, args.n_limit, args.use_ts)

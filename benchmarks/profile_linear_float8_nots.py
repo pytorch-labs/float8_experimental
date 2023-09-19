@@ -1,15 +1,18 @@
 import argparse
 import copy
+import random
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-import random
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 import torch
 from torch.profiler import ProfilerActivity, profile, record_function
 
-from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear import (
+    Float8Linear, sync_float8_amax_and_scale_history)
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+
 
 @dataclass
 class ProfileConfig:
@@ -57,10 +60,6 @@ def profile_function(
     if config.file_path is not None:
         prof.export_chrome_trace(config.file_path)
 
-    if profile_memory:
-        with open(config.memory_profile_path, "w") as f:
-            f.write(profile_plot(prof))
-
     if config.file_path is None:
         print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
 
@@ -85,7 +84,7 @@ class LinearParams:
     torch_compile: Optional[bool] = False
 
 
-def main(profile_path: Path, compile: bool):
+def main(profile_path: Path, compile: bool, use_ts: bool = False):
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
     params = LinearParams(
         M=4*4096,
@@ -97,7 +96,11 @@ def main(profile_path: Path, compile: bool):
         )
 
     linear_ref = torch.nn.Linear(params.K, params.N, bias=params.input_bias, device='cuda', dtype=params.ref_dtype)
-    linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+    if use_ts:
+            linear_float8 = Float8Linear.from_float(copy.deepcopy(linear_ref), emulate=False)
+    else:
+        linear_float8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(linear_ref), emulate=False)
+
     input_tensor = torch.randn(params.M, params.K, device='cuda', dtype=params.ref_dtype, requires_grad=True)
 
     ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
@@ -165,6 +168,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-o', '--output_path', type=str, required=True,help="Path to save folder")
     parser.add_argument('--compile', action='store_true', help="Whether to torch compile the functions")
+    parser.add_argument('--use_ts', action='store_true', help='use tensor subclass')
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path, args.compile)
+    main(output_path, args.compile, args.use_ts)
