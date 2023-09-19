@@ -81,6 +81,10 @@ model.foo.bar.fc2.sequence_parallel = True
 * :white_check_mark: PT2.0 compatibility of this repository: aot_autograd
 * :black_square_button: PT2.0 compatibility of this repository: inductor
 * :black_square_button: reach 80% of TransformerEngine performance (current SOTA)
+  * current torch._scaled_mm speedup over bf16: 1.9x to 2.5x
+  * current pt_float8 speedup over bf16 nn.Linear: 0.6x to 1.1x (optimizations in progress)
+  * current te_float8 speedup over bf16 nn.Linear: 1.1x to 1.6x
+  * main gap: fused amax+cast+transpose+contiguous kernel (ETA for inductor support is 2023-10-15)
 * :black_square_button: match TransformerEngine performance (current SOTA)
 
 ### tensor subclass branch
