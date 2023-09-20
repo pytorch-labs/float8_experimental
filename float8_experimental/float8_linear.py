@@ -230,7 +230,7 @@ class Float8LinearMixin(object):
         return y
 
     def float8_pre_forward(self, x):
-        if self.is_amax_initialized and (not self.amax_and_scale_synced):
+        if self.is_amax_initialized and (not self.amax_and_scale_synced) and torch.is_grad_enabled():
             raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
         self.last_seen_input_dtype = x.dtype
 
