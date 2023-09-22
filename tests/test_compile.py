@@ -53,7 +53,7 @@ def test_eager_only(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.d
 @pytest.mark.parametrize("emulate", [True, False])
 @pytest.mark.parametrize("use_subclass", [True, False])
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
-def test_dyanmo(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+def test_dynamo(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("dynamo", fullgraph, emulate, use_subclass, dtype)
 
 
