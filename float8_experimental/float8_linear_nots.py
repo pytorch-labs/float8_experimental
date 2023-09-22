@@ -102,7 +102,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
 
         # cast fp32 to fp8
         _maybe_initialize_amaxes_scales_for_float8_cast(
-            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, 
+            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY,
             fp8_scale_dL_dY, scale_fn_name, torch.float8_e5m2,
             is_amax_initialized)
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
@@ -158,8 +158,10 @@ class Float8LinearNoTensorSubclass(Float8Linear):
     traceable in PT2.0.
     """
     def forward(self, x):
-        if self.is_amax_initialized and (not self.amax_and_scale_synced):
-            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward') 
+        # It is common during training to have a forward pass with no
+        # gradients (validation), so we only check for grad_enabled
+        if self.is_amax_initialized and (not self.amax_and_scale_synced) and torch.is_grad_enabled():
+            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
 
         is_amax_initialized_this_iteration = self.is_amax_initialized
         self.is_amax_initialized = True
@@ -170,7 +172,7 @@ class Float8LinearNoTensorSubclass(Float8Linear):
             self.fp8_amax_x, self.fp8_amax_history_x, self.fp8_scale_x,
             self.fp8_amax_w, self.fp8_amax_history_w, self.fp8_scale_w,
             self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            self.fp8_scale_dL_dY, is_amax_initialized_this_iteration, 
+            self.fp8_scale_dL_dY, is_amax_initialized_this_iteration,
             scale_fn_name, self.emulate)
 
         if self.bias is not None:

@@ -7,9 +7,9 @@ from float8_experimental.float8_utils import (
 )
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
-    x, 
-    cur_amax, 
-    amax_history, 
+    x,
+    cur_amax,
+    amax_history,
     scale,
     scale_fn_name,
     float8_dtype,
@@ -34,7 +34,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
 
 def _update_history_with_new_amax(new_amax, amax_history):
     """
-    Updates `amax_history` (the last N cur_amax values) inplace with the value 
+    Updates `amax_history` (the last N cur_amax values) inplace with the value
     of `new_amax`.
     """
     new_amax_history = torch.roll(amax_history, 1)
