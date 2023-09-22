@@ -1,54 +1,75 @@
 import copy
-
 import random
 
-
+import pytest
 import torch
 import torch.nn as nn
-from torch._dynamo.testing import (
-    EagerAndRecordGraphs, 
-    CompileCounterWithBackend,
-)
-
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
-
 # Setting to unblock for calling contiguous in backwards
-from torch._dynamo import config
 
-config._autograd_backward_strict_mode_banned_ops = []
+from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
-def main():
+
+def _test_compile_base(
+    backend: str, fullgraph: bool, emulate: bool, use_subclass: bool, dtype: torch.dtype
+):
     random.seed(0)
     torch.manual_seed(0)
-    emulate = False
-    use_no_tensor_subclass = True
-    x_shape =(16, 16)
+    x_shape = (16, 16)
     linear_dtype = torch.bfloat16
 
-    compile = True
+    x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
+    m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
 
-
-    x = torch.randn(*x_shape, device='cuda', dtype=linear_dtype)
-    m_ref = nn.Linear(16, 32, bias=True, device='cuda', dtype=linear_dtype)
-
-    if not use_no_tensor_subclass:
+    if use_subclass:
         m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref), emulate)
     else:
         m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref), emulate)
-    if compile:
-        m_fp8 = torch.compile(m_fp8, backend="inductor", fullgraph=True)
-        m_ref = torch.compile(m_ref, backend="inductor")
+
+    m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
+    m_ref = torch.compile(m_ref, backend=backend, fullgraph=fullgraph)
     y_fp8 = m_fp8(x)
     y_fp8.sum().backward()
     y_ref = m_ref(x)
     y_ref.sum().backward()
+    torch.testing.assert_close(y_fp8, y_ref, atol=8e-2, rtol=8e-2)
+    torch.testing.assert_close(m_fp8.weight.grad, m_ref.weight.grad, atol=2e-1, rtol=2e-1)
+    torch.testing.assert_close(m_fp8.bias.grad, m_ref.bias.grad, atol=8e-2, rtol=8e-2)
 
-    print(y_ref[-1])
-    print(y_fp8[-1])
+
+@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("emulate", [True, False])
+@pytest.mark.parametrize("use_subclass", [True, False])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_eager(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+    _test_compile_base("eager", fullgraph, emulate, use_subclass, dtype)
 
 
+@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("emulate", [True, False])
+@pytest.mark.parametrize("use_subclass", [True, False])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_dyanmo(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+    _test_compile_base("dynamo", fullgraph, emulate, use_subclass, dtype)
 
-if __name__ == '__main__':
-    main()
+
+@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("emulate", [True, False])
+@pytest.mark.parametrize("use_subclass", [True, False])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_aot_eager(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+    _test_compile_base("aot_eager", fullgraph, emulate, use_subclass, dtype)
+
+
+@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("emulate", [True, False])
+@pytest.mark.parametrize("use_subclass", [True, False])
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+def test_inductor(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+    _test_compile_base("inductor", fullgraph, emulate, use_subclass, dtype)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
