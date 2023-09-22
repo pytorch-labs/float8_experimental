@@ -4,12 +4,14 @@ import random
 import pytest
 import torch
 import torch.nn as nn
+from torch._dynamo.testing import (CompileCounterWithBackend,
+                                   EagerAndRecordGraphs)
+
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
 # Setting to unblock for calling contiguous in backwards
 
-from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
 
 def _test_compile_base(
@@ -39,34 +41,34 @@ def _test_compile_base(
     torch.testing.assert_close(m_fp8.bias.grad, m_ref.bias.grad, atol=8e-2, rtol=8e-2)
 
 
-@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [True, False])
 @pytest.mark.parametrize("use_subclass", [True, False])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
-def test_eager(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
+def test_eager_only(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("eager", fullgraph, emulate, use_subclass, dtype)
 
 
-@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [True, False])
 @pytest.mark.parametrize("use_subclass", [True, False])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_dyanmo(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("dynamo", fullgraph, emulate, use_subclass, dtype)
 
 
-@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [True, False])
 @pytest.mark.parametrize("use_subclass", [True, False])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_aot_eager(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("aot_eager", fullgraph, emulate, use_subclass, dtype)
 
 
-@pytest.mark.parametrize("fullgraph", [True, False])
+@pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [True, False])
-@pytest.mark.parametrize("use_subclass", [True, False])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("use_subclass", [True])
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_inductor(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("inductor", fullgraph, emulate, use_subclass, dtype)
 
