@@ -22,8 +22,8 @@ def mm_float8_unwrapped(
         versions of the linear module.
     """
 
-    a_inverse_scale = 1 / a_scale
-    b_inverse_scale = 1 / b_scale
+    a_inverse_scale = a_scale.reciprocal()
+    b_inverse_scale = b_scale.reciprocal()
     output, output_amax = torch._scaled_mm(
         a_data,
         b_data,
