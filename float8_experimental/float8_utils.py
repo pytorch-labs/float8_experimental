@@ -6,10 +6,10 @@ import torch.distributed as dist
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html
 
 # define the e4m3/e5m2 constants
-E4M3_MAX_POS = 448.0
-E5M2_MAX_POS = 57344.0
+E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
-FP16_MAX_POS = 65504.0
+FP16_MAX_POS = torch.finfo(torch.float16).max
 
 # avoid division by zero when calculating scale
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
@@ -26,13 +26,13 @@ def amax_to_scale(amax, float8_dtype, orig_dtype):
     # this helps when amax is small. We are assuming that we don't need
     # to care about this for float32/bfloat16.
     if orig_dtype is torch.float16:
-        res = torch.clamp(res, max=FP16_MAX_POS) 
+        res = torch.clamp(res, max=FP16_MAX_POS)
     return res
 
 @torch.no_grad()
 def amax_history_to_scale(
-    amax_history, 
-    float8_dtype, 
+    amax_history,
+    float8_dtype,
     orig_dtype,
     history_to_scale_fn_type,
 ):
