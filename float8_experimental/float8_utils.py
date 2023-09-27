@@ -44,7 +44,6 @@ def amax_history_to_scale(
 @torch.no_grad()
 def tensor_to_amax(x, distributed_reduction=False):
     amax = torch.max(torch.abs(x))
-    amax_copy = amax.detach().clone()
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
