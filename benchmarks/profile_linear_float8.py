@@ -86,6 +86,8 @@ class LinearParams:
 
 def main(profile_path: Path, compile: bool, use_ts: bool = False):
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
+    print(f"Compile is set to             | {compile}")
+    print(f"Use tensor subclass is set to | {use_ts}")
     params = LinearParams(
         M=4*4096,
         K=8192,

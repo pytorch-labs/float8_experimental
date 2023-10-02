@@ -93,6 +93,8 @@ class Experiment:
 
 def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts: bool = False):
     device = 'cuda'
+    print(f"Compile is set to             | {compile}")
+    print(f"Use tensor subclass is set to | {use_ts}")
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
@@ -217,6 +219,7 @@ def main(sweep_path: Path, compile: bool, n_limit: Optional[int] = None,  use_ts
         'pt_fp8_time_sec', 'te_fp8_time_sec', 'pt_fp8_speedup', 'te_fp8_speedup']]
     print(data_pd_simple)
 
+    sweep_path = sweep_path.with_suffix(".csv")
     with open(sweep_path, mode="w") as file:
         data_pd.to_csv(sweep_path)
 
