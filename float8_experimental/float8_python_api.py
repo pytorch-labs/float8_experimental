@@ -17,9 +17,10 @@ def mm_float8_unwrapped(
         b_scale: torch.tensor,
         output_dtype: torch.dtype,
         output_scale: Optional[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-    """ This is the unwrapped version of mm_float8, which does not take in Float8Tensors
-        as inputs. This is used to standardize the logic between subclassed and non subclassed
-        versions of the linear module.
+    """
+    This is the unwrapped version of mm_float8, which does not take in Float8Tensors
+    as inputs. This is used to standardize the logic between subclassed and non subclassed
+    versions of the linear module.
     """
 
     a_inverse_scale = a_scale.reciprocal()
