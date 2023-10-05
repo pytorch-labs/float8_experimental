@@ -108,8 +108,12 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
     ref_forw_backward = lambda : linear_ref(input_tensor).sum().backward()
 
     def float8_forw_backward():
+        with record_function("scale_amax_and_scales"):
             sync_float8_amax_and_scale_history(linear_float8)
-            linear_float8(input_tensor).sum().backward()
+        with record_function("forward"):
+            out = linear_float8(input_tensor)
+        with record_function("backward"):
+            out.sum().backward()
 
     if transformer_engine_installed:
         # Create an FP8 recipe. Note: All input args are optional.
@@ -117,7 +121,10 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
         te_linear = te.Linear(params.K, params.N, bias=params.input_bias).to(device="cuda", dtype=params.ref_dtype)
         def te_forw_backward():
             with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                te_linear(input_tensor).sum().backward()
+                with record_function("forward"):
+                    out = te_linear(input_tensor)
+                with record_function("backward"):
+                    out.sum().backward()
 
 
     if params.torch_compile:
@@ -145,7 +152,8 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
     profile_function(profile_config, ref_forw_backward)
 
     # # Profile Float8 Linear
-    float8_string = f"linear_float8_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
+    subclass_string = "subclass" if use_ts else "NO_subclass"
+    float8_string = f"linear_float8_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}_{subclass_string}.json"
     profile_config = ProfileConfig(
         str(profile_path/float8_string),
         float8_string,
@@ -155,7 +163,7 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
     )
     profile_function(profile_config, float8_forw_backward)
 
-    te_string = f"linear_transformer_engine_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
+    te_string = f"linear_transformer_engine_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
     if transformer_engine_installed:
         profile_config = ProfileConfig(
             str(profile_path/te_string),
