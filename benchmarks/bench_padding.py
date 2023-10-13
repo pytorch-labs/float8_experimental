@@ -45,10 +45,22 @@ def get_tops_info(tops, time, peak_tops):
 
 def do_fp8_matmul(A, B, fp8_dtype, out_dtype):
     A_fp8 = A.to(fp8_dtype)
-    B_fp8 = B.to(fp8_dtype).t()
+    B_fp8 = B.to(fp8_dtype).t() # view
 
-    A_pad = pad_tensor_for_matmul(A_fp8)
-    B_pad = pad_tensor_for_matmul(B_fp8, both=True).contiguous().t()
+    A_pad = pad_tensor_for_matmul(A_fp8) # mem copy
+    B_pad = pad_tensor_for_matmul(B_fp8, both=True).contiguous().t() # mem copy
+
+    return torch._scaled_mm(A_pad, B_pad, out_dtype=out_dtype)[0][: A.shape[0], : B.shape[1]]
+
+
+def do_fp8_pad_first_matmul(A, B, fp8_dtype, out_dtype):
+    A_pad = pad_tensor_for_matmul(A) # mem copy
+    B_pad = pad_tensor_for_matmul(B, both=True) # mem copy
+
+    A_pad = A_pad.to(fp8_dtype) # mem copy
+    B_pad = B_pad.to(fp8_dtype) # mem copy
+
+    B_pad = B_pad.t().contiguous().t() # mem copy
 
     return torch._scaled_mm(A_pad, B_pad, out_dtype=out_dtype)[0][: A.shape[0], : B.shape[1]]
 
@@ -76,7 +88,7 @@ def gen_configs():
     return [Experiment_config(*shape, output_dtype, fp8_dtype) for shape in shapes]
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def run(compile: bool = False, n_limit: Optional[int] = None):
     device = "cuda"
     experiments = gen_configs()
@@ -91,7 +103,7 @@ def run(compile: bool = False, n_limit: Optional[int] = None):
         B_base = torch.rand(K, N, device=device, dtype=output_dtype)
 
         hp_func = torch.compile(do_hp_matmul) if compile else do_hp_matmul
-        fp8_func = torch.compile(do_fp8_matmul) if compile else do_fp8_matmul
+        fp8_func = torch.compile(do_fp8_pad_first_matmul) if compile else do_fp8_matmul
 
         ref_time = benchmark_fn_in_usec(hp_func, A_base, B_base)
         fp8_time = benchmark_fn_in_usec(fp8_func, A_base, B_base, fp8_dtype, output_dtype)
