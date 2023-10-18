@@ -1,12 +1,10 @@
 from enum import Enum
-import torch
-from torch.utils._pytree import tree_map
-from torch._subclasses.fake_tensor import is_fake
 
-from float8_experimental.float8_utils import (
-    tensor_to_amax,
-    to_fp8_saturated,
-)
+import torch
+
+from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
+from torch._subclasses.fake_tensor import is_fake
+from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
@@ -15,16 +13,17 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8
     """
+
     @staticmethod
     def forward(
-        ctx, 
-        tensor, 
-        scale: float=None, 
-        float8_dtype=torch.float8_e4m3fn, 
+        ctx,
+        tensor,
+        scale: float = None,
+        float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
     ):
         # In TransformerEngine, the casts to float8 are fused with calculating
-        # the new amax value. In this codebase, the eager mode code for those 
+        # the new amax value. In this codebase, the eager mode code for those
         # two things is colocated in this function. We expect PT2.0 to fuse it
         # for us.
         if amax_buffer is not None:
@@ -46,6 +45,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8
     """
+
     @staticmethod
     def forward(ctx, tensor):
         return tensor._data.to(tensor._orig_dtype) / tensor._scale
@@ -98,13 +98,10 @@ class Float8Tensor(torch.Tensor):
 
     def __tensor_flatten__(self):
         return ("_data",), (self._scale, self._orig_dtype)
- 
+
     @staticmethod
     def __tensor_unflatten__(tensors, metadatas):
-        return Float8Tensor(
-            tensors["_data"],
-            metadatas[0],
-            metadatas[1])
+        return Float8Tensor(tensors["_data"], metadatas[0], metadatas[1])
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
@@ -115,40 +112,42 @@ class Float8Tensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
-        # 1. tracing through __torch_function__ logic is not supported yet in 
+        # 1. tracing through __torch_function__ logic is not supported yet in
         # PT2.0, so we explicitly disallow it here for callsites from user code.
-        # 2. We do need to handle a couple of ops in order for 
+        # 2. We do need to handle a couple of ops in order for
         # TorchDynamo tracing to succeed.
-        not_supported_msg = \
-            'Float8Tensor.__torch_dispatch__ for user code is not supported'
+        not_supported_msg = (
+            "Float8Tensor.__torch_dispatch__ for user code is not supported"
+        )
         if func == torch.ops.aten.clone.default:
             assert is_fake(args[0]), not_supported_msg
             return Float8Tensor(
-                args[0]._data.clone(**kwargs), args[0]._scale, args[0]._orig_dtype)
+                args[0]._data.clone(**kwargs), args[0]._scale, args[0]._orig_dtype
+            )
         elif func == torch.ops.aten.view.default:
             assert is_fake(args[0]), not_supported_msg
             new_data = args[0]._data.view(*args[1:])
-            return Float8Tensor(
-                new_data, args[0]._scale, args[0]._orig_dtype)
+            return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten._unsafe_view.default:
             assert is_fake(args[0]), not_supported_msg
             new_data = torch.ops.aten._unsafe_view(args[0]._data, *args[1:], **kwargs)
-            return Float8Tensor(
-                new_data, args[0]._scale, args[0]._orig_dtype)
+            return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten.t.default:
             assert is_fake(args[0]), not_supported_msg
-            return Float8Tensor(
-                args[0]._data.t(), args[0]._scale, args[0]._orig_dtype)
+            return Float8Tensor(args[0]._data.t(), args[0]._scale, args[0]._orig_dtype)
         elif func == torch.ops.aten.as_strided.default:
             assert is_fake(args[0]), not_supported_msg
             return Float8Tensor(
-                args[0]._data.as_strided(*args[1:], **kwargs), args[0]._scale, 
-                args[0]._orig_dtype)
-        
-        raise NotImplementedError(f'attempting to run {func}, this is not supported')
+                args[0]._data.as_strided(*args[1:], **kwargs),
+                args[0]._scale,
+                args[0]._orig_dtype,
+            )
+
+        raise NotImplementedError(f"attempting to run {func}, this is not supported")
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
+
 
 # In order for dynamo to successfuly trace our tensor subclass, we need
 # to be able to represent it in the graph.

@@ -10,8 +10,9 @@ from float8_experimental.float8_tensor import Float8Tensor
 # additional differentiable distributed primitives for SP which are not in
 # the Fairscale codebase
 
+
 def _gather_along_first_dim(input_: torch.Tensor):
-    # same as https://github.com/facebookresearch/fairscale/blob/main/fairscale/nn/model_parallel/mappings.py#L67, 
+    # same as https://github.com/facebookresearch/fairscale/blob/main/fairscale/nn/model_parallel/mappings.py#L67,
     # but gather along first dim instead of last dim
     group = get_model_parallel_group()
 
@@ -49,6 +50,7 @@ def _gather_along_first_dim(input_: torch.Tensor):
 
     return output
 
+
 def _reduce_scatter(ctx: Any, input_: torch.Tensor):
     group = get_model_parallel_group()
     rank = torch.distributed.get_rank(group)
@@ -60,6 +62,7 @@ def _reduce_scatter(ctx: Any, input_: torch.Tensor):
 
     torch.distributed.reduce_scatter_tensor(output, input_, group=group)
     return output
+
 
 def _split_along_first_dim(input_: torch.Tensor):
     # this is needed for testing
@@ -74,8 +77,7 @@ def _split_along_first_dim(input_: torch.Tensor):
     assert input_.shape[0] % world_size == 0
     input_list = torch.split(input_, input_.shape[0] // world_size)
     return input_list[local_rank]
-    
-    
+
 
 class _AllGatherFloat8FwReduceScatterBw(torch.autograd.Function):
     @staticmethod
@@ -86,6 +88,7 @@ class _AllGatherFloat8FwReduceScatterBw(torch.autograd.Function):
     def backward(ctx, grad_output):
         return _reduce_scatter(ctx, grad_output)
 
+
 class _ReduceScatterFwAllGatherFloat8Bw(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input_):
@@ -94,6 +97,7 @@ class _ReduceScatterFwAllGatherFloat8Bw(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return _gather_along_first_dim(grad_output)
+
 
 class _AllGatherFwSplitBw(torch.autograd.Function):
     @staticmethod

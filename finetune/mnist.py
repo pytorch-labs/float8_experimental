@@ -1,17 +1,18 @@
 # this started as a copy-paste of https://github.com/NVIDIA/TransformerEngine/blob/main/examples/pytorch/mnist/main.py
 
 import argparse
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
 
 from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear,
-    sync_float8_amax_and_scale_history,\
+    sync_float8_amax_and_scale_history,
 )
+from torch.optim.lr_scheduler import StepLR
+from torchvision import datasets, transforms
 
 
 class Net(nn.Module):
@@ -79,6 +80,7 @@ def calibrate(model, device, test_loader):
             # with te.fp8_autocast(enabled=fp8, calibrating=True):
             #     output = model(data)
             output = model(data)
+
 
 def test(model, device, test_loader, use_pt_fp8):
     """Testing function."""
@@ -200,9 +202,9 @@ def main():
     model = Net().to(device)
     if args.use_pt_fp8:
         # fc3 has oc == 10, this is not supported by cuBLASLt float8 matmul kernel
-        skip_fqn_list = ['fc3']
+        skip_fqn_list = ["fc3"]
         swap_linear_with_float8_linear(model, skip_fqn_list=skip_fqn_list)
-    print('model', model)
+    print("model", model)
 
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
@@ -215,7 +217,7 @@ def main():
     # if args.save_model or args.use_fp8_infer:
     if args.save_model:
         torch.save(model.state_dict(), "mnist_cnn.pt")
-        print('Eval with reloaded checkpoint : fp8='+str(args.use_fp8_infer))
+        print("Eval with reloaded checkpoint : fp8=" + str(args.use_fp8_infer))
         weights = torch.load("mnist_cnn.pt")
         model.load_state_dict(weights)
         test(model, device, test_loader, args.use_fp8_infer)

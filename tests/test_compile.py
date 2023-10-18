@@ -4,14 +4,12 @@ import random
 import pytest
 import torch
 import torch.nn as nn
-from torch._dynamo.testing import (CompileCounterWithBackend,
-                                   EagerAndRecordGraphs)
 
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
 # Setting to unblock for calling contiguous in backwards
-
 
 
 def _test_compile_base(
@@ -37,7 +35,9 @@ def _test_compile_base(
     y_ref = m_ref(x)
     y_ref.sum().backward()
     torch.testing.assert_close(y_fp8, y_ref, atol=8e-2, rtol=8e-2)
-    torch.testing.assert_close(m_fp8.weight.grad, m_ref.weight.grad, atol=2e-1, rtol=2e-1)
+    torch.testing.assert_close(
+        m_fp8.weight.grad, m_ref.weight.grad, atol=2e-1, rtol=2e-1
+    )
     torch.testing.assert_close(m_fp8.bias.grad, m_ref.bias.grad, atol=8e-2, rtol=8e-2)
 
 

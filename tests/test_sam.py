@@ -3,23 +3,23 @@
 # https://github.com/NielsRogge/Transformers-Tutorials/blob/master/SAM/Fine_tune_SAM_(segment_anything)_on_a_custom_dataset.ipynb
 
 import copy
+
 import pytest
 
 import torch
 
-from transformers import SamModel
-
-
 from float8_experimental.float8_linear import (
-    swap_linear_with_float8_linear, 
+    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_utils import compute_error
 
+from transformers import SamModel
+
 torch.manual_seed(0)
 
-class TestFloat8SAMIntegrationTest:
 
+class TestFloat8SAMIntegrationTest:
     @pytest.mark.parametrize("data_dtype", [torch.float16, torch.bfloat16])
     def test_encoder_fw_bw(self, data_dtype):
         model = SamModel.from_pretrained("facebook/sam-vit-base").to(data_dtype).cuda()
@@ -30,8 +30,8 @@ class TestFloat8SAMIntegrationTest:
         encoder_fp8 = copy.deepcopy(encoder_ref)
         swap_linear_with_float8_linear(encoder_fp8, emulate=False)
 
-        # an image 
-        # Note: bsz==4 or a larger power of 2 for this model is needed to 
+        # an image
+        # Note: bsz==4 or a larger power of 2 for this model is needed to
         # ensure all matmuls have arguments with dimensions divisible by 16
         data = torch.randn(4, 3, 1024, 1024).to(data_dtype).cuda()
 
@@ -47,8 +47,9 @@ class TestFloat8SAMIntegrationTest:
         hidden_sqnr = compute_error(last_hidden_ref, last_hidden_fp8)
         assert hidden_sqnr > 20.0
 
-        ref_name_to_grad = \
-            {name: param.grad for name, param in encoder_ref.named_parameters()}
+        ref_name_to_grad = {
+            name: param.grad for name, param in encoder_ref.named_parameters()
+        }
         for name, param in encoder_fp8.named_parameters():
             ref_grad = ref_name_to_grad[name]
             cur_grad = param.grad
@@ -56,5 +57,5 @@ class TestFloat8SAMIntegrationTest:
             assert sqnr > 1.0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pytest.main([__file__])

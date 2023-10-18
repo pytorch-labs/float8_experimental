@@ -4,14 +4,15 @@ are emulated. In the future, they should be calling NVIDIA's float8 kernels.
 """
 
 import torch
-from torch.library import Library
 
 from float8_experimental.float8_utils import (
-    tensor_to_amax,
-    to_fp8_saturated,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    tensor_to_amax,
+    to_fp8_saturated,
 )
+from torch.library import Library
+
 
 def mm_float8_emulated(
     m1,  # input 1 data
@@ -36,6 +37,8 @@ def mm_float8_emulated(
 # These are mostly placeholder and might need to be implemented in c++ as needed
 lib = Library("aten", "FRAGMENT")
 
-lib.define("mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, ScalarType dtype3) -> (Tensor, Tensor)")
+lib.define(
+    "mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, ScalarType dtype3) -> (Tensor, Tensor)"
+)
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")

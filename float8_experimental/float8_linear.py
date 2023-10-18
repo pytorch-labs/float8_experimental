@@ -17,18 +17,16 @@ from float8_experimental.float8_linear_utils import (
     _update_history_with_new_amax,
 )
 
-from float8_experimental.float8_python_api import (
-    mm_float8,
-)
+from float8_experimental.float8_python_api import mm_float8
+from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
-    tensor_to_amax,
     amax_history_to_scale,
-    to_fp8_saturated,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    tensor_to_amax,
+    to_fp8_saturated,
 )
-from float8_experimental.float8_tensor import Float8Tensor
 
 
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
@@ -36,10 +34,16 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     Forward: no-op
     Backward: convert to float8_e5m2, initialize if needed
     """
+
     @staticmethod
     def forward(
-        ctx, tensor, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
-        scale_fn_name, is_amax_initialized,
+        ctx,
+        tensor,
+        fp8_amax_dL_dY,
+        fp8_amax_history_dL_dY,
+        fp8_scale_dL_dY,
+        scale_fn_name,
+        is_amax_initialized,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
@@ -53,8 +57,14 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         is_amax_initialized = ctx.is_amax_initialized
 
         _maybe_initialize_amaxes_scales_for_float8_cast(
-            go, fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY,
-            scale_fn_name, torch.float8_e5m2, is_amax_initialized)
+            go,
+            fp8_amax_dL_dY,
+            fp8_amax_history_dL_dY,
+            fp8_scale_dL_dY,
+            scale_fn_name,
+            torch.float8_e5m2,
+            is_amax_initialized,
+        )
 
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
         go_scaled = go * fp8_scale_dL_dY
@@ -83,15 +93,15 @@ class float8_linear(torch.autograd.Function):
         ctx.emulate = emulate
         orig_shape = x_fp8._data.shape
         x_fp8_reshaped = Float8Tensor(
-            x_fp8._data.reshape(-1, orig_shape[-1]), x_fp8._scale, x_fp8._orig_dtype)
+            x_fp8._data.reshape(-1, orig_shape[-1]), x_fp8._scale, x_fp8._orig_dtype
+        )
         ctx.is_amax_initialized = is_amax_initialized
 
-        w_fp8_t = Float8Tensor(
-            w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
+        w_fp8_t = Float8Tensor(w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
 
         res_bits, _output_amax = mm_float8(
-            x_fp8_reshaped, w_fp8_t, output_dtype=x_fp8._orig_dtype,
-            emulate=emulate)
+            x_fp8_reshaped, w_fp8_t, output_dtype=x_fp8._orig_dtype, emulate=emulate
+        )
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
 
@@ -104,40 +114,53 @@ class float8_linear(torch.autograd.Function):
 
         go_fp8_orig_shape = go_fp8._data.shape
         go_fp8_reshaped = Float8Tensor(
-            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]), go_fp8._scale,
-            go_fp8._orig_dtype)
+            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]),
+            go_fp8._scale,
+            go_fp8._orig_dtype,
+        )
 
         w_fp8_t_c_t = Float8Tensor(
-            w_fp8._data.t().contiguous().t(),
-            w_fp8._scale, w_fp8._orig_dtype)
+            w_fp8._data.t().contiguous().t(), w_fp8._scale, w_fp8._orig_dtype
+        )
 
         #
         # calculate dL/dX
         #
         dL_dX, _dL_dX_amax = mm_float8(
-            go_fp8_reshaped, w_fp8_t_c_t, output_dtype=x_fp8._orig_dtype,
-            emulate=emulate)
+            go_fp8_reshaped,
+            w_fp8_t_c_t,
+            output_dtype=x_fp8._orig_dtype,
+            emulate=emulate,
+        )
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8._data.shape
         x_fp8_reshaped_t_c = Float8Tensor(
-            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(), x_fp8._scale,
-            x_fp8._orig_dtype)
+            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(),
+            x_fp8._scale,
+            x_fp8._orig_dtype,
+        )
 
         go_fp8_reshaped_t_c_t = Float8Tensor(
-            go_fp8_reshaped._data.t().contiguous().t(), go_fp8_reshaped._scale,
-            go_fp8_reshaped._orig_dtype)
+            go_fp8_reshaped._data.t().contiguous().t(),
+            go_fp8_reshaped._scale,
+            go_fp8_reshaped._orig_dtype,
+        )
 
         #
         # calculate dL/dW
         #
         dL_dW, _dL_dW_amax = mm_float8(
-            x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t, output_dtype=x_fp8._orig_dtype,
-            emulate=emulate)
+            x_fp8_reshaped_t_c,
+            go_fp8_reshaped_t_c_t,
+            output_dtype=x_fp8._orig_dtype,
+            emulate=emulate,
+        )
         dL_dW = dL_dW.t()
 
         empty_grads = None, None, None, None, None, None, None, None, None
         return dL_dX, dL_dW, *empty_grads
+
 
 @dataclasses.dataclass
 class DelayedScalingRecipe:
@@ -146,11 +169,14 @@ class DelayedScalingRecipe:
 
     # Controls the way to calculate current scale from amax history
     # TODO(future): add other functions as needed, hardcoded or user defined
-    scale_fn_name = 'max'
+    scale_fn_name = "max"
+
 
 class Float8LinearMixin(object):
     def __init__(self, *args, **kwargs):
-        delayed_scaling_recipe = kwargs.pop('delayed_scaling_recipe', DelayedScalingRecipe())
+        delayed_scaling_recipe = kwargs.pop(
+            "delayed_scaling_recipe", DelayedScalingRecipe()
+        )
         super().__init__(*args, **kwargs)
 
         # TODO(future): have a unique recipe per buffer instead of one per
@@ -159,15 +185,15 @@ class Float8LinearMixin(object):
         self.recipe = delayed_scaling_recipe
         history_len = self.recipe.history_len
 
-        self.register_buffer('fp8_amax_x', torch.tensor(E4M3_MAX_POS))
-        self.register_buffer('fp8_amax_history_x', torch.zeros(history_len))
-        self.register_buffer('fp8_scale_x', torch.tensor(1.0))
-        self.register_buffer('fp8_amax_w', torch.tensor(E4M3_MAX_POS))
-        self.register_buffer('fp8_amax_history_w', torch.zeros(history_len))
-        self.register_buffer('fp8_scale_w', torch.tensor(1.0))
-        self.register_buffer('fp8_amax_dL_dY', torch.tensor(E5M2_MAX_POS))
-        self.register_buffer('fp8_amax_history_dL_dY', torch.zeros(history_len))
-        self.register_buffer('fp8_scale_dL_dY', torch.tensor(1.0))
+        self.register_buffer("fp8_amax_x", torch.tensor(E4M3_MAX_POS))
+        self.register_buffer("fp8_amax_history_x", torch.zeros(history_len))
+        self.register_buffer("fp8_scale_x", torch.tensor(1.0))
+        self.register_buffer("fp8_amax_w", torch.tensor(E4M3_MAX_POS))
+        self.register_buffer("fp8_amax_history_w", torch.zeros(history_len))
+        self.register_buffer("fp8_scale_w", torch.tensor(1.0))
+        self.register_buffer("fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS))
+        self.register_buffer("fp8_amax_history_dL_dY", torch.zeros(history_len))
+        self.register_buffer("fp8_scale_dL_dY", torch.tensor(1.0))
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
 
@@ -198,40 +224,64 @@ class Float8LinearMixin(object):
 
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
-            x, self.fp8_amax_x, self.fp8_amax_history_x,
-            self.fp8_scale_x, scale_fn_name, torch.float8_e4m3fn,
-            is_amax_initialized)
+            x,
+            self.fp8_amax_x,
+            self.fp8_amax_history_x,
+            self.fp8_scale_x,
+            scale_fn_name,
+            torch.float8_e4m3fn,
+            is_amax_initialized,
+        )
         x_fp8 = Float8Tensor.to_float8(
-            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x)
+            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x
+        )
 
         return x_fp8
 
     def cast_w_to_float8(self, w, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
-            w, self.fp8_amax_w, self.fp8_amax_history_w,
-            self.fp8_scale_w, scale_fn_name, torch.float8_e4m3fn,
-            is_amax_initialized)
+            w,
+            self.fp8_amax_w,
+            self.fp8_amax_history_w,
+            self.fp8_scale_w,
+            scale_fn_name,
+            torch.float8_e4m3fn,
+            is_amax_initialized,
+        )
         w_fp8 = Float8Tensor.to_float8(
-            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
+            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w
+        )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y):
         scale_fn_name = self.recipe.scale_fn_name
         y = NoopFwToFloat8E5M2Bw.apply(
-            y, self.fp8_amax_dL_dY, self.fp8_amax_history_dL_dY,
-            self.fp8_scale_dL_dY, scale_fn_name, self.is_amax_initialized)
+            y,
+            self.fp8_amax_dL_dY,
+            self.fp8_amax_history_dL_dY,
+            self.fp8_scale_dL_dY,
+            scale_fn_name,
+            self.is_amax_initialized,
+        )
         return y
 
     def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
         y = float8_linear.apply(
-            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate)
+            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate
+        )
         return y
 
     def float8_pre_forward(self, x):
-        if self.is_amax_initialized and (not self.amax_and_scale_synced) and torch.is_grad_enabled():
-            raise AssertionError('amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward')
+        if (
+            self.is_amax_initialized
+            and (not self.amax_and_scale_synced)
+            and torch.is_grad_enabled()
+        ):
+            raise AssertionError(
+                "amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward"
+            )
         self.last_seen_input_dtype = x.dtype
 
     def float8_post_forward(self):
@@ -239,6 +289,7 @@ class Float8LinearMixin(object):
         # amaxes and scales
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
+
 
 class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     """
@@ -250,10 +301,8 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         self.float8_pre_forward(x)
 
         x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(
-            self.weight, self.is_amax_initialized)
-        y = self.float8_mm(
-            x_fp8, w_fp8, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        y = self.float8_mm(x_fp8, w_fp8, self.is_amax_initialized)
         y = self.cast_y_to_float8_in_bw(y)
 
         if self.bias is not None:
@@ -284,7 +333,7 @@ def swap_linear_with_float8_linear(
     model,
     emulate=False,
     skip_fqn_list=None,
-    cur_fqn='',
+    cur_fqn="",
 ):
     """
     Replaces all instances of torch.nn.Linear in the given model with Float8Linear.
@@ -297,15 +346,15 @@ def swap_linear_with_float8_linear(
     """
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
-        new_fqn = name if cur_fqn == '' else f'{cur_fqn}.{name}'
-        if (
-            (skip_fqn_list is None) or
-            (new_fqn not in skip_fqn_list)
-        ) and isinstance(child, torch.nn.Linear):
+        new_fqn = name if cur_fqn == "" else f"{cur_fqn}.{name}"
+        if ((skip_fqn_list is None) or (new_fqn not in skip_fqn_list)) and isinstance(
+            child, torch.nn.Linear
+        ):
             new_child = Float8Linear.from_float(child, emulate)
             setattr(model, name, new_child)
         else:
             swap_linear_with_float8_linear(child, emulate)
+
 
 def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
     """
@@ -342,12 +391,11 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
         #
         # 2. adds the `amax` values to history
         #
+        _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
+        _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
         _update_history_with_new_amax(
-            child.fp8_amax_x, child.fp8_amax_history_x)
-        _update_history_with_new_amax(
-            child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(
-            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY)
+            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
+        )
 
         #
         # 3. calculate the scales
@@ -355,16 +403,25 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
         # TODO what to do with x_dtype
         x_dtype = child.last_seen_input_dtype
         new_scale = amax_history_to_scale(
-            child.fp8_amax_history_x, torch.float8_e4m3fn,
-            x_dtype, child.recipe.scale_fn_name)
+            child.fp8_amax_history_x,
+            torch.float8_e4m3fn,
+            x_dtype,
+            child.recipe.scale_fn_name,
+        )
         child.fp8_scale_x.copy_(new_scale)
         new_scale = amax_history_to_scale(
-            child.fp8_amax_history_w, torch.float8_e4m3fn,
-            x_dtype, child.recipe.scale_fn_name)
+            child.fp8_amax_history_w,
+            torch.float8_e4m3fn,
+            x_dtype,
+            child.recipe.scale_fn_name,
+        )
         child.fp8_scale_w.copy_(new_scale)
         new_scale = amax_history_to_scale(
-            child.fp8_amax_history_dL_dY, torch.float8_e5m2,
-            x_dtype, child.recipe.scale_fn_name)
+            child.fp8_amax_history_dL_dY,
+            torch.float8_e5m2,
+            x_dtype,
+            child.recipe.scale_fn_name,
+        )
         child.fp8_scale_dL_dY.copy_(new_scale)
 
         #

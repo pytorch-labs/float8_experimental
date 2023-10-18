@@ -1,10 +1,11 @@
 import torch
 
 from float8_experimental.float8_utils import (
-    tensor_to_amax,
-    amax_to_scale,
     amax_history_to_scale,
+    amax_to_scale,
+    tensor_to_amax,
 )
+
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
     x,
@@ -28,9 +29,10 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
         new_scale = amax_history_to_scale(
-            amax_history, float8_dtype, x.dtype,
-            scale_fn_name)
+            amax_history, float8_dtype, x.dtype, scale_fn_name
+        )
         scale.copy_(new_scale)
+
 
 def _update_history_with_new_amax(new_amax, amax_history):
     """

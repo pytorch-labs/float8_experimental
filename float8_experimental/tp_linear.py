@@ -1,29 +1,27 @@
 import torch
 
-from fairscale.nn.model_parallel.layers import (
-    ColumnParallelLinear, 
-    RowParallelLinear,
-)
+from fairscale.nn.model_parallel.layers import ColumnParallelLinear, RowParallelLinear
 
 from fairscale.nn.model_parallel.mappings import (
     copy_to_model_parallel_region,
     gather_from_model_parallel_region,
-    scatter_to_model_parallel_region,
     reduce_from_model_parallel_region,
+    scatter_to_model_parallel_region,
 )
-
-from float8_experimental.float8_linear import Float8LinearMixin, float8_linear
 
 from float8_experimental.distributed_utils import (
     _AllGatherFloat8FwReduceScatterBw,
     _ReduceScatterFwAllGatherFloat8Bw,
 )
 
+from float8_experimental.float8_linear import float8_linear, Float8LinearMixin
+
 
 class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
     """
     Same as `ColumnParallelLinear`, but with single GPU compute in float8.
     """
+
     def forward(self, input_: torch.Tensor) -> torch.Tensor:  # type: ignore
         # Float8 bookkeeping
         self.float8_pre_forward(input_)
@@ -43,25 +41,26 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
             #   Float8 comms: no, because we can't reduce in float8
             input_parallel = copy_to_model_parallel_region(input_)
             input_parallel_fp8 = self.cast_x_to_float8(
-                input_parallel, self.is_amax_initialized)
+                input_parallel, self.is_amax_initialized
+            )
 
-        w_fp8 = self.cast_w_to_float8(
-            self.weight, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
         output_parallel = self.float8_mm(
-            input_parallel_fp8, w_fp8, self.is_amax_initialized)
+            input_parallel_fp8, w_fp8, self.is_amax_initialized
+        )
         output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
 
         if self.bias is not None:
             output_parallel = output_parallel + self.bias.to(output_parallel.dtype)
 
         if self.gather_output:
-            assert not self.use_sequence_parallel, 'unsupported'
+            assert not self.use_sequence_parallel, "unsupported"
             # All-gather across the partitions.
             # forward: gather
-            #   Float8 comms: 
-            #     - in the general case where the next op's input is in high 
+            #   Float8 comms:
+            #     - in the general case where the next op's input is in high
             #       precision, nothing to do.
             #     - in the special case where the next op's input is in float8
             #       we could do the comms in float8. TODO(later) implement this
@@ -81,9 +80,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
     def from_float(cls, mod, emulate=False):
         # create the new module with a toy size to ensure initialization is fast
         fake_in_features, fake_out_features = 8, 8
-        new_mod = cls(
-            fake_in_features,
-            fake_out_features)
+        new_mod = cls(fake_in_features, fake_out_features)
         new_mod.in_features = mod.in_features
         new_mod.out_features = mod.out_features
         new_mod.weight = mod.weight
@@ -97,10 +94,12 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         # TODO: test when creation is on cuda
         return new_mod
 
+
 class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
     """
     Same as `RowParallelLinear`, but with single GPU compute in float8.
     """
+
     def forward(self, input_: torch.Tensor) -> torch.Tensor:  # type:ignore
         # Float8 bookkeeping
         self.float8_pre_forward(input_)
@@ -110,12 +109,12 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
             # no-op
             input_parallel = input_
         else:
-            assert not self.use_sequence_parallel, 'unsupported'
+            assert not self.use_sequence_parallel, "unsupported"
             # forward: split
             #   Float8 comms: none
             # backward: gather
-            #   Float8 comms: 
-            #     - in the general case where the prev op's grad output is in high 
+            #   Float8 comms:
+            #     - in the general case where the prev op's grad output is in high
             #       precision, nothing to do.
             #     - in the special case where the prev op's grad output is in float8
             #       we could do the comms in float8. TODO(later) implement this
@@ -124,13 +123,14 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
 
         # cast activation and weight to float8
         input_parallel_fp8 = self.cast_x_to_float8(
-            input_parallel, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(
-            self.weight, self.is_amax_initialized)
+            input_parallel, self.is_amax_initialized
+        )
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
         output_parallel = self.float8_mm(
-            input_parallel_fp8, w_fp8, self.is_amax_initialized)
+            input_parallel_fp8, w_fp8, self.is_amax_initialized
+        )
 
         if self.use_sequence_parallel:
             # forward: reduce-scatter
@@ -169,9 +169,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
     def from_float(cls, mod, emulate=False):
         # create the new module with a toy size to ensure initialization is fast
         fake_in_features, fake_out_features = 8, 8
-        new_mod = cls(
-            fake_in_features,
-            fake_out_features)
+        new_mod = cls(fake_in_features, fake_out_features)
         new_mod.in_features = mod.in_features
         new_mod.out_features = mod.out_features
         new_mod.weight = mod.weight
@@ -184,6 +182,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         new_mod.to(device_to_use)
         new_mod.emulate = emulate
         return new_mod
+
 
 def swap_tp_linear_with_float8_linear(model, emulate=False):
     """

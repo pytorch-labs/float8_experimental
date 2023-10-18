@@ -1,4 +1,5 @@
 from typing import Callable
+
 import torch
 import torch.distributed as dist
 
@@ -15,6 +16,7 @@ FP16_MAX_POS = torch.finfo(torch.float16).max
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
 EPS = 1e-12
 
+
 @torch.no_grad()
 def amax_to_scale(amax, float8_dtype, orig_dtype):
     if float8_dtype == torch.float8_e4m3fn:
@@ -29,6 +31,7 @@ def amax_to_scale(amax, float8_dtype, orig_dtype):
         res = torch.clamp(res, max=FP16_MAX_POS)
     return res
 
+
 @torch.no_grad()
 def amax_history_to_scale(
     amax_history,
@@ -36,10 +39,11 @@ def amax_history_to_scale(
     orig_dtype,
     history_to_scale_fn_type,
 ):
-    if history_to_scale_fn_type == 'max':
+    if history_to_scale_fn_type == "max":
         amax = torch.max(amax_history)
         return amax_to_scale(amax, float8_dtype, orig_dtype)
     raise NotImplementedError()
+
 
 @torch.no_grad()
 def tensor_to_amax(x, distributed_reduction=False):
@@ -53,10 +57,12 @@ def tensor_to_amax(x, distributed_reduction=False):
 
     return amax
 
+
 @torch.no_grad()
 def tensor_to_scale(x, float8_dtype):
     amax = tensor_to_amax(x)
     return amax_to_scale(amax, float8_dtype, x.dtype)
+
 
 def to_fp8_saturated(x, float8_dtype):
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
@@ -66,10 +72,11 @@ def to_fp8_saturated(x, float8_dtype):
     # is `amax2`, where `amax1 < amax2`. This is common when using delayed
     # scaling.
     if float8_dtype == torch.float8_e4m3fn:
-        x = x.clamp(min=-1*E4M3_MAX_POS, max=E4M3_MAX_POS)
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
     else:
-        x = x.clamp(min=-1*E5M2_MAX_POS, max=E5M2_MAX_POS)
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
     return x.to(float8_dtype)
+
 
 def compute_error(x, y):
     Ps = torch.norm(x)
