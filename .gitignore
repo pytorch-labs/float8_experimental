@@ -1,7 +1,7 @@
 benchmarks/__pycache__/*
 float8_experimental/__pycache__/*
 finetune/__pycache__/*
-tests/__pycache__/*
+test/__pycache__/*
 tmp/*
 benchmarks/data/*
 
