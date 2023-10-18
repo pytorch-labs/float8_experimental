@@ -297,7 +297,7 @@ def swap_linear_with_float8_linear(
     """
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
-        new_fqn = name if cur_fqn == '' else f'{cur_fqn}.{new_fqn}'
+        new_fqn = name if cur_fqn == '' else f'{cur_fqn}.{name}'
         if (
             (skip_fqn_list is None) or
             (new_fqn not in skip_fqn_list)
