@@ -8,8 +8,8 @@ import warnings
 from typing import Optional, Tuple
 
 import float8_experimental.float8_aten_api
-import torch
 from float8_experimental.float8_tensor import Float8Tensor
+import torch
 
 
 def mm_float8_unwrapped(

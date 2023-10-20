@@ -42,7 +42,7 @@ def _test_compile_base(
 
 
 @pytest.mark.parametrize("fullgraph", [False])
-@pytest.mark.parametrize("emulate", [True])
+@pytest.mark.parametrize("emulate", [False])
 @pytest.mark.parametrize("use_subclass", [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_eager_only(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):

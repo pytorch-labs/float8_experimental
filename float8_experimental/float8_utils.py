@@ -82,3 +82,7 @@ def compute_error(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+def is_row_major(stride):
+    assert len(stride) == 2, "is_row_major only supports 2D tensors"
+    return stride[0] > stride[1] and stride[1] == 1

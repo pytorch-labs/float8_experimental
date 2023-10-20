@@ -311,7 +311,13 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
             w_fp8 = self._w_fp8
         else:
             w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
-        y = self.float8_mm(x_fp8, w_fp8, self.is_amax_initialized)
+
+        w_fp8._emulate=self.emulate
+        x_fp8._emulate=self.emulate
+
+        y = torch.matmul(x_fp8, w_fp8.t())
+
+        # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y)
 
         if self.bias is not None:

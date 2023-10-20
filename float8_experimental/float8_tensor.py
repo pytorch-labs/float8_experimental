@@ -1,46 +1,23 @@
-from typing import Any, Dict
-
+from typing import Dict, Optional
+from dataclasses import dataclass
+from abc import ABCMeta
 import torch
+
 from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
-from torch._subclasses.fake_tensor import is_fake
 
 aten = torch.ops.aten
 
-FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
+
+# If we were to output in fp8 we would need to have the dispatched op
+# do the buffer updates for scaled_mm. Since we are always outputting in
+# the higher dtype these are not needed.
+class BufferRefs(metaclass=ABCMeta):
+    pass
 
 
-def implements(aten_ops):
-    """Register aten ops to the float8 op table"""
-
-    def decorator(func):
-        for op in aten_ops:
-            FLOAT8_OPS_TABLE[op] = func
-        return func
-
-    return decorator
-
-
-@implements(
-    [
-        aten.view.default,
-        aten._unsafe_view.default,
-        aten.t.default,
-        aten.as_strided.default,
-        aten.clone.default,
-        aten.detach.default,
-    ]
-)
-def float8_desugar_op(aten_op, args, kwargs=None):
-    assert is_fake(
-        args[0]
-    ), "Float8Tensor.__torch_dispatch__ for user code is not supported"
-    new_data = aten_op(args[0]._data, *args[1:], **kwargs)
-    return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
-
-
-@implements([aten.is_same_size.default])
-def float8_is_same_size(aten_op, args, kwargs=None):
-    return args[0].shape == args[1].shape
+@dataclass
+class LinearBufferRefs(BufferRefs):
+    fp8_amax_y: torch.Tensor
 
 
 class ToFloat8ConstrFunc(torch.autograd.Function):
@@ -131,9 +108,18 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    __slots__ = ["_data", "_scale", "_orig_dtype"]
+    _buffer_refs: Optional[BufferRefs]
+    _emulate: bool
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_buffer_refs", "_emulate"]
 
-    def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
+    def __new__(
+        cls,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+        orig_dtype: torch.dtype,
+        buffer_refs=None,
+        emulate=False,
+    ):
         assert scale.numel() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
@@ -149,27 +135,28 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-
+        self._buffer_refs = buffer_refs
+        self._emulate = emulate
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nbuffer_refs={self._buffer_refs}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
-            "_scale": self._scale,
+            # "_scale": self._scale,
             "_orig_dtype": self._orig_dtype,
         }
         # return ("_data", "_scale"), (self._orig_dtype)
-        return ["_data"], ctx
+        return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, metadata):
-        assert len(inner_tensors) == 1
-        # return Float8Tensor(tensors["_data"], tensors["_scale"], metadatas[0])
+        assert len(inner_tensors) == 2
         return Float8Tensor(
-            inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"]
+            inner_tensors["_data"], inner_tensors["_scale"], metadata["_orig_dtype"]
         )
+        # return Float8Tensor(inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"])
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
@@ -180,6 +167,10 @@ class Float8Tensor(torch.Tensor):
         # PT2.0, so we explicitly disallow it here for callsites from user code.
         # 2. We do need to handle a couple of ops in order for
         # TorchDynamo tracing to succeed.
+
+        # Lazy import to avoid circular dependency
+        from float8_experimental.float8_ops import FLOAT8_OPS_TABLE
+
         if func in FLOAT8_OPS_TABLE:
             return FLOAT8_OPS_TABLE[func](func, args, kwargs)
         raise NotImplementedError(f"attempting to run {func}, this is not supported")
