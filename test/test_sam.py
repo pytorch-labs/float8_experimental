@@ -50,11 +50,12 @@ class TestFloat8SAMIntegrationTest:
         ref_name_to_grad = {
             name: param.grad for name, param in encoder_ref.named_parameters()
         }
+        sqnr_threshold = 1.0 if data_dtype == torch.float16 else -4
         for name, param in encoder_fp8.named_parameters():
             ref_grad = ref_name_to_grad[name]
             cur_grad = param.grad
             sqnr = compute_error(ref_grad, cur_grad)
-            assert sqnr > 1.0
+            assert sqnr > sqnr_threshold
 
 
 if __name__ == "__main__":

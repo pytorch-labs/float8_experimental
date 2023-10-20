@@ -22,8 +22,8 @@ def mm_float8_emulated(
     dtype3,  # output dtype
 ):
     # naive implementation: dq -> op -> q
-    m1_fp32 = m1.to(torch.float32) / s1
-    m2_fp32 = m2.to(torch.float32) / s2
+    m1_fp32 = m1.float() / s1
+    m2_fp32 = m2.float() / s2
     m3_fp32 = torch.mm(m1_fp32, m2_fp32)
 
     return m3_fp32.to(dtype3), tensor_to_amax(m3_fp32)
@@ -45,6 +45,5 @@ lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
 
 @torch.library.impl(lib, "mm_float8_emulated", "Meta")
 def _mm_float8_emulated_meta(m1, s1, m2, s2, dtype3):
-    raise("poop")
     out = torch.mm(m1.float(), m2.float()).to(dtype3)
-    return out, torch.empty(1)
+    return out, torch.empty(1, device='meta')
