@@ -27,7 +27,7 @@ def implements(aten_ops):
         aten.t.default,
         aten.as_strided.default,
         aten.clone.default,
-        aten.detach.default
+        aten.detach.default,
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
@@ -35,11 +35,11 @@ def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
 
-@implements(
-    [aten.is_same_size.default]
-)
+
+@implements([aten.is_same_size.default])
 def float8_is_same_size(aten_op, args, kwargs=None):
     return args[0].shape == args[1].shape
+
 
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
@@ -105,6 +105,7 @@ class Float8Tensor(torch.Tensor):
     3. Float8-agnostic user code can use these tensors as is - they will
        convert to original precision in `__torch_dispatch__`.
     """
+
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
@@ -161,8 +162,7 @@ class Float8Tensor(torch.Tensor):
         # TorchDynamo tracing to succeed.
         if func in FLOAT8_OPS_TABLE:
             return FLOAT8_OPS_TABLE[func](func, args, kwargs)
-        raise NotImplementedError(
-            f"attempting to run {func}, this is not supported")
+        raise NotImplementedError(f"attempting to run {func}, this is not supported")
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
