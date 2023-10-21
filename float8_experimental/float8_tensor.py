@@ -1,12 +1,44 @@
-from enum import Enum
+from typing import Any, Dict
 
 import torch
-
 from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 from torch._subclasses.fake_tensor import is_fake
-from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
+
+FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
+
+
+def implements(aten_ops):
+    """Register aten ops to the float8 op table"""
+
+    def decorator(func):
+        for op in aten_ops:
+            FLOAT8_OPS_TABLE[op] = func
+        return func
+
+    return decorator
+
+
+@implements(
+    [
+        aten.view.default,
+        aten._unsafe_view.default,
+        aten.t.default,
+        aten.as_strided.default,
+        aten.clone.default,
+        aten.detach.default,
+    ]
+)
+def float8_desugar_op(aten_op, args, kwargs=None):
+    assert is_fake(args[0]), "Float8Tensor.__torch_dispatch__ for user code is not supported"
+    new_data = aten_op(args[0]._data, *args[1:], **kwargs)
+    return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
+
+
+@implements([aten.is_same_size.default])
+def float8_is_same_size(aten_op, args, kwargs=None):
+    return args[0].shape == args[1].shape
 
 
 class ToFloat8ConstrFunc(torch.autograd.Function):
@@ -74,8 +106,13 @@ class Float8Tensor(torch.Tensor):
        convert to original precision in `__torch_dispatch__`.
     """
 
+    _data: torch.Tensor
+    _scale: torch.Tensor
+    _orig_dtype: torch.dtype
+    __slots__ = ["_data", "_scale", "_orig_dtype"]
+
     def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
-        assert scale.nelement() == 1
+        assert scale.numel() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
             cls,
@@ -97,11 +134,18 @@ class Float8Tensor(torch.Tensor):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
-        return ("_data",), (self._scale, self._orig_dtype)
+        ctx = {
+            "_scale": self._scale,
+            "_orig_dtype": self._orig_dtype,
+        }
+        # return ("_data", "_scale"), (self._orig_dtype)
+        return ["_data"], ctx
 
     @staticmethod
-    def __tensor_unflatten__(tensors, metadatas):
-        return Float8Tensor(tensors["_data"], metadatas[0], metadatas[1])
+    def __tensor_unflatten__(inner_tensors: Dict, metadata):
+        assert len(inner_tensors) == 1
+        # return Float8Tensor(tensors["_data"], tensors["_scale"], metadatas[0])
+        return Float8Tensor(inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"])
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
@@ -116,33 +160,8 @@ class Float8Tensor(torch.Tensor):
         # PT2.0, so we explicitly disallow it here for callsites from user code.
         # 2. We do need to handle a couple of ops in order for
         # TorchDynamo tracing to succeed.
-        not_supported_msg = (
-            "Float8Tensor.__torch_dispatch__ for user code is not supported"
-        )
-        if func == torch.ops.aten.clone.default:
-            assert is_fake(args[0]), not_supported_msg
-            return Float8Tensor(
-                args[0]._data.clone(**kwargs), args[0]._scale, args[0]._orig_dtype
-            )
-        elif func == torch.ops.aten.view.default:
-            assert is_fake(args[0]), not_supported_msg
-            new_data = args[0]._data.view(*args[1:])
-            return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
-        elif func == torch.ops.aten._unsafe_view.default:
-            assert is_fake(args[0]), not_supported_msg
-            new_data = torch.ops.aten._unsafe_view(args[0]._data, *args[1:], **kwargs)
-            return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
-        elif func == torch.ops.aten.t.default:
-            assert is_fake(args[0]), not_supported_msg
-            return Float8Tensor(args[0]._data.t(), args[0]._scale, args[0]._orig_dtype)
-        elif func == torch.ops.aten.as_strided.default:
-            assert is_fake(args[0]), not_supported_msg
-            return Float8Tensor(
-                args[0]._data.as_strided(*args[1:], **kwargs),
-                args[0]._scale,
-                args[0]._orig_dtype,
-            )
-
+        if func in FLOAT8_OPS_TABLE:
+            return FLOAT8_OPS_TABLE[func](func, args, kwargs)
         raise NotImplementedError(f"attempting to run {func}, this is not supported")
 
     # Do not force the Float8Tensor type on the returned tensor

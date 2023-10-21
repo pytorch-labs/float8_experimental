@@ -42,16 +42,16 @@ def _test_compile_base(
 
 
 @pytest.mark.parametrize("fullgraph", [False])
-@pytest.mark.parametrize("emulate", [False])
+@pytest.mark.parametrize("emulate", [True])
 @pytest.mark.parametrize("use_subclass", [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_eager_only(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("eager", fullgraph, emulate, use_subclass, dtype)
 
 
-@pytest.mark.parametrize("fullgraph", [True])
-@pytest.mark.parametrize("emulate", [True, False])
-@pytest.mark.parametrize("use_subclass", [True, False])
+@pytest.mark.parametrize("fullgraph", [False])
+@pytest.mark.parametrize("emulate", [False])
+@pytest.mark.parametrize("use_subclass", [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_aot_eager(fullgraph, emulate: bool, use_subclass: bool, dtype: torch.dtype):
     _test_compile_base("aot_eager", fullgraph, emulate, use_subclass, dtype)

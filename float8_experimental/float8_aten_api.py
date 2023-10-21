@@ -42,3 +42,9 @@ lib.define(
 )
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
+
+
+@torch.library.impl(lib, "mm_float8_emulated", "Meta")
+def _mm_float8_emulated_meta(m1, s1, m2, s2, dtype3):
+    out = torch.mm(m1.float(), m2.float()).to(dtype3)
+    return out, torch.empty(1, device="meta")

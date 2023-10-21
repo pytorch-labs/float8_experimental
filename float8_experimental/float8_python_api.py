@@ -25,7 +25,6 @@ def mm_float8_unwrapped(
     as inputs. This is used to standardize the logic between subclassed and non subclassed
     versions of the linear module.
     """
-
     a_inverse_scale = a_scale.reciprocal()
     b_inverse_scale = b_scale.reciprocal()
     output, output_amax = torch._scaled_mm(
