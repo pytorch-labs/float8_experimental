@@ -31,7 +31,9 @@ def implements(aten_ops):
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
-    assert is_fake(args[0]), "Float8Tensor.__torch_dispatch__ for user code is not supported"
+    assert is_fake(
+        args[0]
+    ), "Float8Tensor.__torch_dispatch__ for user code is not supported"
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
 
@@ -145,7 +147,9 @@ class Float8Tensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors: Dict, metadata):
         assert len(inner_tensors) == 1
         # return Float8Tensor(tensors["_data"], tensors["_scale"], metadatas[0])
-        return Float8Tensor(inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"])
+        return Float8Tensor(
+            inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"]
+        )
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
