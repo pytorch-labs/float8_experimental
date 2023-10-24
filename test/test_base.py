@@ -224,6 +224,11 @@ class TestFloat8Linear:
             use_no_tensor_subclass=False, emulate=emulate, device="cuda"
         )
 
+    def test_linear_float8_weight_tag(self):
+        m_ref = nn.Linear(16, 32, bias=False, device="cuda")
+        m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
+        assert m_fp8.weight.is_weight == True
+
 
 class TestScaledMM:
     @unittest.skipIf(
