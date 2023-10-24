@@ -227,7 +227,7 @@ class TestFloat8Linear:
     def test_linear_float8_weight_tag(self):
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
-        assert m_fp8.weight.is_weight == True
+        assert m_fp8.weight._is_fp8_weight == True
 
 
 class TestScaledMM:

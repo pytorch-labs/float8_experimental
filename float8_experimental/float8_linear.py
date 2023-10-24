@@ -331,7 +331,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     def add_weight_tag(self):
         # We add a tag to the weight nn.Parameter in order to signal
         # To FSDP that this param is a weight
-        self.weight.is_weight = True
+        self.weight._is_fp8_weight = True
 
 
 def swap_linear_with_float8_linear(
