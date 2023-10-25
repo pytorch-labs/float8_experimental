@@ -174,7 +174,9 @@ class DelayedScalingRecipe:
 
 class Float8LinearMixin(object):
     def __init__(self, *args, **kwargs):
-        delayed_scaling_recipe = kwargs.pop("delayed_scaling_recipe", DelayedScalingRecipe())
+        delayed_scaling_recipe = kwargs.pop(
+            "delayed_scaling_recipe", DelayedScalingRecipe()
+        )
         super().__init__(*args, **kwargs)
 
         # TODO(future): have a unique recipe per buffer instead of one per
@@ -230,7 +232,9 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        x_fp8 = Float8Tensor.to_float8(x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x)
+        x_fp8 = Float8Tensor.to_float8(
+            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x
+        )
 
         return x_fp8
 
@@ -245,7 +249,9 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        w_fp8 = Float8Tensor.to_float8(w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
+        w_fp8 = Float8Tensor.to_float8(
+            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w
+        )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y):
@@ -262,7 +268,9 @@ class Float8LinearMixin(object):
 
     def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
-        y = float8_linear.apply(x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate)
+        y = float8_linear.apply(
+            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate
+        )
         return y
 
     def float8_pre_forward(self, x):
@@ -398,7 +406,9 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
         #
         _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
         _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY)
+        _update_history_with_new_amax(
+            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
+        )
 
         #
         # 3. calculate the scales
