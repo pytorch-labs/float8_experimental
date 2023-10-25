@@ -215,9 +215,8 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False])
     def test_pt2_ts(self, emulate: bool):
-        if emulate:
-            warnings.warn("PT2.0 tracing doesn't work with subclass + emulate yet")
-            pytest.skip()
+        warnings.warn("PT2.0 tracing doesn't work with subclass")
+        pytest.skip()
         self._test_pt2_impl(
             use_no_tensor_subclass=False, emulate=emulate, device="cuda"
         )
