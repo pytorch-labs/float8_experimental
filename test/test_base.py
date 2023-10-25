@@ -46,13 +46,10 @@ class TestFloat8Tensor(unittest.TestCase):
 
 class TestFloat8Linear:
     def _test_linear_impl(self, x, m_ref, use_no_tensor_subclass: bool, emulate: bool):
-
         if not use_no_tensor_subclass:
             m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref), emulate)
         else:
-            m_fp8 = Float8LinearNoTensorSubclass.from_float(
-                copy.deepcopy(m_ref), emulate
-            )
+            m_fp8 = Float8LinearNoTensorSubclass.from_float(copy.deepcopy(m_ref), emulate)
 
         for _ in range(2):
             sync_float8_amax_and_scale_history(m_fp8)
@@ -118,9 +115,7 @@ class TestFloat8Linear:
                 warnings.warn("CUDA not available")
                 pytest.skip()
             elif torch.cuda.get_device_capability() < (9, 0):
-                warnings.warn(
-                    f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
-                )
+                warnings.warn(f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)")
                 pytest.skip()
 
         x = torch.randn(*x_shape, device="cuda")
@@ -130,20 +125,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("use_no_ts", [True, False])
-    @pytest.mark.parametrize(
-        "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
-    )
-    def test_linear_bias(
-        self, x_shape, use_no_ts: bool, emulate: bool, linear_dtype: torch.dtype
-    ):
+    @pytest.mark.parametrize("linear_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_linear_bias(self, x_shape, use_no_ts: bool, emulate: bool, linear_dtype: torch.dtype):
         if not emulate:
             if not torch.cuda.is_available():
                 warnings.warn("CUDA not available")
                 pytest.skip()
             elif torch.cuda.get_device_capability() < (9, 0):
-                warnings.warn(
-                    f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
-                )
+                warnings.warn(f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)")
                 pytest.skip()
 
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
@@ -165,10 +154,7 @@ class TestFloat8Linear:
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
-    def _test_pt2_impl(
-        self, use_no_tensor_subclass: bool, emulate: bool, device: torch.device
-    ):
-
+    def _test_pt2_impl(self, use_no_tensor_subclass: bool, emulate: bool, device: torch.device):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
@@ -220,9 +206,12 @@ class TestFloat8Linear:
         if emulate:
             warnings.warn("PT2.0 tracing doesn't work with subclass + emulate yet")
             pytest.skip()
-        self._test_pt2_impl(
-            use_no_tensor_subclass=False, emulate=emulate, device="cuda"
-        )
+        self._test_pt2_impl(use_no_tensor_subclass=False, emulate=emulate, device="cuda")
+
+    def test_linear_float8_weight_tag(self):
+        m_ref = nn.Linear(16, 32, bias=False, device="cuda")
+        m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
+        assert m_fp8.weight._is_fp8_weight
 
 
 class TestScaledMM:
@@ -230,9 +219,7 @@ class TestScaledMM:
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
         "CUDA not available",
     )
-    @pytest.mark.parametrize(
-        "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
-    )
+    @pytest.mark.parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_scaled_mm_vs_emulated(self, base_dtype):
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
@@ -259,12 +246,8 @@ class TestScaledMM:
             out_scaled_mm = out_scaled_mm.to(compare_type)
             out_emulated = out_emulated.to(compare_type)
 
-            out_scaled_mm = out_scaled_mm / amax_to_scale(
-                output_amax_scaled, input_dtype
-            )
-            out_emulated = out_emulated / amax_to_scale(
-                output_amax_emulated, input_dtype
-            )
+            out_scaled_mm = out_scaled_mm / amax_to_scale(output_amax_scaled, input_dtype)
+            out_emulated = out_emulated / amax_to_scale(output_amax_emulated, input_dtype)
 
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
@@ -289,9 +272,7 @@ class TestNumerics:
         #
         #   amax + eps >= fp8_max_pos / fp16_max_pos
 
-        float8_max_pos = (
-            E4M3_MAX_POS if float8_dtype is torch.float8_e4m3fn else E5M2_MAX_POS
-        )
+        float8_max_pos = E4M3_MAX_POS if float8_dtype is torch.float8_e4m3fn else E5M2_MAX_POS
 
         target_amax = float8_max_pos / (FP16_MAX_POS + 1e-12)
         x = torch.tensor([target_amax], dtype=torch.float16, device="cuda")
