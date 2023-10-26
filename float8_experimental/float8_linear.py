@@ -214,6 +214,13 @@ class Float8LinearMixin(object):
         # Note: this is not used in non-TP code.
         self.use_sequence_parallel = False
 
+        # Save the Float8Tensor constructor for FSDP.
+        # N.B. Do not partially apply the scale into the constructor because
+        # buffer Python IDs are not preserved by `nn.Module.to()` and the
+        # module could be moved to GPU after this constructor. Instead, FSDP
+        # will access the scale when it has ensured that it is on GPU.
+        self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
+
     def cast_x_to_float8(self, x, is_amax_initialized):
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
@@ -305,7 +312,10 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         self.float8_pre_forward(x)
 
         x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
+            w_fp8 = self._w_fp8
+        else:
+            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
         y = self.float8_mm(x_fp8, w_fp8, self.is_amax_initialized)
         y = self.cast_y_to_float8_in_bw(y)
 
