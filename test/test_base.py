@@ -15,7 +15,7 @@ from float8_experimental.float8_linear import (
 )
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 from float8_experimental.float8_python_api import mm_float8
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, to_float8
 
 from float8_experimental.float8_utils import (
     amax_to_scale,
@@ -39,7 +39,7 @@ class TestFloat8Tensor(unittest.TestCase):
         for hp_dtype, lp_dtype in itertools.product(hp_dtypes, lp_dtypes):
             x1_hp = torch.randn(4, 4, dtype=hp_dtype)
             x1_s = tensor_to_scale(x1_hp, lp_dtype)
-            x2_lp = Float8Tensor.to_float8(x1_hp, x1_s, lp_dtype)
+            x2_lp = to_float8(x1_hp, x1_s, lp_dtype)
             x3_hp = x2_lp.to_original_precision()
             self.assertTrue(x3_hp.dtype == hp_dtype)
 
@@ -248,8 +248,8 @@ class TestScaledMM:
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
 
-        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
-        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
+        a_fp8 = to_float8(a, a_scale, input_dtype)
+        b_fp8 = to_float8(b, b_scale, input_dtype)
 
         out_scaled_mm, output_amax_scaled = mm_float8(
             a_fp8, b_fp8, output_dtype=output_dtype, emulate=False

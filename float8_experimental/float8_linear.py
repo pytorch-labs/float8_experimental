@@ -18,7 +18,7 @@ from float8_experimental.float8_linear_utils import (
 )
 
 from float8_experimental.float8_python_api import mm_float8
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, to_float8
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale,
@@ -239,10 +239,9 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        x_fp8 = Float8Tensor.to_float8(
+        x_fp8 = to_float8(
             x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x
         )
-
         return x_fp8
 
     def cast_w_to_float8(self, w, is_amax_initialized):
@@ -256,7 +255,7 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        w_fp8 = Float8Tensor.to_float8(
+        w_fp8 = to_float8(
             w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w
         )
         return w_fp8
