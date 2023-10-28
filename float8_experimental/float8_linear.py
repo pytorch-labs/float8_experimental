@@ -44,10 +44,12 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_scale_dL_dY,
         scale_fn_name,
         is_amax_initialized,
+        emulate: bool,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
+        ctx.emulate = emulate
         return tensor
 
     @staticmethod
@@ -69,8 +71,8 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
         go_scaled = go * fp8_scale_dL_dY
         bits_fp8 = to_fp8_saturated(go_scaled, torch.float8_e5m2)
-        empty_grads = None, None, None, None, None
-        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype)
+        empty_grads = None, None, None, None, None, None
+        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype, emulate=ctx.emulate)
         return res, *empty_grads
 
 
@@ -256,7 +258,7 @@ class Float8LinearMixin(object):
         w_fp8 = to_float8(w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
         return w_fp8
 
-    def cast_y_to_float8_in_bw(self, y):
+    def cast_y_to_float8_in_bw(self, y: torch.Tensor, emulate: bool = False) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         y = NoopFwToFloat8E5M2Bw.apply(
             y,
@@ -265,6 +267,7 @@ class Float8LinearMixin(object):
             self.fp8_scale_dL_dY,
             scale_fn_name,
             self.is_amax_initialized,
+            emulate,
         )
         return y
 
@@ -318,7 +321,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         y = torch.matmul(x_fp8, w_fp8.t())
 
         # Cast gradY to float8_e5m2 during backward
-        y = self.cast_y_to_float8_in_bw(y)
+        y = self.cast_y_to_float8_in_bw(y, self.emulate)
 
         if self.bias is not None:
             y = y + self.bias.to(x_fp8._orig_dtype)
