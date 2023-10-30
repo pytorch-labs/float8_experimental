@@ -223,13 +223,15 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
-    def cast_x_to_float8(self, x, is_amax_initialized):
+    def cast_x_to_float8(self, x: torch.Tensor, is_amax_initialized: bool):
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
         if torch.is_autocast_enabled():
             # For now, hardcode to GPU's autocast dtype
             # if we need CPU support in the future, we can add it
-            x = x.to(torch.get_autocast_gpu_dtype())
+            autocast_dtype = torch.get_autocast_gpu_dtype()
+            x = x.to(autocast_dtype)
+            self.bias_dtype = autocast_dtype
 
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -241,10 +243,12 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        x_fp8 = to_float8(x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x)
+        x_fp8 = Float8Tensor.to_float8(
+            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
+        )
         return x_fp8
 
-    def cast_w_to_float8(self, w, is_amax_initialized):
+    def cast_w_to_float8(self, w: torch.Tensor, is_amax_initialized: bool):
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w,
@@ -255,7 +259,9 @@ class Float8LinearMixin(object):
             torch.float8_e4m3fn,
             is_amax_initialized,
         )
-        w_fp8 = to_float8(w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w)
+        w_fp8 = Float8Tensor.to_float8(
+            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w, self.emulate
+        )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor, emulate: bool = False) -> torch.Tensor:
@@ -315,16 +321,13 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         else:
             w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
-        w_fp8._emulate=self.emulate
-        x_fp8._emulate=self.emulate
-
         y = torch.matmul(x_fp8, w_fp8.t())
 
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y, self.emulate)
 
         if self.bias is not None:
-            y = y + self.bias.to(x_fp8._orig_dtype)
+            y = y + self.bias.to(self.bias_dtype)
 
         self.float8_post_forward()
         return y
@@ -345,6 +348,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
+        new_mod.bias_dtype = mod.weight.dtype
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()

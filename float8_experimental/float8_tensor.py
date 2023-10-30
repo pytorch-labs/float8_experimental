@@ -32,6 +32,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         scale: float = None,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
+        emulate: bool = False,
     ):
         # In TransformerEngine, the casts to float8 are fused with calculating
         # the new amax value. In this codebase, the eager mode code for those
@@ -42,14 +43,14 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
         tensor_scaled = tensor * scale
         bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-        return Float8Tensor(bits_fp8, scale, tensor.dtype)
+        return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None
+            return g.to_original_precision(), None, None, None, None
         else:
-            return g, None, None, None
+            return g, None, None, None, None
 
 
 def to_float8(
@@ -160,6 +161,22 @@ class Float8Tensor(torch.Tensor):
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
+
+    @staticmethod
+    @torch._dynamo.allow_in_graph
+    def to_float8(tensor, scale, float8_dtype, amax_buffer=None, emulate: bool = False):
+        """Converts a higher precision tensor to float8 in a differentiable way.
+
+        Args:
+            tensor: the tensor to convert
+            scale: the scale to use to convert the tensor
+            float8_dtype: the float8 dtype to use
+            amax_buffer: a buffer to store the amax value in prior to conversion
+
+        Returns:
+            Float8Tensor: a float8 tensor
+        """
+        return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer, emulate)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
