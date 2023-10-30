@@ -174,7 +174,9 @@ class DelayedScalingRecipe:
 
 class Float8LinearMixin(object):
     def __init__(self, *args, **kwargs):
-        delayed_scaling_recipe = kwargs.pop("delayed_scaling_recipe", DelayedScalingRecipe())
+        delayed_scaling_recipe = kwargs.pop(
+            "delayed_scaling_recipe", DelayedScalingRecipe()
+        )
         super().__init__(*args, **kwargs)
 
         # TODO(future): have a unique recipe per buffer instead of one per
@@ -268,7 +270,9 @@ class Float8LinearMixin(object):
 
     def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
         scale_fn_name = self.recipe.scale_fn_name
-        y = float8_linear.apply(x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate)
+        y = float8_linear.apply(
+            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate
+        )
         return y
 
     def float8_pre_forward(self, x):
@@ -407,7 +411,9 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
         #
         _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
         _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY)
+        _update_history_with_new_amax(
+            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
+        )
 
         #
         # 3. calculate the scales
