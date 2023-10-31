@@ -33,7 +33,7 @@ dev = ["black", "bumpver", "isort", "pip-tools"]
 packages = ["float8_experimental"]
 
 [tool.black]
-line-length = 99
+line-length = 88 
 include = '\.pyi?$'
 exclude = '''
 /(
