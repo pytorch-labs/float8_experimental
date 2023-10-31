@@ -34,7 +34,7 @@ def implements(aten_ops):
 def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(
-        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._buffer_refs, args[0]._emulate
+        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._emulate
     )
 
 
@@ -81,5 +81,5 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         "dtype"
     ] == torch.float16, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
-        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._buffer_refs, args[0]._emulate
+        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
     )

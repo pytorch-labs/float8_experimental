@@ -223,7 +223,7 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
-    def cast_x_to_float8(self, x: torch.Tensor, is_amax_initialized: bool):
+    def cast_x_to_float8(self, x: torch.Tensor, is_amax_initialized: bool) -> torch.Tensor:
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
         if torch.is_autocast_enabled():
@@ -248,7 +248,7 @@ class Float8LinearMixin(object):
         )
         return x_fp8
 
-    def cast_w_to_float8(self, w: torch.Tensor, is_amax_initialized: bool):
+    def cast_w_to_float8(self, w: torch.Tensor, is_amax_initialized: bool) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w,
@@ -348,7 +348,8 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
-        new_mod.bias_dtype = mod.weight.dtype
+        if mod.bias is not None:
+            new_mod.bias_dtype = mod.bias.dtype
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()

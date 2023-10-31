@@ -8,18 +8,6 @@ from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 aten = torch.ops.aten
 
 
-# If we were to output in fp8 we would need to have the dispatched op
-# do the buffer updates for scaled_mm. Since we are always outputting in
-# the higher dtype these are not needed.
-class BufferRefs(metaclass=ABCMeta):
-    pass
-
-
-@dataclass
-class LinearBufferRefs(BufferRefs):
-    fp8_amax_y: torch.Tensor
-
-
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8
@@ -76,9 +64,6 @@ class Float8Tensor(torch.Tensor):
       from fp8 range to fp32 range.
     * `_orig_dtype`: the original dtype of the tensor used to create this
       tensor.
-    * `_buffer_refs`: Not currently used.  In the future, this can be used
-      to store references to buffers that are used in the conversion from
-      fp32 to fp8. For instance if we make a fp8_mha
     * `_emulate`: if true using fp32 emulation for the matmuls, helpful
       if you don't have access to h100 hardware.
 
@@ -94,16 +79,14 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    _buffer_refs: Optional[BufferRefs]
     _emulate: bool
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_buffer_refs", "_emulate"]
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate"]
 
     def __new__(
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        buffer_refs=None,
         emulate=False,
     ):
         assert scale.numel() == 1
@@ -121,28 +104,25 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._buffer_refs = buffer_refs
         self._emulate = emulate
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nbuffer_refs={self._buffer_refs}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
-            # "_scale": self._scale,
             "_orig_dtype": self._orig_dtype,
+            "_emulate": self._emulate,
         }
-        # return ("_data", "_scale"), (self._orig_dtype)
         return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, metadata):
         assert len(inner_tensors) == 2
         return Float8Tensor(
-            inner_tensors["_data"], inner_tensors["_scale"], metadata["_orig_dtype"]
+            inner_tensors["_data"], inner_tensors["_scale"], metadata["_orig_dtype"], metadata["_emulate"]
         )
-        # return Float8Tensor(inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"])
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
