@@ -71,12 +71,15 @@ def float8_is_same_size(aten_op, args, kwargs=None):
 
 @implements([aten._to_copy.default])
 def autocast_to_copy(aten_op, args, kwargs=None):
-    # TODO Think about the scale propagation with autocast
+    """ This gets called when running matmul under autocast
+    when the input is a Float8Tensor, presenting as a fp32
+    tensor.
+    """
     assert isinstance(args[0], Float8Tensor)
     assert len(kwargs) == 1 and "dtype" in kwargs, "Only support dtype kwarg for autocast"
     assert kwargs[
         "dtype"
-    ].is_floating_point, "Only support floating point conversion for autocast w/ Float8Tensor"
+    ] == torch.float16, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._buffer_refs, args[0]._emulate
     )
