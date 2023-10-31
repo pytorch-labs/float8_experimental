@@ -18,7 +18,7 @@ from float8_experimental.float8_linear_utils import (
 )
 
 from float8_experimental.float8_python_api import mm_float8
-from float8_experimental.float8_tensor import Float8Tensor, to_float8
+from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale,

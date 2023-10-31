@@ -53,26 +53,6 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             return g, None, None, None, None
 
 
-def to_float8(
-    tensor: torch.Tensor,
-    scale: torch.Tensor,
-    float8_dtype: torch.dtype,
-    amax_buffer: torch.Tensor = None,
-) -> "Float8Tensor":
-    """Converts a higher precision tensor to float8 in a differentiable way.
-
-    Args:
-        tensor: the tensor to convert
-        scale: the scale to use to convert the tensor
-        float8_dtype: the float8 dtype to use
-        amax_buffer: a buffer to store the amax value in prior to conversion
-
-    Returns:
-        Float8Tensor: a float8 tensor
-    """
-    return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer)
-
-
 class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8
@@ -84,7 +64,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        return to_float8(g), None, None
+        return Float8Tensor.to_float8(g), None, None
 
 
 class Float8Tensor(torch.Tensor):
