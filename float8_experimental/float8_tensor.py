@@ -76,6 +76,11 @@ class Float8Tensor(torch.Tensor):
       from fp8 range to fp32 range.
     * `_orig_dtype`: the original dtype of the tensor used to create this
       tensor.
+    * `_buffer_refs`: Not currently used.  In the future, this can be used
+      to store references to buffers that are used in the conversion from
+      fp32 to fp8. For instance if we make a fp8_mha
+    * `_emulate`: if true using fp32 emulation for the matmuls, helpful
+      if you don't have access to h100 hardware.
 
     Intended usage of this abstraction:
     1. to bundle raw data + fp8 metadata together for easy passing through
