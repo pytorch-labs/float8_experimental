@@ -4,12 +4,12 @@ of class `Float8Tensor`. This is a thin wrapper on top of the aten API
 to simplify the product code.
 """
 
-import warnings
+
 from typing import Optional, Tuple
 
 import float8_experimental.float8_aten_api
-from float8_experimental.float8_tensor import Float8Tensor
 import torch
+from float8_experimental.float8_tensor import Float8Tensor
 
 
 def mm_float8_unwrapped(

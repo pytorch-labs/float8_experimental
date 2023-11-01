@@ -1,8 +1,6 @@
-from typing import Dict, Optional
-from dataclasses import dataclass
-from abc import ABCMeta
-import torch
+from typing import Dict
 
+import torch
 from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 
 aten = torch.ops.aten
@@ -121,7 +119,10 @@ class Float8Tensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors: Dict, metadata):
         assert len(inner_tensors) == 2
         return Float8Tensor(
-            inner_tensors["_data"], inner_tensors["_scale"], metadata["_orig_dtype"], metadata["_emulate"]
+            inner_tensors["_data"],
+            inner_tensors["_scale"],
+            metadata["_orig_dtype"],
+            metadata["_emulate"],
         )
 
     def to_original_precision(self):
@@ -141,7 +142,9 @@ class Float8Tensor(torch.Tensor):
         Returns:
             Float8Tensor: a float8 tensor
         """
-        return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer, emulate)
+        return ToFloat8ConstrFunc.apply(
+            tensor, scale, float8_dtype, amax_buffer, emulate
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):

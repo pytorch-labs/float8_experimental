@@ -1,10 +1,9 @@
 from typing import Any, Dict
 
 import torch
-
 from float8_experimental.float8_python_api import mm_float8_unwrapped
 from float8_experimental.float8_tensor import Float8Tensor
-from float8_experimental.float8_utils import is_row_major, tensor_to_amax, to_fp8_saturated
+from float8_experimental.float8_utils import is_row_major
 
 aten = torch.ops.aten
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
@@ -33,9 +32,7 @@ def implements(aten_ops):
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
-    return Float8Tensor(
-        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._emulate
-    )
+    return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype, args[0]._emulate)
 
 
 @implements([aten.mm.default])
@@ -71,15 +68,17 @@ def float8_is_same_size(aten_op, args, kwargs=None):
 
 @implements([aten._to_copy.default])
 def autocast_to_copy(aten_op, args, kwargs=None):
-    """ This gets called when running matmul under autocast
+    """This gets called when running matmul under autocast
     when the input is a Float8Tensor, presenting as a fp32
     tensor.
     """
     assert isinstance(args[0], Float8Tensor)
-    assert len(kwargs) == 1 and "dtype" in kwargs, "Only support dtype kwarg for autocast"
-    assert kwargs[
-        "dtype"
-    ] == torch.float16, "Only support floating point conversion for autocast w/ Float8Tensor"
+    assert (
+        len(kwargs) == 1 and "dtype" in kwargs
+    ), "Only support dtype kwarg for autocast"
+    assert (
+        kwargs["dtype"] == torch.float16
+    ), "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
     )

@@ -135,7 +135,9 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
-    def cast_x_to_float8(self, x: torch.Tensor, is_amax_initialized: bool) -> torch.Tensor:
+    def cast_x_to_float8(
+        self, x: torch.Tensor, is_amax_initialized: bool
+    ) -> torch.Tensor:
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
         if torch.is_autocast_enabled():
@@ -160,7 +162,9 @@ class Float8LinearMixin(object):
         )
         return x_fp8
 
-    def cast_w_to_float8(self, w: torch.Tensor, is_amax_initialized: bool) -> torch.Tensor:
+    def cast_w_to_float8(
+        self, w: torch.Tensor, is_amax_initialized: bool
+    ) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w,
@@ -176,7 +180,9 @@ class Float8LinearMixin(object):
         )
         return w_fp8
 
-    def cast_y_to_float8_in_bw(self, y: torch.Tensor, emulate: bool = False) -> torch.Tensor:
+    def cast_y_to_float8_in_bw(
+        self, y: torch.Tensor, emulate: bool = False
+    ) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         y = NoopFwToFloat8E5M2Bw.apply(
             y,
@@ -210,6 +216,7 @@ class Float8LinearMixin(object):
         # We add a tag to the weight nn.Parameter in order to signal
         # To FSDP that this param is a weight
         self.weight._is_fp8_weight = True
+
 
 class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     """
