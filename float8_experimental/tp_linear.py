@@ -14,7 +14,7 @@ from float8_experimental.distributed_utils import (
     _ReduceScatterFwAllGatherFloat8Bw,
 )
 
-from float8_experimental.float8_linear import float8_linear, Float8LinearMixin
+from float8_experimental.float8_linear import Float8LinearMixin
 
 
 class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
@@ -44,16 +44,19 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
                 input_parallel, self.is_amax_initialized
             )
 
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
+            w_fp8 = self._w_fp8
+        else:
+            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
-        output_parallel = self.float8_mm(
-            input_parallel_fp8, w_fp8, self.is_amax_initialized
-        )
-        output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
+        output_parallel = torch.matmul(input_parallel_fp8, w_fp8.t())
+
+        # Cast gradY to float8_e5m2 during backward
+        output_parallel = self.cast_y_to_float8_in_bw(output_parallel, self.emulate)
 
         if self.bias is not None:
-            output_parallel = output_parallel + self.bias.to(output_parallel.dtype)
+            output_parallel = output_parallel + self.bias.to(self.bias_dtype)
 
         if self.gather_output:
             assert not self.use_sequence_parallel, "unsupported"
@@ -85,12 +88,15 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         new_mod.out_features = mod.out_features
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
+        if mod.bias is not None:
+            new_mod.bias_dtype = mod.bias.dtype
         new_mod.gather_output = mod.gather_output
         new_mod.output_size_per_partition = mod.output_size_per_partition
         new_mod.master_weight = mod.master_weight
         device_to_use = next(mod.parameters()).device
         new_mod.to(device_to_use)
         new_mod.emulate = emulate
+        new_mod.add_weight_tag()
         # TODO: test when creation is on cuda
         return new_mod
 
@@ -125,12 +131,14 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         input_parallel_fp8 = self.cast_x_to_float8(
             input_parallel, self.is_amax_initialized
         )
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+
+        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
+            w_fp8 = self._w_fp8
+        else:
+            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
-        output_parallel = self.float8_mm(
-            input_parallel_fp8, w_fp8, self.is_amax_initialized
-        )
+        output_parallel = torch.matmul(input_parallel_fp8, w_fp8.t())
 
         if self.use_sequence_parallel:
             # forward: reduce-scatter
@@ -138,14 +146,14 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
             # backward: all-gather
             #   Float8 comms: yes
             output_ = _ReduceScatterFwAllGatherFloat8Bw.apply(output_parallel)
-            output_ = self.cast_y_to_float8_in_bw(output_)
+            output_ = self.cast_y_to_float8_in_bw(output_, self.emulate)
         else:
             # All-reduce across all the partitions.
             # forward: reduce
             #   Float8 comms: none
             # backward: no-op
             #   Float8 comms: none
-            output_parallel = self.cast_y_to_float8_in_bw(output_parallel)
+            output_parallel = self.cast_y_to_float8_in_bw(output_parallel, self.emulate)
 
             # adding zero below is a hack
             # without this hack, we see the following error: https://gist.github.com/vkuzo/0ed84e35081c8c7d20d0f46ed4322704
@@ -174,6 +182,8 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         new_mod.out_features = mod.out_features
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
+        if mod.bias is not None:
+            new_mod.bias_dtype = mod.bias.dtype
         new_mod.input_is_parallel = mod.input_is_parallel
         new_mod.input_size_per_partition = mod.input_size_per_partition
         new_mod.master_weight = mod.master_weight
@@ -181,6 +191,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         device_to_use = next(mod.parameters()).device
         new_mod.to(device_to_use)
         new_mod.emulate = emulate
+        new_mod.add_weight_tag()
         return new_mod
 
 

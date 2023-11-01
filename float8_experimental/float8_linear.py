@@ -76,94 +76,6 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         return res, *empty_grads
 
 
-class float8_linear(torch.autograd.Function):
-    """
-    Like F.linear, but with X and W in float8
-    """
-
-    @staticmethod
-    def forward(
-        ctx,
-        x_fp8,
-        w_fp8,
-        is_amax_initialized,
-        scale_fn_name,
-        emulate: bool,
-    ):
-        ctx.save_for_backward(x_fp8, w_fp8)
-        ctx.scale_fn_name = scale_fn_name
-        ctx.emulate = emulate
-        orig_shape = x_fp8._data.shape
-        x_fp8_reshaped = Float8Tensor(
-            x_fp8._data.reshape(-1, orig_shape[-1]), x_fp8._scale, x_fp8._orig_dtype
-        )
-        ctx.is_amax_initialized = is_amax_initialized
-
-        w_fp8_t = Float8Tensor(w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype)
-
-        res_bits, _output_amax = mm_float8(
-            x_fp8_reshaped, w_fp8_t, output_dtype=x_fp8._orig_dtype, emulate=emulate
-        )
-        res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
-        return res_bits
-
-    @staticmethod
-    def backward(ctx, go_fp8):
-        x_fp8, w_fp8 = ctx.saved_tensors
-        scale_fn_name = ctx.scale_fn_name
-        emulate = ctx.emulate
-        is_amax_initialized = ctx.is_amax_initialized
-
-        go_fp8_orig_shape = go_fp8._data.shape
-        go_fp8_reshaped = Float8Tensor(
-            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]),
-            go_fp8._scale,
-            go_fp8._orig_dtype,
-        )
-
-        w_fp8_t_c_t = Float8Tensor(
-            w_fp8._data.t().contiguous().t(), w_fp8._scale, w_fp8._orig_dtype
-        )
-
-        #
-        # calculate dL/dX
-        #
-        dL_dX, _dL_dX_amax = mm_float8(
-            go_fp8_reshaped,
-            w_fp8_t_c_t,
-            output_dtype=x_fp8._orig_dtype,
-            emulate=emulate,
-        )
-        dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
-
-        x_fp8_orig_shape = x_fp8._data.shape
-        x_fp8_reshaped_t_c = Float8Tensor(
-            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(),
-            x_fp8._scale,
-            x_fp8._orig_dtype,
-        )
-
-        go_fp8_reshaped_t_c_t = Float8Tensor(
-            go_fp8_reshaped._data.t().contiguous().t(),
-            go_fp8_reshaped._scale,
-            go_fp8_reshaped._orig_dtype,
-        )
-
-        #
-        # calculate dL/dW
-        #
-        dL_dW, _dL_dW_amax = mm_float8(
-            x_fp8_reshaped_t_c,
-            go_fp8_reshaped_t_c_t,
-            output_dtype=x_fp8._orig_dtype,
-            emulate=emulate,
-        )
-        dL_dW = dL_dW.t()
-
-        empty_grads = None, None, None, None, None, None, None, None, None
-        return dL_dX, dL_dW, *empty_grads
-
-
 @dataclasses.dataclass
 class DelayedScalingRecipe:
     # Controls the history length of amax buffers
@@ -277,13 +189,6 @@ class Float8LinearMixin(object):
         )
         return y
 
-    def float8_mm(self, x_fp8, w_fp8, is_amax_initialized):
-        scale_fn_name = self.recipe.scale_fn_name
-        y = float8_linear.apply(
-            x_fp8, w_fp8, is_amax_initialized, scale_fn_name, self.emulate
-        )
-        return y
-
     def float8_pre_forward(self, x):
         if (
             self.is_amax_initialized
@@ -301,6 +206,10 @@ class Float8LinearMixin(object):
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
+    def add_weight_tag(self):
+        # We add a tag to the weight nn.Parameter in order to signal
+        # To FSDP that this param is a weight
+        self.weight._is_fp8_weight = True
 
 class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     """
@@ -354,11 +263,6 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()
         return new_mod
-
-    def add_weight_tag(self):
-        # We add a tag to the weight nn.Parameter in order to signal
-        # To FSDP that this param is a weight
-        self.weight._is_fp8_weight = True
 
 
 def swap_linear_with_float8_linear(
