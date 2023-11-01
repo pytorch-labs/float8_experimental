@@ -1,46 +1,9 @@
-from typing import Any, Dict
+from typing import Dict
 
 import torch
 from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
-from torch._subclasses.fake_tensor import is_fake
 
 aten = torch.ops.aten
-
-FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
-
-
-def implements(aten_ops):
-    """Register aten ops to the float8 op table"""
-
-    def decorator(func):
-        for op in aten_ops:
-            FLOAT8_OPS_TABLE[op] = func
-        return func
-
-    return decorator
-
-
-@implements(
-    [
-        aten.view.default,
-        aten._unsafe_view.default,
-        aten.t.default,
-        aten.as_strided.default,
-        aten.clone.default,
-        aten.detach.default,
-    ]
-)
-def float8_desugar_op(aten_op, args, kwargs=None):
-    assert is_fake(
-        args[0]
-    ), "Float8Tensor.__torch_dispatch__ for user code is not supported"
-    new_data = aten_op(args[0]._data, *args[1:], **kwargs)
-    return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype)
-
-
-@implements([aten.is_same_size.default])
-def float8_is_same_size(aten_op, args, kwargs=None):
-    return args[0].shape == args[1].shape
 
 
 class ToFloat8ConstrFunc(torch.autograd.Function):
@@ -55,6 +18,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         scale: float = None,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
+        emulate: bool = False,
     ):
         # In TransformerEngine, the casts to float8 are fused with calculating
         # the new amax value. In this codebase, the eager mode code for those
@@ -65,34 +29,14 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
         tensor_scaled = tensor * scale
         bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-        return Float8Tensor(bits_fp8, scale, tensor.dtype)
+        return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None
+            return g.to_original_precision(), None, None, None, None
         else:
-            return g, None, None, None
-
-
-def to_float8(
-    tensor: torch.Tensor,
-    scale: torch.Tensor,
-    float8_dtype: torch.dtype,
-    amax_buffer: torch.Tensor = None,
-) -> "Float8Tensor":
-    """Converts a higher precision tensor to float8 in a differentiable way.
-
-    Args:
-        tensor: the tensor to convert
-        scale: the scale to use to convert the tensor
-        float8_dtype: the float8 dtype to use
-        amax_buffer: a buffer to store the amax value in prior to conversion
-
-    Returns:
-        Float8Tensor: a float8 tensor
-    """
-    return ToFloat8ConstrFunc.apply(tensor, scale, float8_dtype, amax_buffer)
+            return g, None, None, None, None
 
 
 class FromFloat8ConstrFunc(torch.autograd.Function):
@@ -106,7 +50,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        return to_float8(g), None, None
+        return Float8Tensor.to_float8(g), None, None
 
 
 class Float8Tensor(torch.Tensor):
@@ -118,6 +62,8 @@ class Float8Tensor(torch.Tensor):
       from fp8 range to fp32 range.
     * `_orig_dtype`: the original dtype of the tensor used to create this
       tensor.
+    * `_emulate`: if true using fp32 emulation for the matmuls, helpful
+      if you don't have access to h100 hardware.
 
     Intended usage of this abstraction:
     1. to bundle raw data + fp8 metadata together for easy passing through
@@ -131,9 +77,16 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    __slots__ = ["_data", "_scale", "_orig_dtype"]
+    _emulate: bool
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate"]
 
-    def __new__(cls, data: torch.Tensor, scale: torch.Tensor, orig_dtype: torch.dtype):
+    def __new__(
+        cls,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+        orig_dtype: torch.dtype,
+        emulate=False,
+    ):
         assert scale.numel() == 1
 
         self = torch.Tensor._make_wrapper_subclass(
@@ -149,30 +102,49 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-
+        self._emulate = emulate
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, as_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
-            "_scale": self._scale,
             "_orig_dtype": self._orig_dtype,
+            "_emulate": self._emulate,
         }
-        # return ("_data", "_scale"), (self._orig_dtype)
-        return ["_data"], ctx
+        return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, metadata):
-        assert len(inner_tensors) == 1
-        # return Float8Tensor(tensors["_data"], tensors["_scale"], metadatas[0])
+        assert len(inner_tensors) == 2
         return Float8Tensor(
-            inner_tensors["_data"], metadata["_scale"], metadata["_orig_dtype"]
+            inner_tensors["_data"],
+            inner_tensors["_scale"],
+            metadata["_orig_dtype"],
+            metadata["_emulate"],
         )
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
+
+    @staticmethod
+    @torch._dynamo.allow_in_graph
+    def to_float8(tensor, scale, float8_dtype, amax_buffer=None, emulate: bool = False):
+        """Converts a higher precision tensor to float8 in a differentiable way.
+
+        Args:
+            tensor: the tensor to convert
+            scale: the scale to use to convert the tensor
+            float8_dtype: the float8 dtype to use
+            amax_buffer: a buffer to store the amax value in prior to conversion
+
+        Returns:
+            Float8Tensor: a float8 tensor
+        """
+        return ToFloat8ConstrFunc.apply(
+            tensor, scale, float8_dtype, amax_buffer, emulate
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -180,6 +152,10 @@ class Float8Tensor(torch.Tensor):
         # PT2.0, so we explicitly disallow it here for callsites from user code.
         # 2. We do need to handle a couple of ops in order for
         # TorchDynamo tracing to succeed.
+
+        # Lazy import to avoid circular dependency
+        from float8_experimental.float8_ops import FLOAT8_OPS_TABLE
+
         if func in FLOAT8_OPS_TABLE:
             return FLOAT8_OPS_TABLE[func](func, args, kwargs)
         raise NotImplementedError(f"attempting to run {func}, this is not supported")
