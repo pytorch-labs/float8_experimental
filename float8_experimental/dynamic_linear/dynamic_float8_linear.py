@@ -84,16 +84,10 @@ class Float8DynamicLinear(torch.nn.Linear):
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
         """
-        # TODO Follow up! This is a great idea but we need the mixin base to create real
-        # Tensors and the Linear base to create empty params
-        # with torch.device("meta"):
-        new_mod = cls(mod.in_features, mod.out_features, bias=False)
+        with torch.device("meta"):
+            new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
-        if mod.bias is not None:
-            new_mod.bias_dtype = mod.bias.dtype
-        # I think its okay to send all params and buffers to device
-        new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()
         return new_mod
