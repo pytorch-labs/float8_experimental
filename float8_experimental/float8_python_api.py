@@ -12,13 +12,14 @@ import torch
 from float8_experimental.float8_tensor import Float8Tensor
 
 
-def mm_float8_unwrapped(
+def addmm_float8_unwrapped(
     a_data: torch.Tensor,
     a_scale: torch.Tensor,
     b_data: torch.Tensor,
     b_scale: torch.tensor,
     output_dtype: torch.dtype,
     output_scale: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor]=None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This is the unwrapped version of mm_float8, which does not take in Float8Tensors
@@ -30,7 +31,7 @@ def mm_float8_unwrapped(
     output, output_amax = torch._scaled_mm(
         a_data,
         b_data,
-        bias=None,
+        bias=bias,
         out_dtype=output_dtype,
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
@@ -70,6 +71,6 @@ def mm_float8(
             a._data, a._scale, b._data, b._scale, output_dtype
         )
 
-    return mm_float8_unwrapped(
+    return addmm_float8_unwrapped(
         a._data, a._scale, b._data, b._scale, output_dtype, output_scale
     )

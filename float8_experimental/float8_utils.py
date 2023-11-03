@@ -19,6 +19,7 @@ EPS = 1e-12
 
 @torch.no_grad()
 def amax_to_scale(amax, float8_dtype, orig_dtype):
+    scale = torch.empty((), device=amax.device, dtype=torch.float32)
     if float8_dtype == torch.float8_e4m3fn:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     else:  # e5m2
@@ -29,7 +30,8 @@ def amax_to_scale(amax, float8_dtype, orig_dtype):
     # to care about this for float32/bfloat16.
     if orig_dtype is torch.float16:
         res = torch.clamp(res, max=FP16_MAX_POS)
-    return res
+    scale.copy_(res)
+    return scale
 
 
 @torch.no_grad()

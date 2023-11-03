@@ -7,7 +7,7 @@ from float8_experimental.float8_linear_utils import (
     _maybe_initialize_amaxes_scales_for_float8_cast,
     _update_history_with_new_amax,
 )
-from float8_experimental.float8_python_api import mm_float8_unwrapped
+from float8_experimental.float8_python_api import addmm_float8_unwrapped
 
 from float8_experimental.float8_utils import (
     E4M3_MAX_POS,
@@ -102,7 +102,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
                 x_fp8_reshaped, fp8_scale_x, w_fp8_d.t(), fp8_scale_w, output_dtype
             )
         else:
-            res_bits, _output_amax = mm_float8_unwrapped(
+            res_bits, _output_amax = addmm_float8_unwrapped(
                 x_fp8_reshaped,
                 fp8_scale_x,
                 w_fp8_d.t(),
@@ -161,7 +161,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
                 output_dtype,
             )
         else:
-            dL_dX_bits, _dL_dX_amax = mm_float8_unwrapped(
+            dL_dX_bits, _dL_dX_amax = addmm_float8_unwrapped(
                 go_fp8_reshaped,
                 fp8_scale_dL_dY,
                 w_fp8_d_t_c.t(),
@@ -187,7 +187,7 @@ class float8_linear_no_tensor_subclass(torch.autograd.Function):
             )
             dL_dW_bits = dL_dW_bits.t()
         else:
-            dL_dW_bits, _dL_dW_amax = mm_float8_unwrapped(
+            dL_dW_bits, _dL_dW_amax = addmm_float8_unwrapped(
                 x_fp8_d_r_t_c,
                 fp8_scale_x,
                 go_fp8_reshaped_t_c_t,

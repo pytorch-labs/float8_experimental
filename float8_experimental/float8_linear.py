@@ -17,7 +17,6 @@ from float8_experimental.float8_linear_utils import (
     _update_history_with_new_amax,
 )
 
-from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
