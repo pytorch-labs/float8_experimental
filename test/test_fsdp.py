@@ -19,8 +19,11 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from float8_experimental.float8_linear import (
-    swap_linear_with_float8_linear,
+    Float8Linear,
     sync_float8_amax_and_scale_history,
+)
+from float8_experimental.float8_linear_utils import (
+    swap_linear_with_float8_linear,
 )
 from torch.distributed.fsdp import (
     FullStateDictConfig,
@@ -63,7 +66,7 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
         nn.Linear(N, N, dtype=base_dtype),
     )
     if is_fp8:
-        swap_linear_with_float8_linear(m, emulate=emulate)
+        swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
     return m
 
 

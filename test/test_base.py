@@ -10,8 +10,10 @@ import torch
 import torch.nn as nn
 from float8_experimental.float8_linear import (
     Float8Linear,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
+)
+from float8_experimental.float8_linear_utils import (
+    swap_linear_with_float8_linear,
 )
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 from float8_experimental.float8_python_api import mm_float8
