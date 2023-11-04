@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+import fire
 
 import torch
 
@@ -13,6 +14,7 @@ from float8_experimental.float8_linear import (
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.dynamic_linear import Float8DynamicLinear
 from torch.profiler import profile, ProfilerActivity, record_function
 
 
@@ -89,22 +91,36 @@ class LinearParams:
     N: int
     input_bias: bool
     ref_dtype: torch.dtype
+    layer_norm: bool = True
     torch_compile: Optional[bool] = False
 
+type_map = {
+    "delayed": Float8Linear,
+    "dynamic": Float8DynamicLinear,
+    "no_subclass": Float8LinearNoTensorSubclass,
+}
+requires_sync = {"delayed", "no_subclass"}
 
-def main(profile_path: Path, compile: bool, use_ts: bool = False):
+def get_float8_linear(linear_type: str, linear_ref: torch.nn.Linear):
+    return type_map[linear_type].from_float(copy.deepcopy(linear_ref), emulate=False)
+
+def main(profile_path: Path, compile: bool, linear_type: str):
+    profile_path = Path(profile_path)
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
-    print(f"Compile is set to             | {compile}")
-    print(f"Use tensor subclass is set to | {use_ts}")
+    if linear_type not in type_map:
+        raise ValueError(f"linear_type must be one of {type_map.keys()}")
     params = LinearParams(
         M=4 * 4096,
         K=8192,
         N=7168,
         input_bias=False,
-        ref_dtype=torch.float16,
+        ref_dtype=torch.bfloat16,
+        layer_norm=True,
         torch_compile=compile,
     )
-
+    print(f"Compile is set to             | {compile}")
+    print(f"Use tensor subclass is set to | {linear_type}")
+    print(f"Use layer norm is set to      | {params.layer_norm}")
     linear_ref = torch.nn.Linear(
         params.K,
         params.N,
@@ -112,26 +128,33 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
         device="cuda",
         dtype=params.ref_dtype,
     )
-    if use_ts:
-        linear_float8 = Float8Linear.from_float(
-            copy.deepcopy(linear_ref), emulate=False
-        )
-    else:
-        linear_float8 = Float8LinearNoTensorSubclass.from_float(
-            copy.deepcopy(linear_ref), emulate=False
-        )
+    linear_float8 = get_float8_linear(linear_type, linear_ref)
 
     input_tensor = torch.randn(
         params.M, params.K, device="cuda", dtype=params.ref_dtype, requires_grad=True
     )
 
-    ref_forw_backward = lambda: linear_ref(input_tensor).sum().backward()
+    if params.layer_norm:
+        ln = torch.nn.LayerNorm(params.K, elementwise_affine=False, device="cuda", dtype=params.ref_dtype)
 
-    def float8_forw_backward():
-        with record_function("scale_amax_and_scales"):
-            sync_float8_amax_and_scale_history(linear_float8)
+    def ref_forw_backward(x):
+        if params.layer_norm:
+            with record_function("layer_norm"):
+                x = ln(x)
         with record_function("forward"):
-            out = linear_float8(input_tensor)
+            out = linear_ref(x)
+        with record_function("backward"):
+            out.sum().backward()
+
+    def float8_forw_backward(x):
+        if linear_type in requires_sync:
+            with record_function("scale_amax_and_scales"):
+                sync_float8_amax_and_scale_history(linear_float8)
+        if params.layer_norm:
+            with record_function("layer_norm"):
+                x = ln(x)
+        with record_function("forward"):
+            out = linear_float8(x)
         with record_function("backward"):
             out.sum().backward()
 
@@ -144,10 +167,10 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
             device="cuda", dtype=params.ref_dtype
         )
 
-        def te_forw_backward():
+        def te_forw_backward(x):
             with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
                 with record_function("forward"):
-                    out = te_linear(input_tensor)
+                    out = te_linear(x)
                 with record_function("backward"):
                     out.sum().backward()
 
@@ -159,21 +182,20 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
         #     te_forw_backward = torch.compile(te_forw_backward)
 
     for _ in range(5):
-        ref_forw_backward()
-        float8_forw_backward()
+        ref_forw_backward(input_tensor)
+        float8_forw_backward(input_tensor)
         if transformer_engine_installed:
-            te_forw_backward()
+            te_forw_backward(input_tensor)
 
     # Profile Reference Linear
-    ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
+    ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
     profile_config = ProfileConfig(
         str(profile_path / ref_string), ref_string, iters=5, warmup_iters=5, sync=True
     )
-    profile_function(profile_config, ref_forw_backward)
+    profile_function(profile_config, ref_forw_backward, input_tensor)
 
     # # Profile Float8 Linear
-    subclass_string = "subclass" if use_ts else "NO_subclass"
-    float8_string = f"linear_float8_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}_{subclass_string}.json"
+    float8_string = f"linear_float8_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}_{linear_type}.json"
     profile_config = ProfileConfig(
         str(profile_path / float8_string),
         float8_string,
@@ -181,25 +203,16 @@ def main(profile_path: Path, compile: bool, use_ts: bool = False):
         warmup_iters=5,
         sync=True,
     )
-    profile_function(profile_config, float8_forw_backward)
+    profile_function(profile_config, float8_forw_backward, input_tensor)
 
     te_string = f"linear_transformer_engine_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
     if transformer_engine_installed:
         profile_config = ProfileConfig(
             str(profile_path / te_string), te_string, iters=5, warmup_iters=5, sync=True
         )
-        profile_function(profile_config, te_forw_backward)
+        profile_function(profile_config, te_forw_backward, input_tensor)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-o", "--output_path", type=str, required=True, help="Path to save folder"
-    )
-    parser.add_argument(
-        "--compile", action="store_true", help="Whether to torch compile the functions"
-    )
-    parser.add_argument("--use_ts", action="store_true", help="use tensor subclass")
-    args = parser.parse_args()
-    output_path = Path(args.output_path)
-    main(output_path, args.compile, args.use_ts)
+    # Example usage: python benchmarks/profile_linear_float8.py benchmarks/data/profiles --compile=True --linear_type="dynamic"
+    fire.Fire(main)

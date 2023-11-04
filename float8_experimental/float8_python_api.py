@@ -22,7 +22,7 @@ def addmm_float8_unwrapped(
     bias: Optional[torch.Tensor]=None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    This is the unwrapped version of mm_float8, which does not take in Float8Tensors
+    This is the unwrapped version of addmm_float8, which does not take in Float8Tensors
     as inputs. This is used to standardize the logic between subclassed and non subclassed
     versions of the linear module.
     """
