@@ -3,6 +3,7 @@ import itertools
 import random
 import unittest
 import warnings
+from enum import Enum
 
 import pytest
 
@@ -10,19 +11,21 @@ import torch
 import torch.nn as nn
 from float8_experimental.float8_linear import (
     Float8Linear,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+from float8_experimental.float8_linear_utils import (
+    LinearType,
+    get_float8_linear,
+    linear_requires_sync,
+)
 from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
-
 from float8_experimental.float8_utils import (
-    amax_to_scale,
-    compute_error,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     FP16_MAX_POS,
+    amax_to_scale,
+    compute_error,
     tensor_to_scale,
 )
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
@@ -45,16 +48,11 @@ class TestFloat8Tensor(unittest.TestCase):
 
 
 class TestFloat8Linear:
-    def _test_linear_impl(self, x, m_ref, use_no_tensor_subclass: bool, emulate: bool):
-        if not use_no_tensor_subclass:
-            m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref), emulate)
-        else:
-            m_fp8 = Float8LinearNoTensorSubclass.from_float(
-                copy.deepcopy(m_ref), emulate
-            )
-
+    def _test_linear_impl(self, x, m_ref, linear_type: LinearType, emulate: bool):
+        m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
         for _ in range(2):
-            sync_float8_amax_and_scale_history(m_fp8)
+            if linear_requires_sync(linear_type):
+                sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)
             y_fp8.sum().backward()
             y_ref = m_ref(x)
@@ -71,47 +69,50 @@ class TestFloat8Linear:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        amax_buffer_names = [
-            "fp8_amax_x",
-            "fp8_amax_w",
-            "fp8_amax_dL_dY",
-        ]
-        for buffer_name in amax_buffer_names:
-            buffer_value = getattr(m_fp8, buffer_name)
-            for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
+        if linear_requires_sync(linear_type):
+            amax_buffer_names = [
+                "fp8_amax_x",
+                "fp8_amax_w",
+                "fp8_amax_dL_dY",
+            ]
+            for buffer_name in amax_buffer_names:
+                buffer_value = getattr(m_fp8, buffer_name)
+                for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
+                    assert torch.ne(
+                        buffer_value, torch.tensor(init_val)
+                    ), f"{buffer_name} not filled, current value {buffer_value}"
+
+            # verify all of the amax history buffers got updated
+            amax_history_buffer_names = [
+                "fp8_amax_history_x",
+                "fp8_amax_history_w",
+                "fp8_amax_history_dL_dY",
+            ]
+            for buffer_name in amax_history_buffer_names:
+                buffer_value = getattr(m_fp8, buffer_name)
+                assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
+
+            # verify all of the scale buffers got updated
+            scale_buffer_names = [
+                "fp8_scale_x",
+                "fp8_scale_w",
+                "fp8_scale_dL_dY",
+            ]
+            for buffer_name in scale_buffer_names:
+                buffer_value = getattr(m_fp8, buffer_name)
                 assert torch.ne(
-                    buffer_value, torch.tensor(init_val)
+                    buffer_value, torch.tensor(1.0)
                 ), f"{buffer_name} not filled, current value {buffer_value}"
 
-        # verify all of the amax history buffers got updated
-        amax_history_buffer_names = [
-            "fp8_amax_history_x",
-            "fp8_amax_history_w",
-            "fp8_amax_history_dL_dY",
-        ]
-        for buffer_name in amax_history_buffer_names:
-            buffer_value = getattr(m_fp8, buffer_name)
-            assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
-
-        # verify all of the scale buffers got updated
-        scale_buffer_names = [
-            "fp8_scale_x",
-            "fp8_scale_w",
-            "fp8_scale_dL_dY",
-        ]
-        for buffer_name in scale_buffer_names:
-            buffer_value = getattr(m_fp8, buffer_name)
-            assert torch.ne(
-                buffer_value, torch.tensor(1.0)
-            ), f"{buffer_name} not filled, current value {buffer_value}"
-
-        # verify initialization flags got updated
-        assert m_fp8.is_amax_initialized == True
+            # verify initialization flags got updated
+            assert m_fp8.is_amax_initialized == True
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("use_no_ts", [True, False])
-    def test_linear_nobias(self, x_shape, use_no_ts: bool, emulate: bool):
+    @pytest.mark.parametrize(
+        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
+    )
+    def test_linear_nobias(self, x_shape, linear_type: LinearType, emulate: bool):
         if not emulate:
             if not torch.cuda.is_available():
                 warnings.warn("CUDA not available")
@@ -124,16 +125,18 @@ class TestFloat8Linear:
 
         x = torch.randn(*x_shape, device="cuda")
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
-        self._test_linear_impl(x, m_ref, use_no_ts, emulate)
+        self._test_linear_impl(x, m_ref, linear_type, emulate)
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("use_no_ts", [True, False])
+    @pytest.mark.parametrize(
+        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
+    )
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     def test_linear_bias(
-        self, x_shape, use_no_ts: bool, emulate: bool, linear_dtype: torch.dtype
+        self, x_shape, linear_type: LinearType, emulate: bool, linear_dtype: torch.dtype
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -147,7 +150,7 @@ class TestFloat8Linear:
 
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
-        self._test_linear_impl(x, m_ref, use_no_ts, emulate)
+        self._test_linear_impl(x, m_ref, linear_type, emulate)
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         m = Float8Linear.from_float(m, emulate)
@@ -163,63 +166,6 @@ class TestFloat8Linear:
             sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
-
-    def _test_pt2_impl(
-        self, use_no_tensor_subclass: bool, emulate: bool, device: torch.device
-    ):
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        m = nn.Linear(48, 32, device=device, bias=False)
-        x = torch.randn(16, 48, device=device)
-        # TODO(future): switch back to tensor subclass based UX once the PT
-        # support is there
-        if use_no_tensor_subclass:
-            m = Float8LinearNoTensorSubclass.from_float(m, emulate=emulate)
-        else:
-            m = Float8Linear.from_float(m, emulate=emulate)
-
-        m_ref = copy.deepcopy(m)
-
-        m = torch.compile(m, backend=cnt)
-        # verify things don't crash
-        y = m(x)
-        y.sum().backward()
-
-        y_ref = m_ref(x)
-        y_ref.sum().backward()
-
-        assert torch.allclose(y, y_ref)
-        assert torch.allclose(m.weight.grad, m_ref.weight.grad)
-
-        # TODO(future): inspect the graph programmaticaly
-        for gm in backend.graphs:
-            # print('gm', gm)
-            pass
-
-    @pytest.mark.parametrize("emulate", [True, False])
-    @pytest.mark.parametrize("device", ["cpu", "cuda"])
-    def test_pt2_nots(self, emulate: bool, device: torch.device):
-        if not emulate:
-            if device == "cpu":
-                warnings.warn("_scaled_mm is not supported on cpu")
-                pytest.skip()
-            if device == "cuda":
-                warnings.warn(
-                    "torch._dynamo.exc.Unsupported: speculate_subgraph: "
-                    "while introspecting the user-defined autograd.Function,"
-                    " we were unable to trace function `trampoline_autograd_bwd`"
-                )
-                pytest.skip()
-        self._test_pt2_impl(use_no_tensor_subclass=True, emulate=emulate, device=device)
-
-    @pytest.mark.parametrize("emulate", [True, False])
-    def test_pt2_ts(self, emulate: bool):
-        warnings.warn("PT2.0 tracing doesn't work with subclass")
-        pytest.skip()
-        self._test_pt2_impl(
-            use_no_tensor_subclass=False, emulate=emulate, device="cuda"
-        )
 
     def test_linear_float8_weight_tag(self):
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")

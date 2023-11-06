@@ -1,4 +1,4 @@
-benchmarks/__pycache__/*
+**/__pycache__/
 float8_experimental/__pycache__/*
 finetune/__pycache__/*
 test/__pycache__/*

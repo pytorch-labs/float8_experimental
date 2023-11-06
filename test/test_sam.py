@@ -5,16 +5,15 @@
 import copy
 
 import pytest
+from transformers import SamModel
 
 import torch
-
 from float8_experimental.float8_linear import (
-    swap_linear_with_float8_linear,
+    Float8Linear,
     sync_float8_amax_and_scale_history,
 )
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_utils import compute_error
-
-from transformers import SamModel
 
 torch.manual_seed(0)
 
@@ -28,7 +27,7 @@ class TestFloat8SAMIntegrationTest:
         # for now just test the encoder to simplify things
         encoder_ref = model.vision_encoder
         encoder_fp8 = copy.deepcopy(encoder_ref)
-        swap_linear_with_float8_linear(encoder_fp8, emulate=False)
+        swap_linear_with_float8_linear(encoder_fp8, Float8Linear, emulate=False)
 
         # an image
         # Note: bsz==4 or a larger power of 2 for this model is needed to

@@ -15,7 +15,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     def forward(
         ctx,
         tensor,
-        scale: float = None,
+        scale: float,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
         emulate: bool = False,

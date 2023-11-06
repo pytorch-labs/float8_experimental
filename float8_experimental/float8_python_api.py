@@ -12,25 +12,38 @@ import torch
 from float8_experimental.float8_tensor import Float8Tensor
 
 
-def mm_float8_unwrapped(
+def addmm_float8_unwrapped(
     a_data: torch.Tensor,
     a_scale: torch.Tensor,
     b_data: torch.Tensor,
     b_scale: torch.tensor,
     output_dtype: torch.dtype,
     output_scale: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    This is the unwrapped version of mm_float8, which does not take in Float8Tensors
+    This is the unwrapped version of addmm_float8, which does not take in Float8Tensors
     as inputs. This is used to standardize the logic between subclassed and non subclassed
     versions of the linear module.
     """
     a_inverse_scale = a_scale.reciprocal()
     b_inverse_scale = b_scale.reciprocal()
+    if output_dtype == torch.float32 and bias is not None:
+        # Bias is not supported by _scaled_mm when output is fp32
+        output, output_amax = torch._scaled_mm(
+            a_data,
+            b_data,
+            out_dtype=output_dtype,
+            scale_a=a_inverse_scale,
+            scale_b=b_inverse_scale,
+            scale_result=output_scale,
+        )
+        output += bias
+        return output, output_amax
     output, output_amax = torch._scaled_mm(
         a_data,
         b_data,
-        bias=None,
+        bias=bias,
         out_dtype=output_dtype,
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
@@ -70,6 +83,6 @@ def mm_float8(
             a._data, a._scale, b._data, b._scale, output_dtype
         )
 
-    return mm_float8_unwrapped(
+    return addmm_float8_unwrapped(
         a._data, a._scale, b._data, b._scale, output_dtype, output_scale
     )
