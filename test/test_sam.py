@@ -5,19 +5,15 @@
 import copy
 
 import pytest
+from transformers import SamModel
 
 import torch
-
 from float8_experimental.float8_linear import (
     Float8Linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_linear_utils import (
-    swap_linear_with_float8_linear,
-)
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_utils import compute_error
-
-from transformers import SamModel
 
 torch.manual_seed(0)
 

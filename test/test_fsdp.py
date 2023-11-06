@@ -17,19 +17,14 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-
 from float8_experimental.float8_linear import (
     Float8Linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_linear_utils import (
-    swap_linear_with_float8_linear,
-)
-from torch.distributed.fsdp import (
-    FullStateDictConfig,
-    FullyShardedDataParallel as FSDP,
-    StateDictType,
-)
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from torch.distributed.fsdp import FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import StateDictType
 
 torch.manual_seed(0)
 
@@ -187,7 +182,6 @@ def run(mode: str, is_fp8: bool):
         sd_out_single_gpu = torch.load(sd_out_single_gpu_fname)
         sd_out_fsdp = torch.load(sd_out_fsdp_fname)
         for k, v1 in sd_out_single_gpu.items():
-
             v2 = sd_out_fsdp[k]
             v1, v2 = v1.cpu(), v2.cpu()
             if is_fp8 and "noop" in k:

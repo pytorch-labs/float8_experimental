@@ -38,20 +38,23 @@ def float8_desugar_op(aten_op, args, kwargs=None):
 
 @implements([aten.sum.dim_IntList])
 def float8_cast_up_op(aten_op, args, kwargs=None):
-    """ Be careful with this function, this is a "fallback" op that
+    """Be careful with this function, this is a "fallback" op that
     casts the output of the op to the original precision. And performs the op.
 
     We currently need this to support the backward for admmm bias.
     "addmm" -> out
     "hp_gradBias" <-"sum" <- "identity" <- gradOut <- "hp_gradOut"
     """
+
     def unwrap(x):
         if isinstance(x, Float8Tensor):
             return x.to_original_precision()
         return x
+
     new_args = tree_map(unwrap, args)
     new_kwargs = tree_map(unwrap, kwargs)
     return aten_op(*new_args, **new_kwargs)
+
 
 def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     a_data = a._data
@@ -64,6 +67,7 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
         b_data = b_data.t().contiguous().t()
     b_scale = b._scale
     return a_data, a_scale, b_data, b_scale
+
 
 @implements([aten.mm.default])
 def float8_mm(aten_op, args, kwargs=None):
@@ -82,9 +86,14 @@ def float8_mm(aten_op, args, kwargs=None):
     )
     return tensor_out
 
+
 @implements([aten.addmm.default])
 def float8_addmm(aten_op, args, kwargs=None):
-    assert isinstance(args[0], torch.Tensor) and isinstance(args[1], Float8Tensor) and isinstance(args[2], Float8Tensor)
+    assert (
+        isinstance(args[0], torch.Tensor)
+        and isinstance(args[1], Float8Tensor)
+        and isinstance(args[2], Float8Tensor)
+    )
     bias = args[0]
     a = args[1]
     b = args[2]

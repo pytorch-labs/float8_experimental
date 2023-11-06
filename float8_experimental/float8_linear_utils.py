@@ -1,15 +1,14 @@
 import copy
-from enum import Enum
+from enum import Enum, auto
 
 import torch
-from float8_experimental.float8_utils import (amax_history_to_scale,
-                                              tensor_to_amax)
+from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
 
 class LinearType(Enum):
-    DELAYED = 1
-    DYNAMIC = 2
-    NO_SUBCLASS = 3
+    DELAYED = auto()
+    DYNAMIC = auto()
+    NO_SUBCLASS = auto()
 
 
 REQUIRES_SYNC = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
@@ -18,7 +17,7 @@ REQUIRES_SYNC = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
 def get_float8_linear(
     linear_type: LinearType, linear_ref: torch.nn.Linear, emulate: bool = False
 ):
-    """ Returns a Float8Linear module of the given type, initialized from linear_ref.
+    """Returns a Float8Linear module of the given type, initialized from linear_ref.
     Args:
         linear_type: The type of Float8Linear to return.
         linear_ref: The linear module to initialize from.
@@ -43,7 +42,7 @@ def get_float8_linear(
 
 
 def linear_requires_sync(linear_type: LinearType):
-    """ Returns whether the given linear_type requires sync before forward."""
+    """Returns whether the given linear_type requires sync before forward."""
     return linear_type in REQUIRES_SYNC
 
 

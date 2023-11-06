@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import fire
- 
+
 import torch
-from float8_experimental.float8_linear import \
-    sync_float8_amax_and_scale_history
-from float8_experimental.float8_linear_utils import (LinearType,
-                                                     get_float8_linear,
-                                                     linear_requires_sync)
+from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_utils import (
+    LinearType,
+    get_float8_linear,
+    linear_requires_sync,
+)
 from torch.profiler import ProfilerActivity, profile, record_function
 
 

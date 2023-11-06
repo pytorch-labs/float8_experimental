@@ -3,32 +3,36 @@ import itertools
 import random
 import unittest
 import warnings
+from enum import Enum
 
 import pytest
 
 import torch
 import torch.nn as nn
-from enum import Enum
 from float8_experimental.float8_linear import (
     Float8Linear,
     sync_float8_amax_and_scale_history,
 )
+from float8_experimental.float8_linear_utils import (
+    LinearType,
+    get_float8_linear,
+    linear_requires_sync,
+)
 from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
-from float8_experimental.float8_linear_utils import get_float8_linear, linear_requires_sync, LinearType
-
 from float8_experimental.float8_utils import (
-    amax_to_scale,
-    compute_error,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     FP16_MAX_POS,
+    amax_to_scale,
+    compute_error,
     tensor_to_scale,
 )
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
 random.seed(0)
 torch.manual_seed(0)
+
 
 class TestFloat8Tensor(unittest.TestCase):
     def test_preserves_dtype(self):
@@ -105,7 +109,9 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS])
+    @pytest.mark.parametrize(
+        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
+    )
     def test_linear_nobias(self, x_shape, linear_type: LinearType, emulate: bool):
         if not emulate:
             if not torch.cuda.is_available():
@@ -123,7 +129,9 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS])
+    @pytest.mark.parametrize(
+        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
+    )
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
