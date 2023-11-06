@@ -13,10 +13,9 @@ from float8_experimental.float8_linear import (
     Float8Linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.dynamic_linear import Float8DynamicLinear
-from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_linear_utils import get_float8_linear, linear_requires_sync, LinearType
 
 from float8_experimental.float8_utils import (
     amax_to_scale,
@@ -30,21 +29,6 @@ from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraph
 
 random.seed(0)
 torch.manual_seed(0)
-
-class LinearType(Enum):
-    DELAYED=1
-    DYNAMIC=2
-    NO_SUBCLASS=3
-
-type_map = {
-    LinearType.DELAYED: Float8Linear,
-    LinearType.DYNAMIC: Float8DynamicLinear,
-    LinearType.NO_SUBCLASS: Float8LinearNoTensorSubclass,
-}
-requires_sync = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
-
-def get_float8_linear(linear_type: LinearType, linear_ref: torch.nn.Linear, emulate: bool):
-    return type_map[linear_type].from_float(copy.deepcopy(linear_ref), emulate=emulate)
 
 class TestFloat8Tensor(unittest.TestCase):
     def test_preserves_dtype(self):
@@ -63,7 +47,7 @@ class TestFloat8Linear:
     def _test_linear_impl(self, x, m_ref, linear_type: LinearType, emulate: bool):
         m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
         for _ in range(2):
-            if linear_type in requires_sync:
+            if linear_requires_sync(linear_type):
                 sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)
             y_fp8.sum().backward()
@@ -81,7 +65,7 @@ class TestFloat8Linear:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        if linear_type in requires_sync:
+        if linear_requires_sync(linear_type):
             amax_buffer_names = [
                 "fp8_amax_x",
                 "fp8_amax_w",

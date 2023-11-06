@@ -1,10 +1,50 @@
-import torch
+import copy
+from enum import Enum
 
-from float8_experimental.float8_utils import (
-    amax_history_to_scale,
-    amax_to_scale,
-    tensor_to_amax,
-)
+import torch
+from float8_experimental.float8_utils import (amax_history_to_scale,
+                                              tensor_to_amax)
+
+
+class LinearType(Enum):
+    DELAYED = 1
+    DYNAMIC = 2
+    NO_SUBCLASS = 3
+
+
+REQUIRES_SYNC = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
+
+
+def get_float8_linear(
+    linear_type: LinearType, linear_ref: torch.nn.Linear, emulate: bool = False
+):
+    """ Returns a Float8Linear module of the given type, initialized from linear_ref.
+    Args:
+        linear_type: The type of Float8Linear to return.
+        linear_ref: The linear module to initialize from.
+        emulate: Whether to emulate the fp8 matmul logic in float32.
+    """
+    # Lazy import to avoid circular dependency
+    from float8_experimental.float8_linear import Float8Linear
+    from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+    from float8_experimental.dynamic_linear import Float8DynamicLinear
+
+    LINEAR_TYPE_MAP = {
+        LinearType.DELAYED: Float8Linear,
+        LinearType.DYNAMIC: Float8DynamicLinear,
+        LinearType.NO_SUBCLASS: Float8LinearNoTensorSubclass,
+    }
+    if linear_type not in LINEAR_TYPE_MAP:
+        raise ValueError(f"linear_type must be one of {LINEAR_TYPE_MAP.keys()}")
+
+    return LINEAR_TYPE_MAP[linear_type].from_float(
+        copy.deepcopy(linear_ref), emulate=emulate
+    )
+
+
+def linear_requires_sync(linear_type: LinearType):
+    """ Returns whether the given linear_type requires sync before forward."""
+    return linear_type in REQUIRES_SYNC
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(

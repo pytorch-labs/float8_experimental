@@ -1,21 +1,18 @@
-import argparse
-import copy
 import random
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
 import fire
-
+ 
 import torch
-
-from float8_experimental.float8_linear import (
-    Float8Linear,
-    sync_float8_amax_and_scale_history,
-)
-from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
-from float8_experimental.dynamic_linear import Float8DynamicLinear
-from torch.profiler import profile, ProfilerActivity, record_function
+from float8_experimental.float8_linear import \
+    sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_utils import (LinearType,
+                                                     get_float8_linear,
+                                                     linear_requires_sync)
+from torch.profiler import ProfilerActivity, profile, record_function
 
 
 @dataclass
@@ -94,21 +91,10 @@ class LinearParams:
     layer_norm: bool = True
     torch_compile: Optional[bool] = False
 
-type_map = {
-    "delayed": Float8Linear,
-    "dynamic": Float8DynamicLinear,
-    "no_subclass": Float8LinearNoTensorSubclass,
-}
-requires_sync = {"delayed", "no_subclass"}
-
-def get_float8_linear(linear_type: str, linear_ref: torch.nn.Linear):
-    return type_map[linear_type].from_float(copy.deepcopy(linear_ref), emulate=False)
 
 def main(profile_path: Path, compile: bool, linear_type: str):
     profile_path = Path(profile_path)
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
-    if linear_type not in type_map:
-        raise ValueError(f"linear_type must be one of {type_map.keys()}")
     params = LinearParams(
         M=4 * 4096,
         K=8192,
@@ -128,6 +114,7 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         device="cuda",
         dtype=params.ref_dtype,
     )
+    linear_type = LinearType[linear_type.upper()]
     linear_float8 = get_float8_linear(linear_type, linear_ref)
 
     input_tensor = torch.randn(
@@ -135,7 +122,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
     )
 
     if params.layer_norm:
-        ln = torch.nn.LayerNorm(params.K, elementwise_affine=False, device="cuda", dtype=params.ref_dtype)
+        ln = torch.nn.LayerNorm(
+            params.K, elementwise_affine=False, device="cuda", dtype=params.ref_dtype
+        )
 
     def ref_forw_backward(x):
         if params.layer_norm:
@@ -147,7 +136,7 @@ def main(profile_path: Path, compile: bool, linear_type: str):
             out.sum().backward()
 
     def float8_forw_backward(x):
-        if linear_type in requires_sync:
+        if linear_requires_sync(linear_type):
             with record_function("scale_amax_and_scales"):
                 sync_float8_amax_and_scale_history(linear_float8)
         if params.layer_norm:
