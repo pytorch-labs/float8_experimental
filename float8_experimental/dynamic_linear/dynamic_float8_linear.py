@@ -3,10 +3,8 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
 import torch
-
 from float8_experimental.float8_tensor import Float8Tensor
-from float8_experimental.float8_utils import (amax_to_scale, tensor_to_amax,
-                                              to_fp8_saturated)
+from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
 
 
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
@@ -26,9 +24,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gradY):
-        gradY_scale = amax_to_scale(
-            tensor_to_amax(gradY), torch.float8_e5m2, gradY.dtype
-        )
+        gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
         gradY_scaled = gradY * gradY_scale
         bits_fp8 = to_fp8_saturated(gradY_scaled, torch.float8_e5m2)
         return (
@@ -67,10 +63,8 @@ class Float8DynamicLinear(torch.nn.Linear):
         self.weight._is_fp8_weight = True
 
     def cast_to_float8(self, inpt_tensor):
-        scale = amax_to_scale(
-            tensor_to_amax(inpt_tensor), torch.float8_e4m3fn, inpt_tensor.dtype
-        )
-        return Float8Tensor.to_float8(inpt_tensor, scale, torch.float8_e4m3fn)
+        scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
+        return Float8Tensor.to_float8(inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate)
 
     def cast_to_float8e5m2_bw(self, gradY):
         return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
