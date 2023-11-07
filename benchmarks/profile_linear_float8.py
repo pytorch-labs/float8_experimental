@@ -7,13 +7,13 @@ from typing import Callable, Optional
 import fire
 
 import torch
-from float8_experimental.float8_linear import sync_float8_amax_and_scale_history
 from float8_experimental.float8_linear_utils import (
+    LinearType,
     get_float8_linear,
     linear_requires_sync,
-    LinearType,
+    sync_float8_amax_and_scale_history,
 )
-from torch.profiler import profile, ProfilerActivity, record_function
+from torch.profiler import ProfilerActivity, profile, record_function
 
 
 @dataclass
