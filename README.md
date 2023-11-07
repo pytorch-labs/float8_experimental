@@ -26,6 +26,7 @@ from float8_experimental.float8_linear import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
+from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
 
 # create fp32 model
 m = Model(...)

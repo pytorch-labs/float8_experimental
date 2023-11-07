@@ -6,11 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-
-from float8_experimental.float8_linear import (
-    swap_linear_with_float8_linear,
-    sync_float8_amax_and_scale_history,
-)
+from float8_experimental.float8_linear import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
 from torch.optim.lr_scheduler import StepLR
 from torchvision import datasets, transforms
 

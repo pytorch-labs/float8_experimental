@@ -35,8 +35,8 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
 class Float8DynamicLinear(torch.nn.Linear):
     """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
-    scales in way friendly to delayed scaling.
+    A wrapper around a `torch.nn.Linear` module which does fp8 compute. By on the fly
+    conversion to fp8 of the input and weight tensors.
     """
 
     def __init__(self, *args, **kwargs):

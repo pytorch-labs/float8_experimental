@@ -128,7 +128,7 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         len(kwargs) == 1 and "dtype" in kwargs
     ), "Only support dtype kwarg for autocast"
     assert (
-        kwargs["dtype"] == torch.float16
+        kwargs["dtype"] in {torch.float16, torch.bfloat16}
     ), "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
