@@ -1,5 +1,5 @@
 import copy
-from enum import Enum, auto
+from enum import auto, Enum
 
 import torch
 from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
@@ -23,10 +23,11 @@ def get_float8_linear(
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
     """
+    from float8_experimental.dynamic_linear import Float8DynamicLinear
+
     # Lazy import to avoid circular dependency
     from float8_experimental.float8_linear import Float8Linear
     from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
-    from float8_experimental.dynamic_linear import Float8DynamicLinear
 
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
