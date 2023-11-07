@@ -10,17 +10,14 @@ owners to implement their own UEX.
 import dataclasses
 
 import torch
-import torch.distributed as dist
 
 from float8_experimental.float8_linear_utils import (
     _maybe_initialize_amaxes_scales_for_float8_cast,
-    _update_history_with_new_amax,
 )
 
 from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
-    amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     tensor_to_amax,
@@ -269,77 +266,3 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()
         return new_mod
-
-
-def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
-    """
-    Manages the float8 amax and scale bookkeeping. In detail, it does the
-    following:
-    1. in distributed contexts, syncs amax values across workers
-    2. adds the `amax` values to history
-    3. calculates the scales to be used for next iteration
-    4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
-       to signal that they have been synced
-
-    TODO(future): design the UX for this (context manager, etc)
-
-    Args:
-        model (torch.nn.Module): The model to track amaxes for
-    """
-
-    # For now, this is written in a naive way to maximize code readability.
-    # TODO(future): benchmark and optimize as needed, we can combine all
-    # the reductions into one and probably make the history update faster.
-
-    for name, child in model.named_modules():
-        if not isinstance(child, Float8Linear):
-            continue
-
-        #
-        # 1. in distributed contexts, syncs amax values across workers
-        #
-        if dist.is_initialized():
-            dist.all_reduce(child.fp8_amax_x, op=dist.ReduceOp.MAX)
-            dist.all_reduce(child.fp8_amax_w, op=dist.ReduceOp.MAX)
-            dist.all_reduce(child.fp8_amax_dL_dY, op=dist.ReduceOp.MAX)
-
-        #
-        # 2. adds the `amax` values to history
-        #
-        _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
-        _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(
-            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
-        )
-
-        #
-        # 3. calculate the scales
-        #
-        # TODO what to do with x_dtype
-        x_dtype = child.last_seen_input_dtype
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_x,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_x.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_w,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_w.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_dL_dY,
-            torch.float8_e5m2,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_dL_dY.copy_(new_scale)
-
-        #
-        # 4. set a flag to signal amaxes/scales are ready
-        #
-        child.amax_and_scale_synced = True

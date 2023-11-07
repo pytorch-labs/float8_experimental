@@ -167,6 +167,13 @@ class TestFloat8Linear:
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            sync_float8_amax_and_scale_history(m)
+            y = m(x)
+        assert y.dtype == torch.bfloat16, (
+            f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
+        )
+
     def test_linear_float8_weight_tag(self):
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
