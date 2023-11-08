@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 import pandas as pd
-from tqdm import tqdm
 
 import torch
 import torch.utils.benchmark as benchmark
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from tqdm import tqdm
 
 # Check if transformer_engine is installed
 transformer_engine_installed = False

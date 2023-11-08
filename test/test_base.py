@@ -11,19 +11,19 @@ import torch
 import torch.nn as nn
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
-    LinearType,
     get_float8_linear,
     linear_requires_sync,
+    LinearType,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import (
+    amax_to_scale,
+    compute_error,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     FP16_MAX_POS,
-    amax_to_scale,
-    compute_error,
     tensor_to_scale,
 )
 from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs

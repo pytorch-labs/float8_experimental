@@ -133,7 +133,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
     # For now, this is written in a naive way to maximize code readability.
     # TODO(future): benchmark and optimize as needed, we can combine all
     # the reductions into one and probably make the history update faster.
-        # Lazy import to avoid circular dependency
+    # Lazy import to avoid circular dependency
 
     from float8_experimental.float8_linear import Float8Linear
     from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass

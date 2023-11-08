@@ -22,9 +22,11 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from torch.distributed.fsdp import FullStateDictConfig
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import StateDictType
+from torch.distributed.fsdp import (
+    FullStateDictConfig,
+    FullyShardedDataParallel as FSDP,
+    StateDictType,
+)
 
 torch.manual_seed(0)
 
