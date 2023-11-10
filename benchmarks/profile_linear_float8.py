@@ -129,24 +129,15 @@ def main(profile_path: Path, compile: bool, linear_type: str):
 
     def ref_forw_backward(x):
         if params.layer_norm:
-            with record_function("layer_norm"):
-                x = ln(x)
-        with record_function("forward"):
-            out = linear_ref(x)
-        with record_function("backward"):
-            out.sum().backward()
+             x = ln(x)
+        out = linear_ref(x)
+        out.sum().backward()
 
     def float8_forw_backward(x):
-        if linear_requires_sync(linear_type):
-            with record_function("scale_amax_and_scales"):
-                sync_float8_amax_and_scale_history(linear_float8)
         if params.layer_norm:
-            with record_function("layer_norm"):
-                x = ln(x)
-        with record_function("forward"):
-            out = linear_float8(x)
-        with record_function("backward"):
-            out.sum().backward()
+            x = ln(x)
+        out = linear_float8(x)
+        out.sum().backward()
 
     if transformer_engine_installed:
         # Create an FP8 recipe. Note: All input args are optional.
@@ -165,15 +156,20 @@ def main(profile_path: Path, compile: bool, linear_type: str):
                     out.sum().backward()
 
     if params.torch_compile:
-        ref_forw_backward = torch.compile(ref_forw_backward)
+        # ref_forw_backward = torch.compile(ref_forw_backward)
         float8_forw_backward = torch.compile(float8_forw_backward)
         # Compiling TE_linear fails but they are already compiling under the hood
         # if transformer_engine_installed:
         #     te_forw_backward = torch.compile(te_forw_backward)
 
+    def wrapper_float8(x):
+        if linear_requires_sync(linear_type):
+            sync_float8_amax_and_scale_history(linear_float8)
+        float8_forw_backward(x)
+
     for _ in range(5):
         ref_forw_backward(input_tensor)
-        float8_forw_backward(input_tensor)
+        wrapper_float8(input_tensor)
         if transformer_engine_installed:
             te_forw_backward(input_tensor)
 
@@ -193,7 +189,7 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         warmup_iters=5,
         sync=True,
     )
-    profile_function(profile_config, float8_forw_backward, input_tensor)
+    profile_function(profile_config, wrapper_float8, input_tensor)
 
     te_string = f"linear_transformer_engine_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
     if transformer_engine_installed:
