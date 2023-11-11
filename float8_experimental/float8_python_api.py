@@ -11,15 +11,20 @@ import float8_experimental.float8_aten_api
 import torch
 from float8_experimental.float8_tensor import Float8Tensor
 
-
+# [Note] Usage of scales
+# The meaning of scale in this library can be found in the definition of the Float8Tensor
+# Cublas defines scale to always mean a multiplicative factor for the respective matrices
+# For a,b going from fp8 -> fp32 we multiple by the inverse of the scale
+# For output going from fp32 -> fp8 we multiply by the scale
 def addmm_float8_unwrapped(
     a_data: torch.Tensor,
     a_scale: torch.Tensor,
     b_data: torch.Tensor,
     b_scale: torch.tensor,
     output_dtype: torch.dtype,
-    output_scale: Optional[torch.Tensor],
+    output_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
+    use_fast_accum: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     This is the unwrapped version of addmm_float8, which does not take in Float8Tensors
@@ -37,6 +42,7 @@ def addmm_float8_unwrapped(
             scale_a=a_inverse_scale,
             scale_b=b_inverse_scale,
             scale_result=output_scale,
+            use_fast_accum=use_fast_accum,
         )
         output += bias
         return output, output_amax
@@ -48,41 +54,6 @@ def addmm_float8_unwrapped(
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
         scale_result=output_scale,
+        use_fast_accum=use_fast_accum,
     )
     return output, output_amax
-
-
-# [Note] Usage of scales
-# The meaning of scale in this library can be found in the definition of the Float8Tensor
-# Cublas defines scale to always mean a multiplicative factor for the respective matrices
-# For a,b going from fp8 -> fp32 we multiple by the inverse of the scale
-# For output going from fp32 -> fp8 we multiply by the scale
-def mm_float8(
-    a: Float8Tensor,  # input 1
-    b: Float8Tensor,  # input 2
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-    emulate: bool = False,  # whether to emulate the operation using fp32
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Performs a matrix multiplication of two Float8Tensors `a` and `b`.
-
-    Args:
-        a: The first matrix multiplication term.
-        b: The second matrix multiplication term.
-        output_dtype: The output tensor's dtype.
-        output_scale: The output tensor's scale, precomputed.
-        emulate: Whether to emulate the operation using fp32.
-
-    Returns:
-        torch.Tensor: The result of the matrix multiplication.
-    """
-    if emulate:
-        assert output_scale is None, "unsupported"
-        return torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale, b._data, b._scale, output_dtype
-        )
-
-    return addmm_float8_unwrapped(
-        a._data, a._scale, b._data, b._scale, output_dtype, output_scale
-    )
