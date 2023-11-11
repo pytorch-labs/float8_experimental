@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 from typing import Dict, Optional
+from dataclasses import dataclass
 
 import torch
 
@@ -135,7 +136,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        return to_fp8_no_autograd(tensor, scale, float8_dtype, emulate)
+        return to_fp8_no_autograd(tensor, scale, float8_dtype, mm_config=mm_config)
 
     @staticmethod
     def backward(ctx, g):
@@ -182,15 +183,15 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    _emulate: bool
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate"]
+    _mm_config: ScaledMMConfig
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config"]
 
     def __new__(
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        emulate=False,
+        mm_config: Optional[ScaledMMConfig] = None,
     ):
         assert (
             scale.numel() == 1
@@ -211,16 +212,17 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._emulate = emulate
+        self._mm_config = mm_config if mm_config is not None else ScaledMMConfig()
+
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
             "_orig_dtype": self._orig_dtype,
-            "_emulate": self._emulate,
+            "_mm_config": self._mm_config,
         }
         return ["_data", "_scale"], ctx
 
@@ -231,7 +233,7 @@ class Float8Tensor(torch.Tensor):
             inner_tensors["_data"],
             inner_tensors["_scale"],
             metadata["_orig_dtype"],
-            metadata["_emulate"],
+            metadata["_mm_config"],
         )
 
     def to_original_precision(self):
@@ -244,7 +246,8 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        emulate: bool = False,
+        # emulate: bool = False,
+        mm_config: Optional[ScaledMMConfig] = None
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
@@ -258,11 +261,7 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor,
-            scale,
-            float8_dtype,
-            amax_buffer,
-            emulate,
+            tensor, scale, float8_dtype, amax_buffer, mm_config
         )
 
     @classmethod

@@ -22,7 +22,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_python_api import mm_float8
+from float8_experimental.float8_python_api import addmm_float8_unwrapped
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import (
     amax_to_scale,
@@ -281,7 +281,8 @@ class TestScaledMM:
     @pytest.mark.parametrize(
         "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
-    def test_scaled_mm_vs_emulated(self, base_dtype):
+    @pytest.mark.parametrize("use_fast_accum", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum):
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
         output_dtype = base_dtype
@@ -296,11 +297,16 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        out_scaled_mm, output_amax_scaled = mm_float8(
-            a_fp8, b_fp8, output_dtype=output_dtype, emulate=False
+        out_scaled_mm, output_amax_scaled = addmm_float8_unwrapped(
+            a_fp8._data,
+            a_fp8._scale,
+            b_fp8._data,
+            b_fp8._scale,
+            output_dtype=output_dtype,
+            use_fast_accum=use_fast_accum,
         )
-        out_emulated, output_amax_emulated = mm_float8(
-            a_fp8, b_fp8, output_dtype=output_dtype, emulate=True
+        out_emulated, output_amax_emulated = torch.ops.aten.mm_float8_emulated(
+            a_fp8._data, a_fp8._scale, b_fp8._data, b_fp8._scale, output_dtype
         )
 
         if output_dtype != base_dtype:
