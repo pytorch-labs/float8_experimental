@@ -9,7 +9,7 @@ import torch
 from torch.utils._pytree import tree_map
 
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 from float8_experimental.float8_utils import is_row_major
 
 aten = torch.ops.aten
@@ -39,7 +39,9 @@ def implements(aten_ops):
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
-    return Float8Tensor(new_data, args[0]._scale, args[0]._orig_dtype, args[0]._emulate)
+    return Float8Tensor(
+        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config
+    )
 
 
 @implements([aten.sum.dim_IntList])
@@ -82,13 +84,22 @@ def float8_mm(aten_op, args, kwargs=None):
     b = args[1]
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
-    if a._emulate:
-        assert a._emulate == b._emulate
+    a_mm_config: ScaledMMConfig = a._mm_config
+    b_mm_config: ScaledMMConfig = b._mm_config
+    mm_config: ScaledMMConfig = a_mm_config.merge(b_mm_config)
+    if mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
         )[0]
     tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=None
+        a_data,
+        a_scale,
+        b_data,
+        b_scale,
+        output_dtype,
+        output_scale=None,
+        bias=None,
+        use_fast_accum=mm_config.use_fast_accum,
     )
     return tensor_out
 
@@ -106,14 +117,23 @@ def float8_addmm(aten_op, args, kwargs=None):
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
     assert bias.dtype == output_dtype, "bias dtype must match output dtype"
-    if a._emulate:
-        assert a._emulate == b._emulate
+    a_mm_config: ScaledMMConfig = a._mm_config
+    b_mm_config: ScaledMMConfig = b._mm_config
+    mm_config: ScaledMMConfig = a_mm_config.merge(b_mm_config)
+    if mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
         )[0]
         return out + bias
     tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=bias
+        a_data,
+        a_scale,
+        b_data,
+        b_scale,
+        output_dtype,
+        output_scale=None,
+        bias=bias,
+        use_fast_accum=mm_config.use_fast_accum,
     )
     return tensor_out
 
@@ -138,5 +158,5 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         torch.bfloat16,
     }, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
-        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
+        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._mm_config
     )
