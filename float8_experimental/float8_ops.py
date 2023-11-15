@@ -1,10 +1,11 @@
 from typing import Any, Dict
 
 import torch
+from torch.utils._pytree import tree_map
+
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import is_row_major
-from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}

@@ -17,6 +17,7 @@ from float8_experimental.float8_utils import compute_error
 
 from float8_experimental.tp_linear import swap_tp_linear_with_float8_linear
 
+
 # copied from https://github.com/facebookresearch/llama/blob/main/example.py
 def setup_model_parallel():
     local_rank = int(os.environ.get("LOCAL_RANK", -1))

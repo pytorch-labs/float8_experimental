@@ -3,6 +3,7 @@ from enum import auto, Enum
 
 import torch
 import torch.distributed as dist
+
 from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
 

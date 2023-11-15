@@ -3,6 +3,7 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
 import torch
+
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
 
