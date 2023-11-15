@@ -238,3 +238,6 @@ python tests/test_sam.py
 # dump chrome traces of fw/bw of `Linear`, `Float8Linear` and `te.Linear` on a single shape
 ./benchmarks/profile_linear_float8_nots.py -o ../tmp/ --compile
 ```
+
+# License
+PyTorch has a BSD 3-Clause License, as found in the LICENSE file.
