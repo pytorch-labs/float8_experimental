@@ -3,11 +3,8 @@
 This is a prototype of a float8 training UX in native PyTorch, with full PT2.0 and distributed support. 
 The codebase strives to stay small, easily hackable, and debuggable with native PyTorch tooling.
 
-For now the goal is to move quickly and validate our design by achieving promising e2e training performance/accuracy 
-benchmark data on LLaMa 2 70B by the end of 2023H2. Production readiness, backwards compatibility, etc right now is 
-an explicit non-goal at this point. Once we are farther along, we will discuss how to make this public.
-
-:warning: **This repository is shared with external partners, so do not post/commit any confidential Meta information here**
+Backwards compatibility is not guaranteed at this point. The codebase is in active development and
+will change rapidly.
 
 # installation
 
@@ -22,17 +19,17 @@ pip install -e .
 ## single GPU
 
 ```python
-from float8_experimental.float8_linear import (
+from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear import Float8Linear
 
 # create fp32 model
 m = Model(...)
 
 # convert all `torch.nn.Linear` modules to `Float8Linear`
-swap_linear_with_float8_linear(m)
+swap_linear_with_float8_linear(m, Float8Linear)
 
 # toy training loop
 for _ in range(N_ITER):
