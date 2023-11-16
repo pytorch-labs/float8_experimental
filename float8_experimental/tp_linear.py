@@ -109,6 +109,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
     def extra_repr(self) -> str:
         return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}"
 
+
 class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
     """
     Same as `RowParallelLinear`, but with single GPU compute in float8.
@@ -204,6 +205,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
 
     def extra_repr(self) -> str:
         return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, input_is_parallel={self.input_is_parallel}"
+
 
 def swap_tp_linear_with_float8_linear(model, emulate=False):
     """

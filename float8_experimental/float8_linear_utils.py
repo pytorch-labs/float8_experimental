@@ -120,7 +120,9 @@ def swap_linear_with_float8_linear(
             swap_linear_with_float8_linear(child, module, emulate)
 
 
-def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_classes = None) -> None:
+def sync_float8_amax_and_scale_history(
+    model: torch.nn.Module, fp8_classes=None
+) -> None:
     """
     Manages the float8 amax and scale bookkeeping. In detail, it does the
     following:
@@ -144,6 +146,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_classes = Non
     if fp8_classes is None:
         from float8_experimental.float8_linear import Float8Linear
         from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
+
         fp8_classes = [Float8Linear, Float8LinearNoTensorSubclass]
 
     for name, child in model.named_modules():
