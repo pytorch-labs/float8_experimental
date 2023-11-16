@@ -1,0 +1,45 @@
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "float8_experimental"
+version = "0.0.1"
+description = "This is a prototype of a float8 training UX in native PyTorch, with full PT2.0 and distributed support."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "torch >= 2.0.1",
+    "transformers==4.32.0",
+    "fire==0.5.0",
+    "fairscale==0.4.13",
+    "tqdm==4.66.1",
+    "pandas >= 2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "usort",
+    "libcst",
+    "bumpver",
+    "pip-tools"
+]
+
+# Since we have multiple top level folders we specify what we want to be included
+# in the package
+[tool.setuptools]
+packages = ["float8_experimental"]
+
+[tools.usort]
+first_party_detection = false
+
+[tool.black]
+target-version = ["py38"]
