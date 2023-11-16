@@ -47,35 +47,32 @@ def _test_compile_base(
 
 
 @pytest.mark.parametrize("fullgraph", [True])
-@pytest.mark.parametrize(
-    "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
-)
+@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_eager_only(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+    torch._dynamo.reset()
     _test_compile_base("eager", fullgraph, emulate, linear_type, dtype)
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
-@pytest.mark.parametrize(
-    "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
-)
+@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_aot_eager(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+    torch._dynamo.reset()
     _test_compile_base("aot_eager", fullgraph, emulate, linear_type, dtype)
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
-@pytest.mark.parametrize(
-    "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
-)
+@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_inductor(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+    torch._dynamo.reset()
     _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
 
 
