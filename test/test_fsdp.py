@@ -1,3 +1,8 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 """
 Test numerics of single GPU vs FSDP of toy model. At a high level:
 1. start with reference input and state dict for a single GPU model

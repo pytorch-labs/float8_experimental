@@ -1,3 +1,8 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 """
 Test numerics of manually defined float16 TP vs float8 TP of toy models
 """
@@ -16,6 +21,7 @@ from float8_experimental.distributed_utils import _AllGatherFwSplitBw
 from float8_experimental.float8_utils import compute_error
 
 from float8_experimental.tp_linear import swap_tp_linear_with_float8_linear
+
 
 # copied from https://github.com/facebookresearch/llama/blob/main/example.py
 def setup_model_parallel():

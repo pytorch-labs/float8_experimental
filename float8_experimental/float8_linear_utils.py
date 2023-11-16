@@ -1,9 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 import copy
 from enum import auto, Enum
 import logging
 
 import torch
 import torch.distributed as dist
+
 from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
 

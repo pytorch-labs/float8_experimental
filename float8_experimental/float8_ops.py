@@ -1,10 +1,16 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 from typing import Any, Dict
 
 import torch
+from torch.utils._pytree import tree_map
+
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import is_row_major
-from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}

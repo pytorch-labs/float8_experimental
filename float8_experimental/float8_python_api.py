@@ -1,3 +1,8 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 """
 This file defines the Python functions for float8 which expect inputs
 of class `Float8Tensor`. This is a thin wrapper on top of the aten API
@@ -7,8 +12,9 @@ to simplify the product code.
 
 from typing import Optional, Tuple
 
-import float8_experimental.float8_aten_api
 import torch
+
+import float8_experimental.float8_aten_api
 from float8_experimental.float8_tensor import Float8Tensor
 
 

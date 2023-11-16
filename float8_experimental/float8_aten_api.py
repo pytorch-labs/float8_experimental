@@ -1,9 +1,15 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 """
 This file defines the aten functions for float8. Today, all of these functions
 are emulated. In the future, they should be calling NVIDIA's float8 kernels.
 """
 
 import torch
+from torch.library import Library
 
 from float8_experimental.float8_utils import (
     E4M3_MAX_POS,
@@ -11,7 +17,6 @@ from float8_experimental.float8_utils import (
     tensor_to_amax,
     to_fp8_saturated,
 )
-from torch.library import Library
 
 
 def mm_float8_emulated(

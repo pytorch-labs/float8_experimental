@@ -25,26 +25,21 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["black", "bumpver", "isort", "pip-tools"]
+dev = [
+    "black",
+    "usort",
+    "libcst",
+    "bumpver",
+    "pip-tools"
+]
 
 # Since we have multiple top level folders we specify what we want to be included
 # in the package
 [tool.setuptools]
 packages = ["float8_experimental"]
 
+[tools.usort]
+first_party_detection = false
+
 [tool.black]
-line-length = 88
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)/
-'''
+target-version = ["py38"]

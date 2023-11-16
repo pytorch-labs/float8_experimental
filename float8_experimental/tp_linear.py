@@ -1,4 +1,9 @@
-import logging
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD 3-Clause license found in the
+# LICENSE file in the root directory of this source tree.
 
 import torch
 
@@ -203,7 +208,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
     def extra_repr(self) -> str:
         return f"in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}, input_is_parallel={self.input_is_parallel}"
 
-def swap_tp_linear_with_float8_linear(model, emulate=False, verbose=False):
+def swap_tp_linear_with_float8_linear(model, emulate=False):
     """
     Replaces all instances of {Column|Row}ParallelLinear in the given model
     with their Float8 enabled versions.
@@ -215,26 +220,10 @@ def swap_tp_linear_with_float8_linear(model, emulate=False, verbose=False):
     name_to_child = dict(model.named_children())
     for name, child in name_to_child.items():
         if isinstance(child, ColumnParallelLinear):
-            if (child.in_features % 16 != 0) or (child.out_features % 16 != 0):
-                if verbose:
-                    logger.info(
-                        f"Skipped swap_tp_linear_with_float8_linear for {child}, because input/output dims are not divisible by 16."
-                    )
-                continue
             new_child = Float8ColumnParallelLinear.from_float(child, emulate)
             setattr(model, name, new_child)
-            if verbose:
-                logger.info(f"A tp_linear is swapped with float8_linear, {child}")
         elif isinstance(child, RowParallelLinear):
-            if (child.in_features % 16 != 0) or (child.out_features % 16 != 0):
-                if verbose:
-                    logger.info(
-                        f"Skipped swap_tp_linear_with_float8_linear for {child}, because input/output dims are not divisible by 16."
-                    )
-                continue
             new_child = Float8RowParallelLinear.from_float(child, emulate)
             setattr(model, name, new_child)
-            if verbose:
-                logger.info(f"A tp_linear is swapped with float8_linear, {child}")
         else:
             swap_tp_linear_with_float8_linear(child, emulate)
