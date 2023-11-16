@@ -23,8 +23,6 @@ from float8_experimental.distributed_utils import (
 from float8_experimental.float8_linear import Float8LinearMixin
 
 
-logger: logging.Logger = logging.getLogger()
-
 class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
     """
     Same as `ColumnParallelLinear`, but with single GPU compute in float8.
