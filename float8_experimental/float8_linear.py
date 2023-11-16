@@ -20,7 +20,7 @@ from float8_experimental.float8_linear_utils import (
     _maybe_initialize_amaxes_scales_for_float8_cast,
 )
 
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 
 from float8_experimental.float8_utils import (
     E4M3_MAX_POS,
@@ -45,12 +45,12 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_scale_dL_dY,
         scale_fn_name,
         is_amax_initialized,
-        emulate: bool,
+        mm_config: ScaledMMConfig,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
-        ctx.emulate = emulate
+        ctx.mm_config = mm_config
         return tensor
 
     @staticmethod
@@ -73,7 +73,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         go_scaled = go * fp8_scale_dL_dY
         bits_fp8 = to_fp8_saturated(go_scaled, torch.float8_e5m2)
         empty_grads = None, None, None, None, None, None
-        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype, emulate=ctx.emulate)
+        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype, mm_config=ctx.mm_config)
         return res, *empty_grads
 
 
@@ -136,6 +136,11 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
+        # Defines the behavior of the matmul in the forward and backward
+        # Forward we use fast_accum, backwards we do not
+        self.forward_config = ScaledMMConfig(self.emulate, True if not self.emulate else False)
+        self.backward_config = ScaledMMConfig(self.emulate, False)
+
     def cast_x_to_float8(
         self, x: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
@@ -159,7 +164,7 @@ class Float8LinearMixin(object):
             is_amax_initialized,
         )
         x_fp8 = Float8Tensor.to_float8(
-            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
+            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.forward_config
         )
         return x_fp8
 
@@ -177,7 +182,7 @@ class Float8LinearMixin(object):
             is_amax_initialized,
         )
         w_fp8 = Float8Tensor.to_float8(
-            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w, self.emulate
+            w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w, self.forward_config
         )
         return w_fp8
 
@@ -192,7 +197,7 @@ class Float8LinearMixin(object):
             self.fp8_scale_dL_dY,
             scale_fn_name,
             self.is_amax_initialized,
-            emulate,
+            self.backward_config,
         )
         return y
 
@@ -264,7 +269,8 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
-        new_mod.emulate = emulate
+        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
+        new_mod.backward_config = ScaledMMConfig(emulate, False)
         if mod.bias is not None:
             new_mod.bias_dtype = mod.bias.dtype
         # I think its okay to send all params and buffers to device
