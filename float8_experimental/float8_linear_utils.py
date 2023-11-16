@@ -5,7 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 import copy
 from enum import auto, Enum
-import logging
 
 import torch
 import torch.distributed as dist
@@ -20,8 +19,6 @@ class LinearType(Enum):
 
 
 REQUIRES_SYNC = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
-
-logger: logging.Logger = logging.getLogger()
 
 
 def get_float8_linear(
