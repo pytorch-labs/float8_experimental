@@ -14,6 +14,8 @@ owners to implement their own UEX.
 
 import dataclasses
 
+from typing import Optional
+
 import torch
 
 from float8_experimental.float8_linear_utils import (
@@ -92,6 +94,8 @@ class Float8LinearMixin(object):
         delayed_scaling_recipe = kwargs.pop(
             "delayed_scaling_recipe", DelayedScalingRecipe()
         )
+        # Amax scales should always be kept as float32.
+        self.always_float32_buffers = set()
         super().__init__(*args, **kwargs)
 
         # TODO(future): have a unique recipe per buffer instead of one per
@@ -100,15 +104,15 @@ class Float8LinearMixin(object):
         self.recipe = delayed_scaling_recipe
         history_len = self.recipe.history_len
 
-        self.register_buffer("fp8_amax_x", torch.tensor(E4M3_MAX_POS))
-        self.register_buffer("fp8_amax_history_x", torch.zeros(history_len))
-        self.register_buffer("fp8_scale_x", torch.tensor(1.0))
-        self.register_buffer("fp8_amax_w", torch.tensor(E4M3_MAX_POS))
-        self.register_buffer("fp8_amax_history_w", torch.zeros(history_len))
-        self.register_buffer("fp8_scale_w", torch.tensor(1.0))
-        self.register_buffer("fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS))
-        self.register_buffer("fp8_amax_history_dL_dY", torch.zeros(history_len))
-        self.register_buffer("fp8_scale_dL_dY", torch.tensor(1.0))
+        self.register_always_float32_buffer("fp8_amax_x", torch.tensor(E4M3_MAX_POS))
+        self.register_always_float32_buffer("fp8_amax_history_x", torch.zeros(history_len))
+        self.register_always_float32_buffer("fp8_scale_x", torch.tensor(1.0))
+        self.register_always_float32_buffer("fp8_amax_w", torch.tensor(E4M3_MAX_POS))
+        self.register_always_float32_buffer("fp8_amax_history_w", torch.zeros(history_len))
+        self.register_always_float32_buffer("fp8_scale_w", torch.tensor(1.0))
+        self.register_always_float32_buffer("fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS))
+        self.register_always_float32_buffer("fp8_amax_history_dL_dY", torch.zeros(history_len))
+        self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor(1.0))
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
 
@@ -135,6 +139,20 @@ class Float8LinearMixin(object):
         # module could be moved to GPU after this constructor. Instead, FSDP
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
+
+    def register_always_float32_buffer(self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True) -> None:
+        self.register_buffer(name=name, tensor=tensor, persistent=persistent)
+        self.always_float32_buffers.add(name)
+
+    def _apply(self, fn, recurse=True):
+        ret = super()._apply(fn, recurse)
+        self.convert_amax_buffer_to_float32()
+        return ret
+
+    def convert_amax_buffer_to_float32(self):
+        for key in self.always_float32_buffers:
+            if self._buffers[key] is not None:
+                self._buffers[key] = self._buffers[key].to(torch.float32)
 
     def cast_x_to_float8(
         self, x: torch.Tensor, is_amax_initialized: bool
