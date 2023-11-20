@@ -106,7 +106,7 @@ class Float8Tensor(torch.Tensor):
             device=data.device,
         )
         self._data = data
-        self._scale = scale.to(torch.float32)
+        self._scale = scale
         self._orig_dtype = orig_dtype
         self._emulate = emulate
         return self
