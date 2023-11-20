@@ -142,6 +142,7 @@ def sync_float8_amax_and_scale_history(
 
     if fp8_classes is None:
         from float8_experimental.float8_linear import Float8Linear
+
         fp8_classes = [Float8Linear]
 
     for name, child in model.named_modules():

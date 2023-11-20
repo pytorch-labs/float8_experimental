@@ -105,13 +105,21 @@ class Float8LinearMixin(object):
         history_len = self.recipe.history_len
 
         self.register_always_float32_buffer("fp8_amax_x", torch.tensor(E4M3_MAX_POS))
-        self.register_always_float32_buffer("fp8_amax_history_x", torch.zeros(history_len))
+        self.register_always_float32_buffer(
+            "fp8_amax_history_x", torch.zeros(history_len)
+        )
         self.register_always_float32_buffer("fp8_scale_x", torch.tensor(1.0))
         self.register_always_float32_buffer("fp8_amax_w", torch.tensor(E4M3_MAX_POS))
-        self.register_always_float32_buffer("fp8_amax_history_w", torch.zeros(history_len))
+        self.register_always_float32_buffer(
+            "fp8_amax_history_w", torch.zeros(history_len)
+        )
         self.register_always_float32_buffer("fp8_scale_w", torch.tensor(1.0))
-        self.register_always_float32_buffer("fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS))
-        self.register_always_float32_buffer("fp8_amax_history_dL_dY", torch.zeros(history_len))
+        self.register_always_float32_buffer(
+            "fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_history_dL_dY", torch.zeros(history_len)
+        )
         self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor(1.0))
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
@@ -140,7 +148,9 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
-    def register_always_float32_buffer(self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True) -> None:
+    def register_always_float32_buffer(
+        self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
+    ) -> None:
         self.register_buffer(name=name, tensor=tensor, persistent=persistent)
         self.always_float32_buffers.add(name)
 
