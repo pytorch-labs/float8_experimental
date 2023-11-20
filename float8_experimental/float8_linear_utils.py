@@ -15,10 +15,9 @@ from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_am
 class LinearType(Enum):
     DELAYED = auto()
     DYNAMIC = auto()
-    NO_SUBCLASS = auto()
 
 
-REQUIRES_SYNC = {LinearType.DELAYED, LinearType.NO_SUBCLASS}
+REQUIRES_SYNC = {LinearType.DELAYED}
 
 
 def get_float8_linear(
@@ -34,12 +33,10 @@ def get_float8_linear(
 
     # Lazy import to avoid circular dependency
     from float8_experimental.float8_linear import Float8Linear
-    from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
         LinearType.DYNAMIC: Float8DynamicLinear,
-        LinearType.NO_SUBCLASS: Float8LinearNoTensorSubclass,
     }
     if linear_type not in LINEAR_TYPE_MAP:
         raise ValueError(f"linear_type must be one of {LINEAR_TYPE_MAP.keys()}")
@@ -142,10 +139,9 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module) -> None:
     # Lazy import to avoid circular dependency
 
     from float8_experimental.float8_linear import Float8Linear
-    from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 
     for name, child in model.named_modules():
-        if not isinstance(child, (Float8Linear, Float8LinearNoTensorSubclass)):
+        if not isinstance(child, (Float8Linear)):
             continue
 
         #

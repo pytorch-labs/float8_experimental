@@ -31,7 +31,6 @@ from float8_experimental.float8_utils import (
     FP16_MAX_POS,
     tensor_to_scale,
 )
-from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 
 random.seed(0)
 torch.manual_seed(0)
@@ -112,9 +111,7 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize(
-        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
-    )
+    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     def test_linear_nobias(self, x_shape, linear_type: LinearType, emulate: bool):
         if not emulate:
             if not torch.cuda.is_available():
@@ -132,9 +129,7 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize(
-        "linear_type", [LinearType.DELAYED, LinearType.DYNAMIC, LinearType.NO_SUBCLASS]
-    )
+    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )

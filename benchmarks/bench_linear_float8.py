@@ -15,7 +15,6 @@ import pandas as pd
 import torch
 import torch.utils.benchmark as benchmark
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_nots import Float8LinearNoTensorSubclass
 from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
 from tqdm import tqdm
 
@@ -66,7 +65,6 @@ class Experiment:
     float8_time_sec: float
     dtype: torch.dtype
     compiled: bool = False
-    use_ts: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
     te_time_sec: Optional[float] = None
 
@@ -106,11 +104,12 @@ class Experiment:
 
 
 def main(
-    sweep_path: Path, compile: bool, n_limit: Optional[int] = None, use_ts: bool = False
+    sweep_path: Path,
+    compile: bool,
+    n_limit: Optional[int] = None,
 ):
     device = "cuda"
     print(f"Compile is set to             | {compile}")
-    print(f"Use tensor subclass is set to | {use_ts}")
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
@@ -132,14 +131,10 @@ def main(
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(
             device=device, dtype=dtype
         )
-        if use_ts:
-            linear_float8 = Float8Linear.from_float(
-                copy.deepcopy(linear_ref), emulate=False
-            )
-        else:
-            linear_float8 = Float8LinearNoTensorSubclass.from_float(
-                copy.deepcopy(linear_ref), emulate=False
-            )
+
+        linear_float8 = Float8Linear.from_float(
+            copy.deepcopy(linear_ref), emulate=False
+        )
 
         bsz, seq_len = 4, 4096
         M = bsz * seq_len
@@ -192,7 +187,6 @@ def main(
             float8_time,
             dtype,
             compile,
-            use_ts=use_ts,
             te_time_sec=te_time_sec,
         )
         print(experiment)
@@ -209,7 +203,6 @@ def main(
         "N",
         "ref_dtype",
         "compiled",
-        "use_ts",
         "fp8_dtype",
         "ref_time_sec",
         "pt_fp8_time_sec",
@@ -231,7 +224,6 @@ def main(
                 experiment.shape[2],
                 experiment.dtype,
                 experiment.compiled,
-                experiment.use_ts,
                 experiment.float_8_dtype,
                 experiment.ref_time_sec,
                 experiment.float8_time_sec,
@@ -286,7 +278,6 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output_path", type=str, required=True)
     parser.add_argument("--compile", action="store_true")
     parser.add_argument("-n", "--n_limit", type=int, required=False)
-    parser.add_argument("--use_ts", action="store_true", help="use tensor subclass")
     args = parser.parse_args()
     output_path = Path(args.output_path)
-    main(output_path, args.compile, args.n_limit, args.use_ts)
+    main(output_path, args.compile, args.n_limit)

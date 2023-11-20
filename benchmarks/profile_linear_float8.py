@@ -110,9 +110,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         layer_norm=True,
         torch_compile=compile,
     )
-    print(f"Compile is set to             | {compile}")
-    print(f"Use tensor subclass is set to | {linear_type}")
-    print(f"Use layer norm is set to      | {params.layer_norm}")
+    print(f"Compile is set to          | {compile}")
+    print(f"Using Linear type:         | {linear_type}")
+    print(f"Use layer norm is set to   | {params.layer_norm}")
     linear_ref = torch.nn.Linear(
         params.K,
         params.N,
