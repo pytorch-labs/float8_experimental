@@ -12,9 +12,9 @@ to simplify the product code.
 
 from typing import Optional, Tuple
 
-import torch
-
 import float8_experimental.float8_aten_api
+
+import torch
 from float8_experimental.float8_tensor import Float8Tensor
 
 
