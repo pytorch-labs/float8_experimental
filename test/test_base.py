@@ -196,6 +196,21 @@ class TestFloat8Linear:
 
         # Cast the module to dtype
         m = m.to(dtype=linear_dtype)
+        # Check amax buffer types
+        for key in [
+            "fp8_amax_x",
+            "fp8_amax_history_x",
+            "fp8_scale_x",
+            "fp8_amax_w",
+            "fp8_amax_history_w",
+            "fp8_scale_w",
+            "fp8_amax_dL_dY",
+            "fp8_amax_history_dL_dY",
+            "fp8_scale_dL_dY",
+        ]:
+            assert (
+                m._buffers[key].dtype == torch.float32
+            ), f"{key}.dtype is {m._buffers[key].dtype}, expected torch.float32"
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
