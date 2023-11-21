@@ -182,7 +182,9 @@ class TestFloat8Linear:
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     def test_type_cast(self, linear_type: LinearType, linear_dtype: torch.dtype):
-        emulate = (not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0))
+        emulate = (
+            not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
+        )
         x_shape = (16, 16)
 
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
