@@ -157,6 +157,19 @@ def main(
                     y = te_linear(input_tensor)
                 y.sum().backward()
 
+        def n_times(n, fn, *args, **kwargs):
+            def wrapper(*args, **kwargs):
+                for _ in range(n):
+                    fn(*args, **kwargs)
+            return wrapper
+
+        REPEAT_N = 100
+
+        if REPEAT_N > 1:
+            ref_forw_backward = n_times(REPEAT_N, ref_forw_backward)
+            float8_forw_backward = n_times(REPEAT_N, float8_forw_backward)
+            te_forw_backward = n_times(REPEAT_N, te_forw_backward)
+
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
             float8_forw_backward = torch.compile(float8_forw_backward)
@@ -169,6 +182,7 @@ def main(
             float8_forw_backward()
             if transformer_engine_installed:
                 te_forw_backward()
+
 
         ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward) * 1e-6
         float8_time = (
