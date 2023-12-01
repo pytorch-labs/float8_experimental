@@ -183,13 +183,21 @@ def main(
             if transformer_engine_installed:
                 te_forw_backward()
 
-        ref_time = benchmark_torch_function_in_microseconds(ref_forw_backward) * 1e-6
+        ref_time = (
+            benchmark_torch_function_in_microseconds(ref_forw_backward)
+            * 1e-6
+            / REPEAT_N
+        )
         float8_time = (
-            benchmark_torch_function_in_microseconds(float8_forw_backward) * 1e-6
+            benchmark_torch_function_in_microseconds(float8_forw_backward)
+            * 1e-6
+            / REPEAT_N
         )
         if transformer_engine_installed:
             te_time_sec = (
-                benchmark_torch_function_in_microseconds(te_forw_backward) * 1e-6
+                benchmark_torch_function_in_microseconds(te_forw_backward)
+                * 1e-6
+                / REPEAT_N
             )
         else:
             te_time_sec = None
