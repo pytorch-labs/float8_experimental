@@ -168,7 +168,8 @@ def main(
 
         ref_forw_backward = n_times(REPEAT_N, ref_forw_backward)
         float8_forw_backward = n_times(REPEAT_N, float8_forw_backward)
-        te_forw_backward = n_times(REPEAT_N, te_forw_backward)
+        if transformer_engine_installed:
+            te_forw_backward = n_times(REPEAT_N, te_forw_backward)
 
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
