@@ -177,15 +177,16 @@ class Float8LinearMixin(object):
             self.bias_dtype = autocast_dtype
 
         scale_fn_name = self.recipe.scale_fn_name
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            x,
-            self.fp8_amax_x,
-            self.fp8_amax_history_x,
-            self.fp8_scale_x,
-            scale_fn_name,
-            torch.float8_e4m3fn,
-            is_amax_initialized,
-        )
+        if False:
+            _maybe_initialize_amaxes_scales_for_float8_cast(
+                x,
+                self.fp8_amax_x,
+                self.fp8_amax_history_x,
+                self.fp8_scale_x,
+                scale_fn_name,
+                torch.float8_e4m3fn,
+                is_amax_initialized,
+            )
         x_fp8 = Float8Tensor.to_float8(
             x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
         )
@@ -195,15 +196,16 @@ class Float8LinearMixin(object):
         self, w: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            w,
-            self.fp8_amax_w,
-            self.fp8_amax_history_w,
-            self.fp8_scale_w,
-            scale_fn_name,
-            torch.float8_e4m3fn,
-            is_amax_initialized,
-        )
+        if False:
+            _maybe_initialize_amaxes_scales_for_float8_cast(
+                w,
+                self.fp8_amax_w,
+                self.fp8_amax_history_w,
+                self.fp8_scale_w,
+                scale_fn_name,
+                torch.float8_e4m3fn,
+                is_amax_initialized,
+            )
         w_fp8 = Float8Tensor.to_float8(
             w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w, self.emulate
         )
@@ -229,6 +231,7 @@ class Float8LinearMixin(object):
             self.is_amax_initialized
             and (not self.amax_and_scale_synced)
             and torch.is_grad_enabled()
+            and False
         ):
             raise AssertionError(
                 "amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward"

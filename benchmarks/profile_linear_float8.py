@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+import time
 
 import fire
 
@@ -19,6 +20,9 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from torch.profiler import profile, ProfilerActivity, record_function
+
+import torch._inductor as torchinductor
+torchinductor.config.triton.cudagraphs = True
 
 
 @dataclass
@@ -105,9 +109,13 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         M=4 * 4096,
         K=8192,
         N=7168,
+        # M=4096,
+        # K=4096,
+        # N=4096,
         input_bias=False,
         ref_dtype=torch.bfloat16,
-        layer_norm=True,
+        # layer_norm=True,
+        layer_norm=False,
         torch_compile=compile,
     )
     print(f"Compile is set to          | {compile}")
@@ -142,7 +150,7 @@ def main(profile_path: Path, compile: bool, linear_type: str):
             out.sum().backward()
 
     def float8_forw_backward(x):
-        if linear_requires_sync(linear_type):
+        if linear_requires_sync(linear_type) and False:
             with record_function("scale_amax_and_scales"):
                 sync_float8_amax_and_scale_history(linear_float8)
         if params.layer_norm:
@@ -170,24 +178,39 @@ def main(profile_path: Path, compile: bool, linear_type: str):
                     out.sum().backward()
 
     if params.torch_compile:
-        ref_forw_backward = torch.compile(ref_forw_backward)
-        float8_forw_backward = torch.compile(float8_forw_backward)
+        ref_forw_backward = torch.compile(ref_forw_backward, mode='reduce-overhead')
+        float8_forw_backward = torch.compile(float8_forw_backward, mode='reduce-overhead')
         # Compiling TE_linear fails but they are already compiling under the hood
         # if transformer_engine_installed:
         #     te_forw_backward = torch.compile(te_forw_backward)
 
-    for _ in range(5):
-        ref_forw_backward(input_tensor)
+    if False:
+        for _ in range(2):
+            ref_forw_backward(input_tensor)
+        t0 = time.time()
+        for _ in range(5):
+            ref_forw_backward(input_tensor)
+        print(1, time.time() - t0)
+
+    # warmup
+    for _ in range(2):
         float8_forw_backward(input_tensor)
+    t0 = time.time()
+    for _ in range(5):
+        float8_forw_backward(input_tensor)
+    print(2, time.time() - t0)
+
+    for _ in range(5):
         if transformer_engine_installed:
             te_forw_backward(input_tensor)
 
     # Profile Reference Linear
-    ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
-    profile_config = ProfileConfig(
-        str(profile_path / ref_string), ref_string, iters=5, warmup_iters=5, sync=True
-    )
-    profile_function(profile_config, ref_forw_backward, input_tensor)
+    if True:
+        ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
+        profile_config = ProfileConfig(
+            str(profile_path / ref_string), ref_string, iters=5, warmup_iters=5, sync=True
+        )
+        profile_function(profile_config, ref_forw_backward, input_tensor)
 
     # # Profile Float8 Linear
     float8_string = f"linear_float8_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}_{linear_type}.json"

@@ -2,6 +2,7 @@
 float8_experimental/__pycache__/*
 finetune/__pycache__/*
 test/__pycache__/*
+torch_compile_debug/*
 tmp/*
 benchmarks/data/*
 

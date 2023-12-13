@@ -14,6 +14,7 @@ import pandas as pd
 
 import torch
 import torch.utils.benchmark as benchmark
+from float8_experimental.dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
 from tqdm import tqdm
