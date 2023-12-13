@@ -47,7 +47,6 @@ output_fsdp_fname = os.path.join(data_dir, "output_fsdp.pt")
 B, M, K, N = 8, 8, 32, 32
 lr = 0.01
 N_ITER = 3
-N_ITER = 1
 
 
 def setup(rank, world_size):
