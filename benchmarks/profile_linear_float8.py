@@ -154,9 +154,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
             out.sum().backward()
 
     if transformer_engine_installed:
-        # Create an FP8 recipe. Note: All input args are optional.
+        fp8_format = recipe.Format.HYBRID
         fp8_recipe = recipe.DelayedScaling(
-            margin=0, interval=1, fp8_format=recipe.Format.E4M3
+            fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
         )
         te_linear = te.Linear(params.K, params.N, bias=params.input_bias).to(
             device="cuda", dtype=params.ref_dtype

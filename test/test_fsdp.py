@@ -65,7 +65,9 @@ def cleanup():
 def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
+        nn.ReLU(),
         nn.Linear(N, N, dtype=base_dtype),
+        nn.ReLU(),
     )
     if is_fp8:
         swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
@@ -75,6 +77,8 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
 # taken from https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html
 # and modified
 def fsdp_main(rank, world_size, args):
+    COMPILE = True
+
     setup(rank, world_size)
     torch.cuda.set_device(rank)
 
@@ -83,7 +87,7 @@ def fsdp_main(rank, world_size, args):
         rank
     )
     model.load_state_dict(torch.load(sd_in_fname))
-    model = FSDP(model)
+    model = FSDP(model, use_orig_params=COMPILE)
     # Note: we need to multiply by world_size here to match single GPU
     # optimizer update
     optimizer = torch.optim.SGD(model.parameters(), lr=lr * world_size)
@@ -97,12 +101,19 @@ def fsdp_main(rank, world_size, args):
     bsz_local_end = int((rank + 1) / world_size * B)
     ref_input_local = ref_input_global[bsz_local_start:bsz_local_end].to(rank)
 
-    for _ in range(N_ITER):
+    def forward_backward():
         optimizer.zero_grad()
         y_local = model(ref_input_local)
         y_local.sum().backward()
         sync_float8_amax_and_scale_history(model)
         optimizer.step()
+        return y_local
+
+    forward_backward()
+    if COMPILE:
+        forward_backward = torch.compile(forward_backward)
+    for _ in range(N_ITER):
+        y_local = forward_backward()
 
     # get global y
     y_global = [
@@ -160,12 +171,19 @@ def run(mode: str, is_fp8: bool):
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
-        for _ in range(N_ITER):
+        def forward_backward():
             optimizer.zero_grad()
             y = model(ref_input)
             y.sum().backward()
             sync_float8_amax_and_scale_history(model)
             optimizer.step()
+            return y
+
+        # forward_backward = torch.compile(forward_backward)
+
+        y = forward_backward()
+        for _ in range(N_ITER):
+            y = forward_backward()
 
         torch.save(y, output_single_gpu_fname)
         torch.save(model.state_dict(), sd_out_single_gpu_fname)

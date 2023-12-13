@@ -146,9 +146,9 @@ def main(
             linear_float8(input_tensor).sum().backward()
 
         if transformer_engine_installed:
-            # Create an FP8 recipe. Note: All input args are optional.
+            fp8_format = recipe.Format.HYBRID
             fp8_recipe = recipe.DelayedScaling(
-                margin=0, interval=1, fp8_format=recipe.Format.E4M3
+                fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
             )
             te_linear = te.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
 
@@ -168,7 +168,8 @@ def main(
 
         ref_forw_backward = n_times(REPEAT_N, ref_forw_backward)
         float8_forw_backward = n_times(REPEAT_N, float8_forw_backward)
-        te_forw_backward = n_times(REPEAT_N, te_forw_backward)
+        if transformer_engine_installed:
+            te_forw_backward = n_times(REPEAT_N, te_forw_backward)
 
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)

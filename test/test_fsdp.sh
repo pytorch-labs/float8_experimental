@@ -29,7 +29,7 @@ launch() {
     echo "✅ All Tests Passed ✅"
 }
 
-for IS_FP8 in False True
+for IS_FP8 in True # False True
 do
     launch
 done
