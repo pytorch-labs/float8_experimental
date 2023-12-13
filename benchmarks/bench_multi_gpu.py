@@ -3,15 +3,6 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-"""
-Test numerics of single GPU vs FSDP of toy model. At a high level:
-1. start with reference input and state dict for a single GPU model
-2. run fw+bw+optim on single GPU, save the results
-3. run fw+bw+optim with FSDP, save the results
-4. verify that the outputs and state dicts after optim update match
-
-later 1-4 can be repeated for fp16, various combinations of fp8, etc.
-"""
 
 import os
 import warnings
