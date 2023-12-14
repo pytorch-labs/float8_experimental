@@ -132,7 +132,7 @@ def get_float8_layers(model: torch.nn.Module, fp8_classes=None):
     return fp8_layers
 
 def sync_float8_amax_and_scale_history(
-    model: torch.nn.Module, fp8_layers, combine_reduction = False
+    model: torch.nn.Module, fp8_classes=None, fp8_layers=None, combine_reduction=False
 ) -> None:
     """
     Manages the float8 amax and scale bookkeeping. In detail, it does the
@@ -152,6 +152,9 @@ def sync_float8_amax_and_scale_history(
     # For now, this is written in a naive way to maximize code readability.
     # TODO(future): benchmark and optimize as needed, we can combine all
     # the reductions into one and probably make the history update faster.
+
+    if fp8_layers is None:
+        fp8_layers = get_float8_layers(model, fp8_classes)
 
     if dist.is_initialized():
         if combine_reduction:

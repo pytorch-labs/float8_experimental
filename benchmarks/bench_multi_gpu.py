@@ -121,7 +121,7 @@ def fsdp_main(rank, world_size, args):
         fp8_optimizer.zero_grad()
         y_local = fp8_model(input_tensor)
         y_local.sum().backward()
-        sync_float8_amax_and_scale_history(fp8_model, fp8_layers, combine_reduction=True)
+        sync_float8_amax_and_scale_history(fp8_model, fp8_layers=fp8_layers, combine_reduction=True)
         fp8_optimizer.step()
         return y_local
 
