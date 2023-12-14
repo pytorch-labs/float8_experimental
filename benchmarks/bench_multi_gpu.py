@@ -19,7 +19,7 @@ from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
-    update_float8_amax_and_scale_history,
+    get_float8_layers,
 )
 from torch.distributed.fsdp import (
     FullStateDictConfig,
@@ -42,7 +42,6 @@ torch.manual_seed(0)
 
 B, M, K, N = 32, 32, 32, 32
 lr = 0.01
-N_ITER = 11
 
 def benchmark_torch_function_in_microseconds(
     func: Callable,
@@ -75,7 +74,7 @@ def get_model(K, N, is_fp8, is_te, base_dtype=torch.float32):
         else te.Linear(K, N, params_dtype=base_dtype),
         nn.ReLU(),
     ]
-    N_LAYERS = 10
+    N_LAYERS = 20
     # N linear layers
     for _ in range(N_LAYERS - 1):
         if is_te:
@@ -112,6 +111,8 @@ def fsdp_main(rank, world_size, args):
     if rank == 0:
         print(fp8_model)
 
+    fp8_layers = get_float8_layers(fp8_model)
+
     # fp8_model = torch.compile(fp8_model)
     fp8_optimizer = torch.optim.SGD(fp8_model.parameters(), lr=lr * world_size)
 
@@ -120,7 +121,7 @@ def fsdp_main(rank, world_size, args):
         fp8_optimizer.zero_grad()
         y_local = fp8_model(input_tensor)
         y_local.sum().backward()
-        sync_float8_amax_and_scale_history(fp8_model)
+        sync_float8_amax_and_scale_history(fp8_model, fp8_layers, combine_reduction=True)
         fp8_optimizer.step()
         return y_local
 
@@ -156,6 +157,8 @@ def fsdp_main(rank, world_size, args):
             y.sum().backward()
             te_optimizer.step()
 
+    float8_forw_backward()
+
     if compile:
         torch._inductor.config.reorder_for_compute_comm_overlap = True
 
@@ -165,8 +168,8 @@ def fsdp_main(rank, world_size, args):
             float8_forw_backward, options={"trace.graph_diagram": True}
         )
 
-        explain_output = torch._dynamo.explain(float8_forw_backward)()
-        print(explain_output)
+        # explain_output = torch._dynamo.explain(float8_forw_backward)()
+        # print(explain_output)
 
         # Compiling TE_linear fails but they are already compiling under the hood
         # if transformer_engine_installed:
@@ -178,12 +181,12 @@ def fsdp_main(rank, world_size, args):
         # make sure training is done on all ranks
         dist.barrier()
 
-    run_n_iterations(5, ref_forw_backward)
-    run_n_iterations(5, float8_forw_backward)
+    run_n_iterations(50, ref_forw_backward)
+    run_n_iterations(50, float8_forw_backward)
     if transformer_engine_installed:
-        run_n_iterations(5, te_forw_backward)
+        run_n_iterations(50, te_forw_backward)
 
-    N_ITER = 10
+    N_ITER = 50
     ref_time = (
         benchmark_torch_function_in_microseconds(
             run_n_iterations, N_ITER, ref_forw_backward

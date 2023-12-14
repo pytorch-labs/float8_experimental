@@ -117,112 +117,9 @@ def swap_linear_with_float8_linear(
             swap_linear_with_float8_linear(child, module, emulate)
 
 
-def sync_float8_amax_and_scale_history(
-    model: torch.nn.Module, fp8_classes=None
-) -> None:
-    """
-    Manages the float8 amax and scale bookkeeping. In detail, it does the
-    following:
-    1. in distributed contexts, syncs amax values across workers
-    2. adds the `amax` values to history
-    3. calculates the scales to be used for next iteration
-    4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
-       to signal that they have been synced
-
-    TODO(future): design the UX for this (context manager, etc)
-
-    Args:
-        model (torch.nn.Module): The model to track amaxes for
-    """
-
-    # For now, this is written in a naive way to maximize code readability.
-    # TODO(future): benchmark and optimize as needed, we can combine all
-    # the reductions into one and probably make the history update faster.
-    # Lazy import to avoid circular dependency
-
+def get_float8_layers(model: torch.nn.Module, fp8_classes=None):
     if fp8_classes is None:
-        from float8_experimental.float8_linear import Float8Linear
-
-        fp8_classes = Float8Linear
-
-    for name, child in model.named_modules():
-        if not isinstance(child, fp8_classes):
-            continue
-
-        #
-        # 1. in distributed contexts, syncs amax values across workers
-        #
-        if dist.is_initialized():
-            dist.all_reduce(child.fp8_amax_x, op=dist.ReduceOp.MAX)
-            dist.all_reduce(child.fp8_amax_w, op=dist.ReduceOp.MAX)
-            dist.all_reduce(child.fp8_amax_dL_dY, op=dist.ReduceOp.MAX)
-
-        #
-        # 2. adds the `amax` values to history
-        #
-        _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
-        _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(
-            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
-        )
-
-        #
-        # 3. calculate the scales
-        #
-        # TODO what to do with x_dtype
-        x_dtype = child.last_seen_input_dtype
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_x,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_x.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_w,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_w.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_dL_dY,
-            torch.float8_e5m2,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_dL_dY.copy_(new_scale)
-
-        #
-        # 4. set a flag to signal amaxes/scales are ready
-        #
-        child.amax_and_scale_synced = True
-
-
-def sync_float8_amax_and_scale_history_test_conbine_reduction(
-    model: torch.nn.Module, fp8_classes=None
-) -> None:
-    """
-    Manages the float8 amax and scale bookkeeping. In detail, it does the
-    following:
-    1. in distributed contexts, syncs amax values across workers
-    2. adds the `amax` values to history
-    3. calculates the scales to be used for next iteration
-    4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
-       to signal that they have been synced
-
-    TODO(future): design the UX for this (context manager, etc)
-
-    Args:
-        model (torch.nn.Module): The model to track amaxes for
-    """
-
-    # For now, this is written in a naive way to maximize code readability.
-    # TODO(future): benchmark and optimize as needed, we can combine all
-    # the reductions into one and probably make the history update faster.
-    # Lazy import to avoid circular dependency
-
-    if fp8_classes is None:
+        # Lazy import to avoid circular dependency
         from float8_experimental.float8_linear import Float8Linear
 
         fp8_classes = Float8Linear
@@ -232,42 +129,70 @@ def sync_float8_amax_and_scale_history_test_conbine_reduction(
         child for name, child in model.named_modules() if isinstance(child, fp8_classes)
     ]
 
-    if dist.is_initialized():
-        fp8_amax_x_tensor = torch.tensor(
-            [child.fp8_amax_x for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        fp8_amax_w_tensor = torch.tensor(
-            [child.fp8_amax_w for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        fp8_amax_dL_dY_tensor = torch.tensor(
-            [child.fp8_amax_dL_dY for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        # print("fp8_amax_x_tensor, ", fp8_amax_x_tensor)
+    return fp8_layers
 
-        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
+def sync_float8_amax_and_scale_history(
+    model: torch.nn.Module, fp8_layers, combine_reduction = False
+) -> None:
+    """
+    Manages the float8 amax and scale bookkeeping. In detail, it does the
+    following:
+    1. in distributed contexts, syncs amax values across workers
+    2. adds the `amax` values to history
+    3. calculates the scales to be used for next iteration
+    4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
+       to signal that they have been synced
+
+    TODO(future): design the UX for this (context manager, etc)
+
+    Args:
+        model (torch.nn.Module): The model to track amaxes for
+    """
+
+    # For now, this is written in a naive way to maximize code readability.
+    # TODO(future): benchmark and optimize as needed, we can combine all
+    # the reductions into one and probably make the history update faster.
+
+    if dist.is_initialized():
+        if combine_reduction:
+            fp8_amax_x_tensor = torch.tensor(
+                [child.fp8_amax_x for child in fp8_layers],
+                dtype=torch.float32,
+                device="cuda",
+                requires_grad=False,
+            )
+            fp8_amax_w_tensor = torch.tensor(
+                [child.fp8_amax_w for child in fp8_layers],
+                dtype=torch.float32,
+                device="cuda",
+                requires_grad=False,
+            )
+            fp8_amax_dL_dY_tensor = torch.tensor(
+                [child.fp8_amax_dL_dY for child in fp8_layers],
+                dtype=torch.float32,
+                device="cuda",
+                requires_grad=False,
+            )
+            # print("fp8_amax_x_tensor, ", fp8_amax_x_tensor)
+            dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
+            dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
+            dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
 
     for idx in range(len(fp8_layers)):
         child = fp8_layers[idx]
-
         #
         # 1. in distributed contexts, syncs amax values across workers
         #
         if dist.is_initialized():
-            child.fp8_amax_x = fp8_amax_x_tensor[idx].clone()
-            child.fp8_amax_w = fp8_amax_w_tensor[idx].clone()
-            child.fp8_amax_dL_dY = fp8_amax_dL_dY_tensor[idx].clone()
-        # TODO: There are errors if no "clone()", need to figure out.
+            if combine_reduction:
+                # TODO: There are errors if no "clone()", need to figure out.
+                child.fp8_amax_x = fp8_amax_x_tensor[idx].clone()
+                child.fp8_amax_w = fp8_amax_w_tensor[idx].clone()
+                child.fp8_amax_dL_dY = fp8_amax_dL_dY_tensor[idx].clone()
+            else:
+                dist.all_reduce(child.fp8_amax_x, op=dist.ReduceOp.MAX)
+                dist.all_reduce(child.fp8_amax_w, op=dist.ReduceOp.MAX)
+                dist.all_reduce(child.fp8_amax_dL_dY, op=dist.ReduceOp.MAX)
 
         #
         # 2. adds the `amax` values to history
