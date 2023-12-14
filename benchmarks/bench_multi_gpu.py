@@ -157,7 +157,7 @@ def fsdp_main(rank, world_size, args):
             y.sum().backward()
             te_optimizer.step()
 
-    float8_forw_backward()
+    # float8_forw_backward()
 
     if compile:
         torch._inductor.config.reorder_for_compute_comm_overlap = True
