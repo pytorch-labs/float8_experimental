@@ -111,7 +111,9 @@ def fsdp_main(rank, world_size, args):
 
     sync_float8_func = sync_float8_amax_and_scale_history
     if compile:
-        sync_float8_func = torch.compile(sync_float8_amax_and_scale_history, fullgraph=fullgraph)
+        sync_float8_func = torch.compile(
+            sync_float8_amax_and_scale_history, fullgraph=fullgraph
+        )
         # model = FSDP(torch.compile(model.module), use_orig_params=True)
         model = torch.compile(model, fullgraph=fullgraph)
 
