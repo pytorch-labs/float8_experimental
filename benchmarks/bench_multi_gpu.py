@@ -103,7 +103,6 @@ def fsdp_main(rank, world_size, args):
     bsz_local_end = int((rank + 1) / world_size * B)
     input_tensor = input_global[bsz_local_start:bsz_local_end].to(rank)
 
-
     fp8_model = get_model(K, N, is_fp8=True, is_te=False, base_dtype=base_dtype).to(
         rank
     )
@@ -131,7 +130,6 @@ def fsdp_main(rank, world_size, args):
         fp8_optimizer.step()
         sync_float8_func(fp8_model)
 
-
     ref_model = get_model(K, N, is_fp8=False, is_te=False, base_dtype=base_dtype).to(
         rank
     )
@@ -145,7 +143,6 @@ def fsdp_main(rank, world_size, args):
         ref_optimizer.zero_grad()
         ref_model(input_tensor).sum().backward()
         ref_optimizer.step()
-
 
     if transformer_engine_installed:
         te_model = FSDP(
@@ -170,7 +167,6 @@ def fsdp_main(rank, world_size, args):
                 y = te_model(input_tensor)
             y.sum().backward()
             te_optimizer.step()
-
 
     def run_n_iterations(n, fn):
         for _ in range(n):
@@ -234,6 +230,7 @@ def run():
     # run fsdp model
     args = (base_dtype, ref_input, compile)
     mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
+
 
 # Usgae:
 # CUDA_VISIBLE_DEVICES=0,1 python benchmarks/bench_multi_gpu.py
