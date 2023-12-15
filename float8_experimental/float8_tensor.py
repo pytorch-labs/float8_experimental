@@ -12,6 +12,16 @@ from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 aten = torch.ops.aten
 
 
+@torch.no_grad()
+def calculate_amax_and_cast_to_float8(tensor, scale, float8_dtype, amax_buffer):
+    if amax_buffer is not None:
+        amax_buffer.fill_(tensor_to_amax(tensor))
+
+    tensor_scaled = tensor * scale
+    bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+    return bits_fp8
+
+
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8
@@ -25,24 +35,23 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
         emulate: bool = False,
+        cached_casted_weight=None,
     ):
-        # In TransformerEngine, the casts to float8 are fused with calculating
-        # the new amax value. In this codebase, the eager mode code for those
-        # two things is colocated in this function. We expect PT2.0 to fuse it
-        # for us.
-        if amax_buffer is not None:
-            amax_buffer.fill_(tensor_to_amax(tensor))
-
-        tensor_scaled = tensor * scale
-        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+        if cached_casted_weight is not None:
+            return Float8Tensor(
+                cached_casted_weight, scale, tensor.dtype, emulate=emulate
+            )
+        bits_fp8 = calculate_amax_and_cast_to_float8(
+            tensor, scale, float8_dtype, amax_buffer
+        )
         return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None, None
+            return g.to_original_precision(), None, None, None, None, None
         else:
-            return g, None, None, None, None
+            return g, None, None, None, None, None
 
 
 class FromFloat8ConstrFunc(torch.autograd.Function):
@@ -122,7 +131,7 @@ class Float8Tensor(torch.Tensor):
         return ["_data", "_scale"], ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, metadata):
+    def __tensor_unflatten__(inner_tensors: Dict, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
         return Float8Tensor(
             inner_tensors["_data"],
@@ -136,7 +145,14 @@ class Float8Tensor(torch.Tensor):
 
     @staticmethod
     @torch._dynamo.allow_in_graph
-    def to_float8(tensor, scale, float8_dtype, amax_buffer=None, emulate: bool = False):
+    def to_float8(
+        tensor,
+        scale,
+        float8_dtype,
+        amax_buffer=None,
+        emulate: bool = False,
+        cached_casted_weight=None,
+    ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
         Args:
@@ -149,7 +165,12 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor, scale, float8_dtype, amax_buffer, emulate
+            tensor,
+            scale,
+            float8_dtype,
+            amax_buffer,
+            emulate,
+            cached_casted_weight,
         )
 
     @classmethod

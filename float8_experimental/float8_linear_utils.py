@@ -156,6 +156,9 @@ def sync_float8_amax_and_scale_history(
 
     for idx in range(len(fp8_layers)):
         child = fp8_layers[idx]
+        # TODO(future): enable skipping weight related syncing if weight cache
+        # is on
+
         #
         # 1. in distributed contexts, syncs amax values across workers
         #
