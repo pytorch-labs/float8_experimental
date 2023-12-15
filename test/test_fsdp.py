@@ -108,6 +108,8 @@ def fsdp_main(rank, world_size, args):
         optimizer.step()
         return y_local
 
+    # TODO: Fix here. Running for one iteration and then compile is a workaround for compiling fsdp float8.
+    # A better way for compile is to FSDP(torch.compile(model)).
     forward_backward()
     if COMPILE:
         forward_backward = torch.compile(forward_backward)

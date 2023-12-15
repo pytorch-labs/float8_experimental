@@ -17,9 +17,9 @@ import torch.nn as nn
 import torch.utils.benchmark as benchmark
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    get_float8_layers,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
-    get_float8_layers,
 )
 from torch.distributed.fsdp import (
     FullStateDictConfig,
@@ -40,8 +40,10 @@ except ImportError:
 
 torch.manual_seed(0)
 
+# TODO: Add more shapes for the benchmark
 B, M, K, N = 32, 32, 32, 32
 lr = 0.01
+
 
 def benchmark_torch_function_in_microseconds(
     func: Callable,
@@ -102,34 +104,47 @@ def fsdp_main(rank, world_size, args):
     bsz_local_end = int((rank + 1) / world_size * B)
     input_tensor = input_global[bsz_local_start:bsz_local_end].to(rank)
 
-    fp8_model = FSDP(
-        # torch.compile(
-        get_model(K, N, is_fp8=True, is_te=False, base_dtype=base_dtype).to(rank),
-        # ),
-        use_orig_params=compile,
+    fp8_model = get_model(K, N, is_fp8=True, is_te=False, base_dtype=base_dtype).to(
+        rank
     )
+    fp8_optimizer = torch.optim.SGD(fp8_model.parameters(), lr=lr * world_size)
+
+    if compile:
+        # TODO: Need to fix issues with compile
+        fp8_model = torch.compile(fp8_model)
+        compiled_sync_float8_amax_and_scale_history = torch.compile(
+            sync_float8_amax_and_scale_history
+        )
+
+    fp8_model = FSDP(fp8_model, use_orig_params=compile)
     if rank == 0:
         print(fp8_model)
 
     fp8_layers = get_float8_layers(fp8_model)
-
-    # fp8_model = torch.compile(fp8_model)
-    fp8_optimizer = torch.optim.SGD(fp8_model.parameters(), lr=lr * world_size)
+    print(fp8_layers)
 
     def float8_forw_backward():
-        # TODO: Has to use the optimizer in float forward_backward, otherwise there will be errors of fsdp compile, need to figure out.
         fp8_optimizer.zero_grad()
+        if compile:
+            compiled_sync_float8_amax_and_scale_history(
+                fp8_model, fp8_layers=fp8_layers, combine_reduction=True
+            )
+        else:
+            sync_float8_amax_and_scale_history(
+                fp8_model, fp8_layers=fp8_layers, combine_reduction=True
+            )
         y_local = fp8_model(input_tensor)
         y_local.sum().backward()
-        sync_float8_amax_and_scale_history(fp8_model, fp8_layers=fp8_layers, combine_reduction=True)
         fp8_optimizer.step()
         return y_local
 
-    ref_model = FSDP(
-        get_model(K, N, is_fp8=False, is_te=False, base_dtype=base_dtype).to(rank),
-        use_orig_params=compile,
+    ref_model = get_model(K, N, is_fp8=False, is_te=False, base_dtype=base_dtype).to(
+        rank
     )
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=lr * world_size)
+    if compile:
+        ref_model = torch.compile(ref_model)
+    ref_model = FSDP(ref_model, use_orig_params=compile)
 
     def ref_forw_backward():
         ref_optimizer.zero_grad()
@@ -145,6 +160,9 @@ def fsdp_main(rank, world_size, args):
         fp8_recipe = recipe.DelayedScaling(
             fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
         )
+        # Compiling TE_linear fails but they are already compiling under the hood
+        # if transformer_engine_installed:
+        #     te_forw_backward = torch.compile(te_forw_backward)
         if rank == 0:
             print(te_model)
 
@@ -157,30 +175,13 @@ def fsdp_main(rank, world_size, args):
             y.sum().backward()
             te_optimizer.step()
 
-    # float8_forw_backward()
-
-    if compile:
-        torch._inductor.config.reorder_for_compute_comm_overlap = True
-
-        ref_forw_backward = torch.compile(ref_forw_backward)
-
-        float8_forw_backward = torch.compile(
-            float8_forw_backward, options={"trace.graph_diagram": True}
-        )
-
-        # explain_output = torch._dynamo.explain(float8_forw_backward)()
-        # print(explain_output)
-
-        # Compiling TE_linear fails but they are already compiling under the hood
-        # if transformer_engine_installed:
-        #     te_forw_backward = torch.compile(te_forw_backward)
-
     def run_n_iterations(n, fn):
         for _ in range(n):
             fn()
         # make sure training is done on all ranks
         dist.barrier()
 
+    # warmup
     run_n_iterations(50, ref_forw_backward)
     run_n_iterations(50, float8_forw_backward)
     if transformer_engine_installed:

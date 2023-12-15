@@ -59,7 +59,6 @@ def tensor_to_amax(x, distributed_reduction=False):
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
     # happen elsewhere.
-    # TODO: The two lines need to be commente to workaround a fsdp compile error, need to figure this out
     if distributed_reduction and dist.is_initialized():
         dist.all_reduce(amax, op=dist.ReduceOp.MAX)
 

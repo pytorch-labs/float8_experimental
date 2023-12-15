@@ -131,6 +131,7 @@ def get_float8_layers(model: torch.nn.Module, fp8_classes=None):
 
     return fp8_layers
 
+
 def sync_float8_amax_and_scale_history(
     model: torch.nn.Module, fp8_classes=None, fp8_layers=None, combine_reduction=False
 ) -> None:
@@ -157,6 +158,7 @@ def sync_float8_amax_and_scale_history(
         fp8_layers = get_float8_layers(model, fp8_classes)
 
     if dist.is_initialized():
+        # TODO: Testing if combine_reduction improves performance.
         if combine_reduction:
             fp8_amax_x_tensor = torch.tensor(
                 [child.fp8_amax_x for child in fp8_layers],
