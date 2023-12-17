@@ -148,9 +148,17 @@ class Float8LinearMixin(object):
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
 
+        # If we are using gradient accumulation, then the weight tensor
+        # will be used multiple times before being updated. We can cache
+        # this float8 tensor to avoid the cast on every iteration.
+        self.do_weight_cache = False
+        self.weight_cache = None
+
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
     ) -> None:
+        # If a user calls `to` on the module, we want to ensure that
+        # these buffers are not casted and remain float32.
         self.register_buffer(name=name, tensor=tensor, persistent=persistent)
         self.always_float32_buffers.add(name)
 
@@ -194,6 +202,11 @@ class Float8LinearMixin(object):
     def cast_w_to_float8(
         self, w: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
+        # Who should own reset the weight cache? Should be optimizer applying the grads
+        # not sure if there is a nice hook for this, feels error prone users are requried to do this
+        if self.weight_cache is not None:
+            return self.weight_cache
+
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w,
@@ -207,6 +220,9 @@ class Float8LinearMixin(object):
         w_fp8 = Float8Tensor.to_float8(
             w, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w, self.emulate
         )
+        if self.do_weight_cache and self.weight_cache is None:
+            self.weight_cache = w_fp8
+
         return w_fp8
 
     def cast_y_to_float8_in_bw(
