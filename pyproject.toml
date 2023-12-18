@@ -16,15 +16,17 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch >= 2.0.1",
-    "transformers==4.32.0",
-    "fire==0.5.0",
-    "fairscale==0.4.13",
-    "tqdm==4.66.1",
-    "pandas >= 2.0",
+    "torch >= 2.1",
+    "fairscale==0.4.13"
 ]
 
 [project.optional-dependencies]
+test = [
+    "transformers==4.32.0",
+    "pandas >= 2.0",
+    "tqdm==4.66.1",
+    "fire==0.5.0"
+]
 dev = [
     "black",
     "usort",
