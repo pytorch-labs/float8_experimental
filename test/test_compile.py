@@ -11,6 +11,7 @@ import pytest
 import torch
 import torch.nn as nn
 from float8_experimental.float8_linear_utils import get_float8_linear, LinearType
+from float8_experimental.float8_tensor import Float8Tensor
 
 # Setting to unblock for calling contiguous in backwards
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
@@ -74,6 +75,87 @@ def test_aot_eager(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dty
 def test_inductor(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
     torch._dynamo.reset()
     _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
+
+def test_float8_with_graph_break_in_the_middle():
+    # test that having Float8Tensor object at the boundary of a subgraph
+    # works
+
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("fp8_amax_x", torch.tensor(1.0))
+            self.register_buffer("fp8_scale_x", torch.tensor(1.0))
+
+        def forward(self, x):
+            x_fp8 = Float8Tensor.to_float8(
+                x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, 
+                emulate=False,
+            )
+
+            # graph break
+            print('foo')
+            x_hp = x_fp8.to_original_precision()
+            return x_hp
+
+    m = M().cuda()
+    m = torch.compile(m)
+    x = torch.randn(16, 16, device='cuda')
+    y = m(x)
+
+def test_float8_graph_input():
+    # test that having Float8Tensor object as a graph input works
+    # works fine!
+
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("fp8_amax_x", torch.tensor(1.0))
+            self.register_buffer("fp8_scale_x", torch.tensor(1.0))
+
+        def forward(self, x):
+            x_fp8 = Float8Tensor.to_float8(
+                x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, 
+                emulate=False,
+            )
+
+            return x_fp8
+
+    def to_float(x):
+        return x.to_original_precision()
+
+    to_float = torch.compile(to_float)
+
+    m = M().cuda()
+    x = torch.randn(2, 2, device='cuda')
+    y = m(x)
+    print(1, y)
+    y2 = to_float(y)
+    print(2, y2)
+
+def test_float8_graph_output():
+    # test that having Float8Tensor object as a graph output works
+    # silently incorrect - `y` has fake tensors!
+
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_buffer("fp8_amax_x", torch.tensor(1.0))
+            self.register_buffer("fp8_scale_x", torch.tensor(1.0))
+
+        def forward(self, x):
+            x_fp8 = Float8Tensor.to_float8(
+                x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, 
+                emulate=False,
+            )
+
+            return x_fp8
+
+    m = M().cuda()
+    m = torch.compile(m)
+    x = torch.randn(16, 16, device='cuda')
+    y = m(x)
+    print('y', y)
+
 
 
 if __name__ == "__main__":
