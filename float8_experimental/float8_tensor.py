@@ -122,7 +122,7 @@ class Float8Tensor(torch.Tensor):
         return ["_data", "_scale"], ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, metadata):
+    def __tensor_unflatten__(inner_tensors: Dict, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
         return Float8Tensor(
             inner_tensors["_data"],
