@@ -70,9 +70,11 @@ def cleanup():
 
 def get_model(K, N, is_fp8, is_te, base_dtype=torch.float32):
     modules = [
-        nn.Linear(K, N, dtype=base_dtype)
-        if not is_te
-        else te.Linear(K, N, params_dtype=base_dtype),
+        (
+            nn.Linear(K, N, dtype=base_dtype)
+            if not is_te
+            else te.Linear(K, N, params_dtype=base_dtype)
+        ),
         nn.ReLU(),
     ]
     N_LAYERS = 20
