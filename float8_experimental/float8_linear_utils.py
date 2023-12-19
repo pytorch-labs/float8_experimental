@@ -8,6 +8,8 @@ from enum import auto, Enum
 
 import torch
 import torch.distributed as dist
+from float8_experimental.dynamic_linear import Float8DynamicLinear
+from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
@@ -29,11 +31,6 @@ def get_float8_linear(
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
     """
-    from float8_experimental.dynamic_linear import Float8DynamicLinear
-
-    # Lazy import to avoid circular dependency
-    from float8_experimental.float8_linear import Float8Linear
-
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
         LinearType.DYNAMIC: Float8DynamicLinear,
@@ -49,33 +46,6 @@ def get_float8_linear(
 def linear_requires_sync(linear_type: LinearType):
     """Returns whether the given linear_type requires sync before forward."""
     return linear_type in REQUIRES_SYNC
-
-
-def _maybe_initialize_amaxes_scales_for_float8_cast(
-    x,
-    cur_amax,
-    amax_history,
-    scale,
-    scale_fn_name,
-    float8_dtype,
-    is_initialized,
-):
-    """
-    If x is about to be cast to `float8` and the amax buffers are not initialized,
-    initializes them inplace.
-    """
-    if is_initialized:
-        return
-    with torch.no_grad():
-        # Note: we need to enable distributed reduction here in order
-        # to match numerics between single GPU and multi GPU code
-        new_amax = tensor_to_amax(x, distributed_reduction=True)
-        cur_amax.fill_(new_amax)
-        amax_history[0] = new_amax
-        new_scale = amax_history_to_scale(
-            amax_history, float8_dtype, x.dtype, scale_fn_name
-        )
-        scale.copy_(new_scale)
 
 
 def _update_history_with_new_amax(new_amax, amax_history):
@@ -141,7 +111,6 @@ def sync_float8_amax_and_scale_history(
     # Lazy import to avoid circular dependency
 
     if fp8_classes is None:
-        from float8_experimental.float8_linear import Float8Linear
 
         fp8_classes = Float8Linear
 

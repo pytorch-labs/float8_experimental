@@ -18,18 +18,42 @@ from typing import Optional
 
 import torch
 
-from float8_experimental.float8_linear_utils import (
-    _maybe_initialize_amaxes_scales_for_float8_cast,
-)
-
 from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
+    amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     tensor_to_amax,
     to_fp8_saturated,
 )
+
+
+def _maybe_initialize_amaxes_scales_for_float8_cast(
+    x,
+    cur_amax,
+    amax_history,
+    scale,
+    scale_fn_name,
+    float8_dtype,
+    is_initialized,
+):
+    """
+    If x is about to be cast to `float8` and the amax buffers are not initialized,
+    initializes them inplace.
+    """
+    if is_initialized:
+        return
+    with torch.no_grad():
+        # Note: we need to enable distributed reduction here in order
+        # to match numerics between single GPU and multi GPU code
+        new_amax = tensor_to_amax(x, distributed_reduction=True)
+        cur_amax.fill_(new_amax)
+        amax_history[0] = new_amax
+        new_scale = amax_history_to_scale(
+            amax_history, float8_dtype, x.dtype, scale_fn_name
+        )
+        scale.copy_(new_scale)
 
 
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
