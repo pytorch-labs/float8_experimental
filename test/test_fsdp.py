@@ -33,6 +33,8 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 
+from fsdp_utils import setup, cleanup, get_model
+
 torch.manual_seed(0)
 
 # assumes user is running the script from /data/users/{user}/float8_experimental
@@ -48,28 +50,6 @@ B, M, K, N = 8, 8, 32, 32
 lr = 0.01
 N_ITER = 3
 N_ITER = 1
-
-
-def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
-
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-
-def cleanup():
-    dist.destroy_process_group()
-
-
-def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
-    m = nn.Sequential(
-        nn.Linear(K, N, dtype=base_dtype),
-        nn.Linear(N, N, dtype=base_dtype),
-    )
-    if is_fp8:
-        swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
-    return m
 
 
 # taken from https://pytorch.org/tutorials/intermediate/FSDP_tutorial.html
