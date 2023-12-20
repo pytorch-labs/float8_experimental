@@ -111,7 +111,6 @@ def sync_float8_amax_and_scale_history(
     # Lazy import to avoid circular dependency
 
     if fp8_classes is None:
-
         fp8_classes = Float8Linear
 
     for name, child in model.named_modules():
