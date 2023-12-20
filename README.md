@@ -12,6 +12,9 @@ will change rapidly.
 pip install .
 # Optionally install editable
 pip install -e .
+
+# Optionally Install dev tooling
+pip install -e ".[dev]"
 ```
 
 # User API, subject to change

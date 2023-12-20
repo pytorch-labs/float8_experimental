@@ -28,9 +28,11 @@ test = [
     "fire==0.5.0"
 ]
 dev = [
-    "black",
-    "usort",
-    "libcst",
+    "black==23.3.0",
+    "usort==1.0.6",
+    "ufmt==2.1.0",
+    "libcst==1.0.1",
+    "pytest==7.4.0",
     "bumpver",
     "pip-tools"
 ]
