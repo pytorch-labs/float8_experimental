@@ -46,8 +46,7 @@ output_fsdp_fname = os.path.join(data_dir, "output_fsdp.pt")
 
 B, M, K, N = 8, 8, 32, 32
 lr = 0.01
-N_ITER = 3
-N_ITER = 1
+N_ITER = 5
 
 
 def setup(rank, world_size):
@@ -65,7 +64,9 @@ def cleanup():
 def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
+        nn.ReLU(),
         nn.Linear(N, N, dtype=base_dtype),
+        nn.ReLU(),
     )
     if is_fp8:
         swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
@@ -78,12 +79,18 @@ def fsdp_main(rank, world_size, args):
     setup(rank, world_size)
     torch.cuda.set_device(rank)
 
-    is_fp8, emulate, base_dtype = args
+    # TODO: We set fullgraph as an option. However, it currently doesn't work for fullgraph compile.
+    # We can investigate and fix it later.
+    is_fp8, emulate, base_dtype, compile, fullgraph = args
     model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).to(
         rank
     )
     model.load_state_dict(torch.load(sd_in_fname))
-    model = FSDP(model)
+    # To compile FSDP, we need use_orig_params to True
+    model = FSDP(model, use_orig_params=True)
+    # TODO: The following line doesn't work. We should fix it.
+    # model = FSDP(torch.compile(model), use_orig_params=True)
+
     # Note: we need to multiply by world_size here to match single GPU
     # optimizer update
     optimizer = torch.optim.SGD(model.parameters(), lr=lr * world_size)
@@ -91,18 +98,33 @@ def fsdp_main(rank, world_size, args):
     ref_input_global = torch.load(input_fname).to(base_dtype)
 
     # basic distributed data sampling
-    bsz_global = ref_input_global.shape[0]
     assert B % world_size == 0
     bsz_local_start = int(rank / world_size * B)
     bsz_local_end = int((rank + 1) / world_size * B)
     ref_input_local = ref_input_global[bsz_local_start:bsz_local_end].to(rank)
 
-    for _ in range(N_ITER):
+    sync_float8_func = sync_float8_amax_and_scale_history
+    if compile:
+        sync_float8_func = torch.compile(
+            sync_float8_amax_and_scale_history, fullgraph=fullgraph
+        )
+
+    def forward_backward(model):
         optimizer.zero_grad()
         y_local = model(ref_input_local)
         y_local.sum().backward()
-        sync_float8_amax_and_scale_history(model)
+        sync_float8_func(model)
         optimizer.step()
+        return y_local
+
+    for iter in range(N_ITER):
+        # We first run one iteration without compile, as a workaround to compile float8 layer.
+        # In the first iter, float8 layers go to the branches of "self.is_amax_initialized == False"
+        # After that, float8 layers go the the branches of "self.is_amax_initialized == True"
+        # TODO: Need to fix compile to run wihtout this workaround.
+        if iter == 1 and compile:
+            model = torch.compile(model, fullgraph=fullgraph)
+        y_local = forward_backward(model)
 
     # get global y
     y_global = [
@@ -126,7 +148,7 @@ def fsdp_main(rank, world_size, args):
     cleanup()
 
 
-def run(mode: str, is_fp8: bool):
+def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = False):
     print(f"Mode: {mode}".center(100, "-"))
     base_dtype = torch.bfloat16
     if not os.path.exists(data_dir):
@@ -160,19 +182,24 @@ def run(mode: str, is_fp8: bool):
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
-        for _ in range(N_ITER):
+        def forward_backward():
             optimizer.zero_grad()
             y = model(ref_input)
             y.sum().backward()
             sync_float8_amax_and_scale_history(model)
             optimizer.step()
+            return y
+
+        for _ in range(N_ITER):
+            y = forward_backward()
 
         torch.save(y, output_single_gpu_fname)
         torch.save(model.state_dict(), sd_out_single_gpu_fname)
 
     elif mode == "fsdp":
         WORLD_SIZE = torch.cuda.device_count()
-        args = (is_fp8, emulate, base_dtype)
+        # We only compile for fsdp, and compare the numerics with signle-gpu no-compile
+        args = (is_fp8, emulate, base_dtype, compile_fsdp, fullgraph)
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == "analyze":
