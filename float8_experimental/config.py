@@ -16,3 +16,12 @@ allocate_float8_weight_cache_buffers = False
 # according to their microbatching/pipeline parallel setup.
 # Note: this is currently a global flag for simplicity and dynamo performance.
 weight_cache_enabled = False
+
+#
+# Other
+#
+
+# If True, dynamic linear uses hooks for activation casting
+# TODO(before land): add test coverage for both cases
+dynamic_use_activation_hooks = True
+# dynamic_use_activation_hooks = False
