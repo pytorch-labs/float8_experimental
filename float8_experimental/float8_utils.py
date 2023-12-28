@@ -7,6 +7,7 @@ from typing import Callable
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as _functional_collectives
 
 # Helpful visualizer for debugging (only supports fp32):
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html
@@ -60,7 +61,12 @@ def tensor_to_amax(x, distributed_reduction=False):
     # If the user did not ask for it, assume that it will
     # happen elsewhere.
     if distributed_reduction and dist.is_initialized():
-        dist.all_reduce(amax, op=dist.ReduceOp.MAX)
+        # TODO(future): support process groups
+        ranks = list(range(dist.get_world_size()))
+        # print('ranks', ranks)
+        # print('old amax', amax)
+        amax = _functional_collectives.all_reduce(amax, "max", group=ranks)
+        # print('new amax', amax)
 
     return amax
 

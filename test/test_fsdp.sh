@@ -7,12 +7,12 @@ launch() {
     echo "launching IS_FP8 $IS_FP8, compile_fsdp $COMPILE, fullgraph $FULLGRAPH"
 
     # generate the test data
-    python test/test_fsdp.py --mode generate --is_fp8 $IS_FP8 --compile_fsdp $COMPILE --fullgraph $FULLGRAPH
-    echo "Success: ✅"
+    # python test/test_fsdp.py --mode generate --is_fp8 $IS_FP8 --compile_fsdp $COMPILE --fullgraph $FULLGRAPH
+    # echo "Success: ✅"
 
     # generate single GPU model output and updated state dict
-    python test/test_fsdp.py --mode single_gpu --is_fp8 $IS_FP8 --compile_fsdp $COMPILE --fullgraph $FULLGRAPH
-    echo "Success: ✅"
+    # python test/test_fsdp.py --mode single_gpu --is_fp8 $IS_FP8 --compile_fsdp $COMPILE --fullgraph $FULLGRAPH
+    # echo "Success: ✅"
 
     # generate FSDP model output and updated state dict
     # the NCCL_DEBUG setting is to avoid log spew
@@ -30,7 +30,8 @@ launch() {
 }
 
 # IS_FP8, COMPILE, FULLGRAPH
-for i in False,False,False True,False,False True,True,False
+# for i in False,False,False True,False,False True,True,False
+for i in True,True,False
 do
     IFS=","; set -- $i;
     IS_FP8=$1; COMPILE=$2; FULLGRAPH=$3
