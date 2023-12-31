@@ -234,15 +234,16 @@ class TestFloat8Linear:
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
 
+    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize("use_compile", [False, True])
-    def test_weight_caching(self, use_compile):
+    def test_weight_caching(self, linear_type, use_compile):
         M, K, N = 16, 32, 64
         dtype = torch.bfloat16
         config.allocate_float8_weight_cache_buffers = True
 
         x = torch.randn(M, K, device="cuda", dtype=dtype)
         m_ref = nn.Linear(K, N, bias=True, device="cuda", dtype=dtype)
-        m = Float8Linear.from_float(copy.deepcopy(m_ref), emulate=False)
+        m = get_float8_linear(linear_type, m_ref, emulate=False).cuda()
 
         if use_compile:
             m = torch.compile(m)
