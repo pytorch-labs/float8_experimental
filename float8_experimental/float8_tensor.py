@@ -189,8 +189,3 @@ class Float8Tensor(torch.Tensor):
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-
-# In order for dynamo to successfuly trace our tensor subclass, we need
-# to be able to represent it in the graph.
-# torch._dynamo.allow_in_graph(Float8Tensor)

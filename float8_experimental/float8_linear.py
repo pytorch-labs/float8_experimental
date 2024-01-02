@@ -61,6 +61,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
         scale.copy_(new_scale)
 
 
+@torch._dynamo.allow_in_graph
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     """
     Forward: no-op
@@ -272,7 +273,6 @@ class Float8LinearMixin(object):
         )
         return w_fp8
 
-    @torch._dynamo.allow_in_graph
     def cast_y_to_float8_in_bw(
         self, y: torch.Tensor, emulate: bool = False
     ) -> torch.Tensor:

@@ -13,6 +13,7 @@ from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
 
 
+@torch._dynamo.allow_in_graph
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     """
     Forward: no-op
@@ -74,7 +75,6 @@ class Float8DynamicLinear(torch.nn.Linear):
             inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate
         )
 
-    @torch._dynamo.allow_in_graph
     def cast_to_float8e5m2_bw(self, gradY):
         return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
 
