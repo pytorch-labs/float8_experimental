@@ -193,4 +193,4 @@ class Float8Tensor(torch.Tensor):
 
 # In order for dynamo to successfuly trace our tensor subclass, we need
 # to be able to represent it in the graph.
-torch._dynamo.allow_in_graph(Float8Tensor)
+# torch._dynamo.allow_in_graph(Float8Tensor)

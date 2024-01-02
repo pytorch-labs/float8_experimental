@@ -74,6 +74,7 @@ class Float8DynamicLinear(torch.nn.Linear):
             inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate
         )
 
+    @torch._dynamo.allow_in_graph
     def cast_to_float8e5m2_bw(self, gradY):
         return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
 

@@ -272,6 +272,7 @@ class Float8LinearMixin(object):
         )
         return w_fp8
 
+    @torch._dynamo.allow_in_graph
     def cast_y_to_float8_in_bw(
         self, y: torch.Tensor, emulate: bool = False
     ) -> torch.Tensor:
