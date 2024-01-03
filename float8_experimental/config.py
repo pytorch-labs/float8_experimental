@@ -16,3 +16,18 @@ allocate_float8_weight_cache_buffers = False
 # according to their microbatching/pipeline parallel setup.
 # Note: this is currently a global flag for simplicity and dynamo performance.
 weight_cache_enabled = False
+
+#
+# Other
+#
+
+# If True, on the first iteration of Float8Linear the amaxes will be
+# initialized with the incoming data. As of 2023-12-30, this doesn't work
+# with autocast + torch.compile + FSDP. Enabling this option is nice for
+# testing, but this is not necessary for real training jobs.
+enable_amax_init = True
+
+# If True, pre-forward and post-forward functions are run. As of 2023-12-30,
+# this doesn't work with autocast + torch.compile + FSDP. Enabling this
+# option is useful for safety, but not strictly necessary.
+enable_pre_and_post_forward = True

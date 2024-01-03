@@ -156,14 +156,14 @@ class Float8LinearMixin(object):
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
         # TODO(future PR): add serialization for this flag
-        self.is_amax_initialized = False
+        self.is_amax_initialized = not config.enable_amax_init
 
         # Syncing of amaxes and scales happens outside of this function. This
         # flag is here to enforce that the user does not forget to do this.
-        self.amax_and_scale_synced = False
+        self.amax_and_scale_synced = not config.enable_amax_init
 
         # This is needed to properly handle autocast in the amax/scale
-        # update function
+        # update function for torch.float16
         self.last_seen_input_dtype = None
 
         # If true, this enables TP+SP style distributed comms in TP primitives
@@ -176,6 +176,10 @@ class Float8LinearMixin(object):
         # module could be moved to GPU after this constructor. Instead, FSDP
         # will access the scale when it has ensured that it is on GPU.
         self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
+
+        # pre_forward and post_forward are currently broken with FSDP
+        # and torch.compile, this option can disable them
+        self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
         if config.allocate_float8_weight_cache_buffers:
             # this is a buffer to get `to(dtype)` for free
@@ -212,7 +216,6 @@ class Float8LinearMixin(object):
             # if we need CPU support in the future, we can add it
             autocast_dtype = torch.get_autocast_gpu_dtype()
             x = x.to(autocast_dtype)
-            self.bias_dtype = autocast_dtype
 
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -288,6 +291,8 @@ class Float8LinearMixin(object):
         return y
 
     def float8_pre_forward(self, x):
+        if not self.enable_pre_and_post_forward:
+            return
         if (
             self.is_amax_initialized
             and (not self.amax_and_scale_synced)
@@ -299,6 +304,8 @@ class Float8LinearMixin(object):
         self.last_seen_input_dtype = x.dtype
 
     def float8_post_forward(self):
+        if not self.enable_pre_and_post_forward:
+            return
         # Ensure that calling forward again will fail until the user syncs
         # amaxes and scales
         self.is_amax_initialized = True
@@ -335,7 +342,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         y = self.cast_y_to_float8_in_bw(y, self.emulate)
 
         if self.bias is not None:
-            y = y + self.bias.to(self.bias_dtype)
+            y = y + self.bias.to(y.dtype)
 
         self.float8_post_forward()
         return y
@@ -356,8 +363,6 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
-        if mod.bias is not None:
-            new_mod.bias_dtype = mod.bias.dtype
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         new_mod.add_weight_tag()
