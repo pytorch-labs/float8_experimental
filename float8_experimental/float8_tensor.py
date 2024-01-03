@@ -22,6 +22,7 @@ def calculate_amax_and_cast_to_float8(tensor, scale, float8_dtype, amax_buffer):
     return bits_fp8
 
 
+@torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8
@@ -54,6 +55,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             return g, None, None, None, None, None
 
 
+@torch._dynamo.allow_in_graph
 class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8
