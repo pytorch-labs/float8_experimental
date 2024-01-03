@@ -22,6 +22,7 @@ def calculate_amax_and_cast_to_float8(tensor, scale, float8_dtype, amax_buffer):
     return bits_fp8
 
 
+@torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8
@@ -54,6 +55,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             return g, None, None, None, None, None
 
 
+@torch._dynamo.allow_in_graph
 class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8
@@ -189,8 +191,3 @@ class Float8Tensor(torch.Tensor):
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-
-# In order for dynamo to successfuly trace our tensor subclass, we need
-# to be able to represent it in the graph.
-torch._dynamo.allow_in_graph(Float8Tensor)

@@ -61,6 +61,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
         scale.copy_(new_scale)
 
 
+@torch._dynamo.allow_in_graph
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     """
     Forward: no-op
