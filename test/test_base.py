@@ -40,7 +40,7 @@ torch.manual_seed(0)
 
 
 class TestFloat8Tensor(unittest.TestCase):
-    def test_preserves_dtype(self):
+    def test_preserves_dtype(self) -> None:
         # hp means high precision, lp means low precision
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
         lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
@@ -175,7 +175,7 @@ class TestFloat8Linear:
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
 
-    def test_linear_float8_weight_tag(self):
+    def test_linear_float8_weight_tag(self) -> None:
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
         assert m_fp8.weight._is_fp8_weight
