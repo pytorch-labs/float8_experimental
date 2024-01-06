@@ -6,5 +6,6 @@
 # Lets define a few top level things here
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_tensor import Float8Tensor
+import float8_experimental.dynamic_linear
 
 __all__ = ["Float8Tensor", "Float8Linear"]
