@@ -296,7 +296,7 @@ def main(
         data_pd.to_csv(sweep_path)
 
 
-if __name__ == "__main__":
+def invoke_main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output_path", type=str, required=True)
     parser.add_argument("--compile", action="store_true")
@@ -304,3 +304,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     output_path = Path(args.output_path)
     main(output_path, args.compile, args.n_limit)
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover

@@ -221,6 +221,10 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         profile_function(profile_config, te_forw_backward, input_tensor)
 
 
-if __name__ == "__main__":
+def invoke_main() -> None:
     # Example usage: python benchmarks/profile_linear_float8.py benchmarks/data/profiles --compile=True --linear_type="dynamic"
     fire.Fire(main)
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover

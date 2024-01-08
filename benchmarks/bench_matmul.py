@@ -129,5 +129,9 @@ def run(n_limit: Optional[int] = None):
     print(data_pd)
 
 
-if __name__ == "__main__":
+def main() -> None:
     fire.Fire(run)
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover
