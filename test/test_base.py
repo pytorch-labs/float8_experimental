@@ -10,9 +10,6 @@ import unittest
 import warnings
 from enum import Enum
 
-import float8_experimental.config as config
-import float8_experimental.float8_linear as float8_linear
-
 import pytest
 
 import torch
@@ -233,36 +230,6 @@ class TestFloat8Linear:
         assert (
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
-
-    @pytest.mark.parametrize("use_compile", [False, True])
-    def test_weight_caching(self, use_compile):
-        M, K, N = 16, 32, 64
-        dtype = torch.bfloat16
-        config.allocate_float8_weight_cache_buffers = True
-
-        x = torch.randn(M, K, device="cuda", dtype=dtype)
-        m_ref = nn.Linear(K, N, bias=True, device="cuda", dtype=dtype)
-        m = Float8Linear.from_float(copy.deepcopy(m_ref), emulate=False)
-
-        if use_compile:
-            m = torch.compile(m)
-
-        config.weight_cache_enabled = False
-
-        y1 = m(x)
-        y1.sum().backward()
-        grad1 = m.weight.grad.clone().detach()
-
-        config.weight_cache_enabled = True
-        sync_float8_amax_and_scale_history(m)
-
-        y2 = m(x)
-        y2.sum().backward()
-        grad2 = m.weight.grad.clone().detach()
-
-        torch.testing.assert_close(grad2, grad1 * 2)
-
-        config.allocate_float8_weight_cache_buffers = False
 
 
 class TestScaledMM:

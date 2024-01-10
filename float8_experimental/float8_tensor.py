@@ -12,16 +12,6 @@ from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 aten = torch.ops.aten
 
 
-@torch.no_grad()
-def calculate_amax_and_cast_to_float8(tensor, scale, float8_dtype, amax_buffer):
-    if amax_buffer is not None:
-        amax_buffer.fill_(tensor_to_amax(tensor))
-
-    tensor_scaled = tensor * scale
-    bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-    return bits_fp8
-
-
 @torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
@@ -36,23 +26,20 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
         emulate: bool = False,
-        cached_casted_weight=None,
     ):
-        if cached_casted_weight is not None:
-            return Float8Tensor(
-                cached_casted_weight, scale, tensor.dtype, emulate=emulate
-            )
-        bits_fp8 = calculate_amax_and_cast_to_float8(
-            tensor, scale, float8_dtype, amax_buffer
-        )
+        if amax_buffer is not None:
+            amax_buffer.fill_(tensor_to_amax(tensor))
+
+        tensor_scaled = tensor * scale
+        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
         return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None, None, None
+            return g.to_original_precision(), None, None, None, None
         else:
-            return g, None, None, None, None, None
+            return g, None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
@@ -147,14 +134,7 @@ class Float8Tensor(torch.Tensor):
 
     @staticmethod
     @torch._dynamo.allow_in_graph
-    def to_float8(
-        tensor,
-        scale,
-        float8_dtype,
-        amax_buffer=None,
-        emulate: bool = False,
-        cached_casted_weight=None,
-    ):
+    def to_float8(tensor, scale, float8_dtype, amax_buffer=None, emulate: bool = False):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
         Args:
@@ -172,7 +152,6 @@ class Float8Tensor(torch.Tensor):
             float8_dtype,
             amax_buffer,
             emulate,
-            cached_casted_weight,
         )
 
     @classmethod

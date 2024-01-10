@@ -64,28 +64,6 @@ model.foo.bar.fc2.sequence_parallel = True
 # the rest of the flow is the same as the single GPU flow
 ```
 
-## weight caching (very experimental)
-
-```python
-import float8_experimental.config as config
-
-m = Model(...)
-# before converting to `Float8Linear`, turn on weight cache buffer allocation
-config.allocate_float8_weight_cache_buffers = True
-
-# in the training loop, manually control the global weight caching setting
-for idx in N_ITER:
-    ...
-    if idx % n_microbatch == 0:
-        # if we are in the first pass of a new microbatch, repopulate the cache
-        config.weight_cache_enabled = False
-    elif idx % n_microbatch == 1:
-        # if we are in the second pass of a new microbatch, use cached weight
-        # this persists until `idx % n_microbatch == 0` again
-        config.weight_cache_enabled = True
-    ...
-```
-
 # high level technical design
 
 ## UX
