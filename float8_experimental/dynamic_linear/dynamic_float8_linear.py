@@ -46,16 +46,9 @@ class Float8DynamicLinear(torch.nn.Linear):
     conversion to fp8 of the input and weight tensors.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.add_weight_tag()
-
     def forward(self, x):
         x_fp8 = self.cast_to_float8(x)
-        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
-            w_fp8 = self._w_fp8
-        else:
-            w_fp8 = self.cast_to_float8(self.weight)
+        w_fp8 = self.cast_to_float8(self.weight)
 
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
 
@@ -63,11 +56,6 @@ class Float8DynamicLinear(torch.nn.Linear):
         y = self.cast_to_float8e5m2_bw(y)
 
         return y
-
-    def add_weight_tag(self):
-        # We add a tag to the weight nn.Parameter in order to signal
-        # To FSDP that this param is a weight
-        self.weight._is_fp8_weight = True
 
     def cast_to_float8(self, inpt_tensor):
         scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
@@ -92,5 +80,4 @@ class Float8DynamicLinear(torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
-        new_mod.add_weight_tag()
         return new_mod
