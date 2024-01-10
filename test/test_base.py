@@ -175,11 +175,6 @@ class TestFloat8Linear:
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
 
-    def test_linear_float8_weight_tag(self) -> None:
-        m_ref = nn.Linear(16, 32, bias=False, device="cuda")
-        m_fp8 = Float8Linear.from_float(copy.deepcopy(m_ref))
-        assert m_fp8.weight._is_fp8_weight
-
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]

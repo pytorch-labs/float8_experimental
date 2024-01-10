@@ -171,13 +171,6 @@ class Float8LinearMixin(object):
         # Note: this is not used in non-TP code.
         self.use_sequence_parallel = False
 
-        # Save the Float8Tensor constructor for FSDP.
-        # N.B. Do not partially apply the scale into the constructor because
-        # buffer Python IDs are not preserved by `nn.Module.to()` and the
-        # module could be moved to GPU after this constructor. Instead, FSDP
-        # will access the scale when it has ensured that it is on GPU.
-        self._float8_tensor_ctor = lambda *args, **kwargs: Float8Tensor(*args, **kwargs)
-
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
@@ -312,11 +305,6 @@ class Float8LinearMixin(object):
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
-    def add_weight_tag(self):
-        # We add a tag to the weight nn.Parameter in order to signal
-        # To FSDP that this param is a weight
-        self.weight._is_fp8_weight = True
-
 
 class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     """
@@ -324,18 +312,11 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     scales in way friendly to delayed scaling.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.add_weight_tag()
-
     def forward(self, x):
         self.float8_pre_forward(x)
 
         x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
-            w_fp8 = self._w_fp8
-        else:
-            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         y = torch.matmul(x_fp8, w_fp8.t())
 
@@ -366,5 +347,4 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.emulate = emulate
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
-        new_mod.add_weight_tag()
         return new_mod

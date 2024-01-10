@@ -49,10 +49,7 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
                 input_parallel, self.is_amax_initialized
             )
 
-        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
-            w_fp8 = self._w_fp8
-        else:
-            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
         output_parallel = torch.matmul(input_parallel_fp8, w_fp8.t())
@@ -101,7 +98,6 @@ class Float8ColumnParallelLinear(Float8LinearMixin, ColumnParallelLinear):
         device_to_use = next(mod.parameters()).device
         new_mod.to(device_to_use)
         new_mod.emulate = emulate
-        new_mod.add_weight_tag()
         # TODO: test when creation is on cuda
         return new_mod
 
@@ -137,10 +133,7 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
             input_parallel, self.is_amax_initialized
         )
 
-        if getattr(self, "_w_fp8", None) is not None:  # FSDP handled the cast
-            w_fp8 = self._w_fp8
-        else:
-            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         # Matrix multiply.
         output_parallel = torch.matmul(input_parallel_fp8, w_fp8.t())
@@ -196,7 +189,6 @@ class Float8RowParallelLinear(Float8LinearMixin, RowParallelLinear):
         device_to_use = next(mod.parameters()).device
         new_mod.to(device_to_use)
         new_mod.emulate = emulate
-        new_mod.add_weight_tag()
         return new_mod
 
 
