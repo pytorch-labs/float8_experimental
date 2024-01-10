@@ -20,10 +20,7 @@ import float8_experimental.config as config
 
 import torch
 
-from float8_experimental.float8_tensor import (
-    calculate_amax_and_cast_to_float8,
-    Float8Tensor,
-)
+from float8_experimental.float8_tensor import Float8Tensor
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale,
@@ -175,15 +172,6 @@ class Float8LinearMixin(object):
         # and torch.compile, this option can disable them
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
-        if config.allocate_float8_weight_cache_buffers:
-            # this is a buffer to get `to(dtype)` for free
-            # TODO(future): hide this from serialization
-            # TODO(future): force this to stay in float8_e4m3fn
-            self.register_buffer(
-                "cached_fp8_weight",
-                torch.empty(self.weight.shape, dtype=torch.float8_e4m3fn),
-            )
-
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
     ) -> None:
@@ -240,32 +228,12 @@ class Float8LinearMixin(object):
             is_amax_initialized,
         )
 
-        if config.weight_cache_enabled:
-            assert config.allocate_float8_weight_cache_buffers, (
-                "float8 weight cache buffer must be allocated using "
-                + "`allocate_float8_weight_cache_buffers` to use the weight cache"
-            )
-            w_bits_fp8 = self.cached_fp8_weight
-        else:
-            # manual calculation of fp8 bits:
-            # 1. calculate the bits without Float8Tensor, without grad
-            # 2. store the bits here
-            # 3. create Float8Tensor from the bits calculated in 2
-            # motivation: this will take care of saving the bits without
-            # interacting with tensor subclasses, as w_fp8._data is not
-            # currently traceable by dynamo
-            w_bits_fp8 = calculate_amax_and_cast_to_float8(
-                self.weight, self.fp8_scale_w, torch.float8_e4m3fn, self.fp8_amax_w
-            )
-            if config.allocate_float8_weight_cache_buffers:
-                self.cached_fp8_weight.copy_(w_bits_fp8)
         w_fp8 = Float8Tensor.to_float8(
             w,
             self.fp8_scale_w,
             torch.float8_e4m3fn,
             self.fp8_amax_w,
             self.emulate,
-            cached_casted_weight=w_bits_fp8,
         )
         return w_fp8
 
