@@ -143,7 +143,7 @@ We are working on a new FSDP implementation that uses per-parameter sharding tha
 # code tips
 
 * `float8_experimental/float8_linear.py` - `Float8Linear` (main user facing entry point for delayed scaling)
-* `float8_experimental/dynamic_linear/dynamic_linear.py` - `Float8DynamicLinear` (main user facing entry point for dynamic scaling)
+* `float8_experimental/float8_dynamic_linear.py` - `Float8DynamicLinear` (main user facing entry point for dynamic scaling)
 * `float8_experimental/float8_tensor.py` - `Float8Tensor`, which allows `Float8Linear` to abide by the `x.dtype == x.grad.dtype` restriction
 * `float8_experimental/tp_linear.py` - `Float8ColumnParallelLinear` / `Float8RowParallelLinear` (TP/SP versions of float8 linear)
 
