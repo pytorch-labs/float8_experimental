@@ -76,17 +76,6 @@ def profile_function(
     return prof
 
 
-# Check if transformer_engine is installed
-transformer_engine_installed = False
-try:
-    import transformer_engine.pytorch as te
-    from transformer_engine.common import recipe
-
-    transformer_engine_installed = True
-except ImportError:
-    print("transformer_engine not installed and we won't compare against this")
-
-
 @dataclass(frozen=True)
 class LinearParams:
     M: int
@@ -165,35 +154,13 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         with record_function("backward"):
             out.sum().backward()
 
-    if transformer_engine_installed:
-        # Use the same recipe as float8_linear.DelayedScalingRecipe
-        fp8_format = recipe.Format.HYBRID
-        fp8_recipe = recipe.DelayedScaling(
-            fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
-        )
-        te_linear = te.Linear(params.K, params.N, bias=params.input_bias).to(
-            device="cuda", dtype=params.ref_dtype
-        )
-
-        def te_forw_backward(x):
-            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                with record_function("forward"):
-                    out = te_linear(x)
-                with record_function("backward"):
-                    out.sum().backward()
-
     if params.torch_compile:
         ref_forw_backward = torch.compile(ref_forw_backward)
         float8_forw_backward = torch.compile(float8_forw_backward, fullgraph=True)
-        # Compiling TE_linear fails but they are already compiling under the hood
-        # if transformer_engine_installed:
-        #     te_forw_backward = torch.compile(te_forw_backward)
 
     for _ in range(5):
         ref_forw_backward(input_tensor)
         float8_forw_backward_wrapper(input_tensor)
-        if transformer_engine_installed:
-            te_forw_backward(input_tensor)
 
     # Profile Reference Linear
     ref_string = f"linear_ref_dtype_{params.ref_dtype}_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}_compile_{params.torch_compile}.json"
@@ -212,13 +179,6 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         sync=True,
     )
     profile_function(profile_config, float8_forw_backward_wrapper, input_tensor)
-
-    te_string = f"linear_transformer_engine_M_{params.M}_K_{params.K}_N_{params.N}_input_bias_{params.input_bias}.json"
-    if transformer_engine_installed:
-        profile_config = ProfileConfig(
-            str(profile_path / te_string), te_string, iters=5, warmup_iters=5, sync=True
-        )
-        profile_function(profile_config, te_forw_backward, input_tensor)
 
 
 def invoke_main() -> None:
