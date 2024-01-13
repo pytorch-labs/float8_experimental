@@ -18,16 +18,6 @@ from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
 from tqdm import tqdm
 
-# Check if transformer_engine is installed
-transformer_engine_installed = False
-try:
-    import transformer_engine.pytorch as te
-    from transformer_engine.common import recipe
-
-    transformer_engine_installed = True
-except ImportError:
-    print("transformer_engine not installed and we won't compare against this")
-
 # estimating TOPs for matmuls in fp32, fp16, fp8
 # assuming A * B = C, with A being M * K, B being K * N, C being M * N
 
@@ -66,7 +56,6 @@ class Experiment:
     dtype: torch.dtype
     compiled: bool = False
     float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
-    te_time_sec: Optional[float] = None
 
     # 3 Times since we are calculating forward backward
     @property
@@ -87,21 +76,6 @@ class Experiment:
     def float8_pct_top_peak(self):
         return self.float8_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
 
-    @property
-    def te_tops_sec(self):
-        M, K, N = self.shape
-        if self.te_time_sec is not None:
-            return float(3 * (2 * M * K * N)) / self.te_time_sec
-        else:
-            return None
-
-    @property
-    def te_pct_top_peak(self):
-        if self.te_tops_sec is not None:
-            return self.te_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
-        else:
-            return None
-
 
 def main(
     sweep_path: Path,
@@ -113,7 +87,6 @@ def main(
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
-    # source: https://fburl.com/gsheet/g8onr7rh
     name_to_shapes_70b = {
         "attn.wqkv": (8192, 1280),
         "attn.w0": (1024, 8192),
@@ -145,19 +118,6 @@ def main(
             sync_float8_amax_and_scale_history(linear_float8)
             linear_float8(input_tensor).sum().backward()
 
-        if transformer_engine_installed:
-            # Use the same recipe as float8_linear.DelayedScalingRecipe
-            fp8_format = recipe.Format.HYBRID
-            fp8_recipe = recipe.DelayedScaling(
-                fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
-            )
-            te_linear = te.Linear(K, N, bias=input_bias).to(device=device, dtype=dtype)
-
-            def te_forw_backward():
-                with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                    y = te_linear(input_tensor)
-                y.sum().backward()
-
         def n_times(n, fn, *args, **kwargs):
             def wrapper(*args, **kwargs):
                 for _ in range(n):
@@ -169,21 +129,14 @@ def main(
 
         ref_forw_backward = n_times(REPEAT_N, ref_forw_backward)
         float8_forw_backward = n_times(REPEAT_N, float8_forw_backward)
-        if transformer_engine_installed:
-            te_forw_backward = n_times(REPEAT_N, te_forw_backward)
 
         if compile:
             ref_forw_backward = torch.compile(ref_forw_backward)
             float8_forw_backward = torch.compile(float8_forw_backward)
-            # Compiling TE_linear fails but they are already compiling under the hood
-            # if transformer_engine_installed:
-            #     te_forw_backward = torch.compile(te_forw_backward)
 
         for _ in range(5):
             ref_forw_backward()
             float8_forw_backward()
-            if transformer_engine_installed:
-                te_forw_backward()
 
         ref_time = (
             benchmark_torch_function_in_microseconds(ref_forw_backward)
@@ -195,14 +148,6 @@ def main(
             * 1e-6
             / REPEAT_N
         )
-        if transformer_engine_installed:
-            te_time_sec = (
-                benchmark_torch_function_in_microseconds(te_forw_backward)
-                * 1e-6
-                / REPEAT_N
-            )
-        else:
-            te_time_sec = None
         experiment = Experiment(
             name,
             (M, K, N),
@@ -210,12 +155,9 @@ def main(
             float8_time,
             dtype,
             compile,
-            te_time_sec=te_time_sec,
         )
         print(experiment)
         print("float8 speedup", experiment.ref_time_sec / experiment.float8_time_sec)
-        if transformer_engine_installed:
-            print("te speedup", experiment.ref_time_sec / experiment.te_time_sec)
         experiment_list.append(experiment)
         torch._dynamo.reset()
 
@@ -229,13 +171,10 @@ def main(
         "fp8_dtype",
         "ref_time_sec",
         "pt_fp8_time_sec",
-        "te_fp8_time_sec",
         "ref_tops_sec",
         "ref_pct_top_peak",
         "pt_fp8_tops_sec",
         "pt_fp8_pct_top_peak",
-        "te_fp8_tops_sec",
-        "te_fp8_pct_top_peak",
     ]
     data = []
     for experiment in experiment_list:
@@ -250,22 +189,15 @@ def main(
                 experiment.float_8_dtype,
                 experiment.ref_time_sec,
                 experiment.float8_time_sec,
-                experiment.te_time_sec,
                 experiment.ref_tops_sec,
                 experiment.ref_pct_top_peak,
                 experiment.float8_tops_sec,
                 experiment.float8_pct_top_peak,
-                experiment.te_tops_sec,
-                experiment.te_pct_top_peak,
             ]
         )
 
     data_pd = pd.DataFrame(data, columns=headers)
     data_pd["pt_fp8_speedup"] = data_pd["ref_time_sec"] / data_pd["pt_fp8_time_sec"]
-    if transformer_engine_installed:
-        data_pd["te_fp8_speedup"] = data_pd["ref_time_sec"] / data_pd["te_fp8_time_sec"]
-    else:
-        data_pd["te_fp8_speedup"] = -1.0
     data_pd["shape"] = (
         "("
         + data_pd["M"].astype(str)
@@ -284,9 +216,7 @@ def main(
             "compiled",
             "ref_time_sec",
             "pt_fp8_time_sec",
-            "te_fp8_time_sec",
             "pt_fp8_speedup",
-            "te_fp8_speedup",
         ]
     ]
     print(data_pd_simple)

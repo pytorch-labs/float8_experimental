@@ -26,16 +26,6 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 
-# Check if transformer_engine is installed
-transformer_engine_installed = False
-try:
-    import transformer_engine.pytorch as te
-    from transformer_engine.common import recipe
-
-    transformer_engine_installed = True
-except ImportError:
-    print("transformer_engine not installed and we won't compare against this")
-
 
 torch.manual_seed(0)
 
@@ -68,26 +58,18 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def get_model(K, N, is_fp8, is_te, base_dtype=torch.float32):
+def get_model(K, N, is_fp8, base_dtype=torch.float32):
     modules = [
-        (
-            nn.Linear(K, N, dtype=base_dtype)
-            if not is_te
-            else te.Linear(K, N, params_dtype=base_dtype)
-        ),
+        nn.Linear(K, N, dtype=base_dtype),
         nn.ReLU(),
     ]
     N_LAYERS = 20
     # N linear layers
     for _ in range(N_LAYERS - 1):
-        if is_te:
-            modules.append(te.Linear(N, N, params_dtype=base_dtype))
-        else:
-            modules.append(nn.Linear(N, N, dtype=base_dtype))
+        modules.append(nn.Linear(N, N, dtype=base_dtype))
         modules.append(nn.ReLU())
     m = nn.Sequential(*modules)
     if is_fp8:
-        assert not is_te, "`is_fp8` (using pytorch fp8) can't be used with `is_te`"
         swap_linear_with_float8_linear(m, Float8Linear, emulate=False)
     return m
 
@@ -105,9 +87,7 @@ def fsdp_main(rank, world_size, args):
     bsz_local_end = int((rank + 1) / world_size * B)
     input_tensor = input_global[bsz_local_start:bsz_local_end].to(rank)
 
-    fp8_model = get_model(K, N, is_fp8=True, is_te=False, base_dtype=base_dtype).to(
-        rank
-    )
+    fp8_model = get_model(K, N, is_fp8=True, base_dtype=base_dtype).to(rank)
     # Need use_orig_params=True to compile FSDP
     fp8_model = FSDP(fp8_model, use_orig_params=True)
     fp8_optimizer = torch.optim.SGD(fp8_model.parameters(), lr=lr * world_size)
@@ -132,9 +112,7 @@ def fsdp_main(rank, world_size, args):
         fp8_optimizer.step()
         sync_float8_func(fp8_model)
 
-    ref_model = get_model(K, N, is_fp8=False, is_te=False, base_dtype=base_dtype).to(
-        rank
-    )
+    ref_model = get_model(K, N, is_fp8=False, base_dtype=base_dtype).to(rank)
     ref_optimizer = torch.optim.SGD(ref_model.parameters(), lr=lr * world_size)
     if compile:
         ref_model = torch.compile(ref_model)
@@ -146,30 +124,6 @@ def fsdp_main(rank, world_size, args):
         ref_model(input_tensor).sum().backward()
         ref_optimizer.step()
 
-    if transformer_engine_installed:
-        te_model = FSDP(
-            get_model(K, N, is_fp8=False, is_te=True, base_dtype=base_dtype).to(rank),
-            use_orig_params=True,
-        )
-        fp8_format = recipe.Format.HYBRID
-        fp8_recipe = recipe.DelayedScaling(
-            fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max"
-        )
-        # Compiling TE_linear fails but they are already compiling under the hood
-        # if transformer_engine_installed:
-        #     te_forw_backward = torch.compile(te_forw_backward)
-        if rank == 0:
-            print(te_model)
-
-        te_optimizer = torch.optim.SGD(ref_model.parameters(), lr=lr * world_size)
-
-        def te_forw_backward():
-            te_optimizer.zero_grad()
-            with te.fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-                y = te_model(input_tensor)
-            y.sum().backward()
-            te_optimizer.step()
-
     def run_n_iterations(n, fn):
         for _ in range(n):
             fn()
@@ -179,8 +133,6 @@ def fsdp_main(rank, world_size, args):
     # warmup
     run_n_iterations(50, ref_forw_backward)
     run_n_iterations(50, float8_forw_backward)
-    if transformer_engine_installed:
-        run_n_iterations(50, te_forw_backward)
 
     N_ITER = 50
     ref_time = (
@@ -197,24 +149,11 @@ def fsdp_main(rank, world_size, args):
         * 1e-6
         / N_ITER
     )
-    if transformer_engine_installed:
-        te_time_sec = (
-            benchmark_torch_function_in_microseconds(
-                run_n_iterations, N_ITER, te_forw_backward
-            )
-            * 1e-6
-            / N_ITER
-        )
-    else:
-        te_time_sec = None
 
     if rank == 0:
         print("ref_time", ref_time)
         print("float8_time", float8_time)
-        print("te_time_sec", te_time_sec)
         print("float8 speedup", ref_time / float8_time)
-        if transformer_engine_installed:
-            print("te speedup", ref_time / te_time_sec)
 
     cleanup()
 
