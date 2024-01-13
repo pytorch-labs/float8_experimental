@@ -201,21 +201,13 @@ class float8_linear(torch.autograd.Function):
 
         ctx.recompute_float8_weight = recompute_float8_weight
         ctx.emulate = emulate
-        orig_shape = x_fp8._data.shape
-        x_fp8_reshaped = Float8Tensor(
-            x_fp8._data.reshape(-1, orig_shape[-1]),
-            x_fp8._scale,
-            x_fp8._orig_dtype,
-            emulate=emulate,
-        )
+        x_fp8_reshaped = x_fp8.reshape(-1, x_fp8.size(-1))
 
-        w_fp8_t = Float8Tensor(
-            w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype, emulate=emulate
-        )
+        w_fp8_t = w_fp8.t()
 
         res_bits = float8_mm_helper(x_fp8_reshaped, w_fp8_t)
 
-        res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
+        res_bits = res_bits.reshape(*x_fp8.shape[:-1], res_bits.size(-1))
         return res_bits
 
     @staticmethod
@@ -227,48 +219,21 @@ class float8_linear(torch.autograd.Function):
                 weight_scale,
                 torch.float8_e4m3fn,
                 weight_amax_buffer,
-                emulate=emulate,
+                emulate=ctx.emulate,
             )
         else:
             x_fp8, w_fp8 = ctx.saved_tensors
 
-        emulate = ctx.emulate
-
-        go_fp8_orig_shape = go_fp8._data.shape
-        go_fp8_reshaped = Float8Tensor(
-            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]),
-            go_fp8._scale,
-            go_fp8._orig_dtype,
-            emulate=emulate,
-        )
-
-        w_fp8_t_c_t = Float8Tensor(
-            w_fp8._data.t().contiguous().t(),
-            w_fp8._scale,
-            w_fp8._orig_dtype,
-            emulate=emulate,
-        )
-
         # calculate dL/dX
+        go_fp8_reshaped = go_fp8.reshape(-1, go_fp8.size(-1))
+        w_fp8_t_c_t = w_fp8.t().contiguous().t()
         dL_dX = float8_mm_helper(go_fp8_reshaped, w_fp8_t_c_t)
-        dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
-
-        x_fp8_orig_shape = x_fp8._data.shape
-        x_fp8_reshaped_t_c = Float8Tensor(
-            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(),
-            x_fp8._scale,
-            x_fp8._orig_dtype,
-            emulate=emulate,
-        )
-
-        go_fp8_reshaped_t_c_t = Float8Tensor(
-            go_fp8_reshaped._data.t().contiguous().t(),
-            go_fp8_reshaped._scale,
-            go_fp8_reshaped._orig_dtype,
-            emulate=emulate,
-        )
+        dL_dX = dL_dX.reshape(*go_fp8.shape[:-1], dL_dX.size(-1))
 
         # calculate dL/dW
+        x_fp8_reshaped_t_c = x_fp8.reshape(-1, x_fp8.size(-1)).t().contiguous()
+        go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
+
         dL_dW = float8_mm_helper(x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t)
         dL_dW = dL_dW.t()
 
