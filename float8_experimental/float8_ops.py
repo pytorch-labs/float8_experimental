@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -75,11 +75,33 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     return a_data, a_scale, b_data, b_scale
 
 
+def float8_mm_helper(a: Float8Tensor, b: Float8Tensor) -> torch.Tensor:
+    """This is a helper function for float8_mm
+    Args:
+        a: The first matrix multiplication term.
+        b: The second matrix multiplication term.
+    Returns:
+        torch.Tensor: The result of the matrix multiplication.
+    """
+    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
+    output_dtype = a._orig_dtype
+    if a._emulate:
+        assert a._emulate == b._emulate
+        return torch.ops.aten.mm_float8_emulated(
+            a._data, a._scale, b._data, b._scale, output_dtype
+        )[0]
+    tensor_out, amax = addmm_float8_unwrapped(
+        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=None
+    )
+    return tensor_out
+
+
 @implements([aten.mm.default])
 def float8_mm(aten_op, args, kwargs=None):
     assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
     a = args[0]
     b = args[1]
+    return float8_mm_helper(a, b)
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
     if a._emulate:
@@ -140,3 +162,115 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
     )
+
+
+class float8_linear(torch.autograd.Function):
+    """Custom autograd function for computing torch.nn.Linear on Float8Tensor.
+
+    This is needed for a couple reasons, we want to have fine grained control over the
+    recomputation of casted values for backward.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        x_fp8: torch.Tensor,
+        original_weight: torch.Tensor,
+        weight_scale: torch.Tensor,
+        weight_amax_buffer: Optional[torch.Tensor],
+        emulate: bool,
+        recompute_float8_weight: bool,
+    ):
+        ctx.save_for_backward(x_fp8)
+        w_fp8 = Float8Tensor.to_float8(
+            original_weight,
+            weight_scale,
+            torch.float8_e4m3fn,
+            weight_amax_buffer,
+            emulate=emulate,
+        )
+        if recompute_float8_weight:
+            # This should be set to True when using traditional fsdp to avoid saving
+            # saving the unsharded weight for
+            ctx.save_for_backward(
+                x_fp8, original_weight, weight_scale, weight_amax_buffer
+            )
+        else:
+            # Does this interact properly with activation checkpointing?
+            ctx.save_for_backward(x_fp8, w_fp8)
+
+        ctx.recompute_float8_weight = recompute_float8_weight
+        ctx.emulate = emulate
+        orig_shape = x_fp8._data.shape
+        x_fp8_reshaped = Float8Tensor(
+            x_fp8._data.reshape(-1, orig_shape[-1]),
+            x_fp8._scale,
+            x_fp8._orig_dtype,
+            emulate=emulate,
+        )
+
+        w_fp8_t = Float8Tensor(
+            w_fp8._data.t(), w_fp8._scale, w_fp8._orig_dtype, emulate=emulate
+        )
+
+        res_bits = float8_mm_helper(x_fp8_reshaped, w_fp8_t)
+
+        res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
+        return res_bits
+
+    @staticmethod
+    def backward(ctx, go_fp8: torch.Tensor):
+        if ctx.recompute_float8_weight:
+            x_fp8, original_weight, weight_scale, weight_amax_buffer = ctx.saved_tensors
+            w_fp8 = Float8Tensor.to_float8(
+                original_weight,
+                weight_scale,
+                torch.float8_e4m3fn,
+                weight_amax_buffer,
+                emulate=emulate,
+            )
+        else:
+            x_fp8, w_fp8 = ctx.saved_tensors
+
+        emulate = ctx.emulate
+
+        go_fp8_orig_shape = go_fp8._data.shape
+        go_fp8_reshaped = Float8Tensor(
+            go_fp8._data.reshape(-1, go_fp8_orig_shape[-1]),
+            go_fp8._scale,
+            go_fp8._orig_dtype,
+            emulate=emulate,
+        )
+
+        w_fp8_t_c_t = Float8Tensor(
+            w_fp8._data.t().contiguous().t(),
+            w_fp8._scale,
+            w_fp8._orig_dtype,
+            emulate=emulate,
+        )
+
+        # calculate dL/dX
+        dL_dX = float8_mm_helper(go_fp8_reshaped, w_fp8_t_c_t)
+        dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
+
+        x_fp8_orig_shape = x_fp8._data.shape
+        x_fp8_reshaped_t_c = Float8Tensor(
+            x_fp8._data.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous(),
+            x_fp8._scale,
+            x_fp8._orig_dtype,
+            emulate=emulate,
+        )
+
+        go_fp8_reshaped_t_c_t = Float8Tensor(
+            go_fp8_reshaped._data.t().contiguous().t(),
+            go_fp8_reshaped._scale,
+            go_fp8_reshaped._orig_dtype,
+            emulate=emulate,
+        )
+
+        # calculate dL/dW
+        dL_dW = float8_mm_helper(x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t)
+        dL_dW = dL_dW.t()
+
+        empty_grads = None, None, None, None, None, None, None, None, None
+        return dL_dX, dL_dW, *empty_grads

@@ -8,6 +8,7 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
 import torch
+from float8_experimental.float8_ops import float8_linear
 
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
@@ -48,12 +49,16 @@ class Float8DynamicLinear(torch.nn.Linear):
 
     def forward(self, x):
         x_fp8 = self.cast_to_float8(x)
-        w_fp8 = self.cast_to_float8(self.weight)
+        # w_fp8 = self.cast_to_float8(self.weight)
 
-        y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
-
+        # y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
+        weight_scale = tensor_to_scale(self.weight, torch.float8_e4m3fn)
+        y = float8_linear.apply(
+            x_fp8, self.weight, weight_scale, None, self.emulate, False
+        )
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_to_float8e5m2_bw(y)
+        y = y + self.bias if self.bias is not None else y
 
         return y
 
