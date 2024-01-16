@@ -3,7 +3,10 @@
 This is a prototype of a float8 training UX in native PyTorch, with full torch.compile and distributed support.
 The codebase strives to stay small, easily hackable, and debuggable with native PyTorch tooling.
 
-Backwards compatibility is not guaranteed at this point. The codebase is in active development and
+:warning: Not all distributed support is implemented yet. See the 
+[upcoming feature tracker](https://github.com/pytorch-labs/float8_experimental/issues/187) for details.
+
+:warning: Backwards compatibility is not guaranteed at this point. The codebase is in active development and
 will change rapidly.
 
 # installation
