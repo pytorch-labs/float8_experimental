@@ -181,7 +181,6 @@ class float8_linear(torch.autograd.Function):
         emulate: bool,
         recompute_float8_weight: bool,
     ):
-        ctx.save_for_backward(x_fp8)
         w_fp8 = Float8Tensor.to_float8(
             original_weight,
             weight_scale,
@@ -191,7 +190,7 @@ class float8_linear(torch.autograd.Function):
         )
         if recompute_float8_weight:
             # This should be set to True when using traditional fsdp to avoid saving
-            # saving the unsharded weight for
+            # saving the unsharded weight for backwards
             ctx.save_for_backward(
                 x_fp8, original_weight, weight_scale, weight_amax_buffer
             )
