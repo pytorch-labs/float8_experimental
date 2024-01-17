@@ -329,13 +329,16 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         return y
 
     @classmethod
-    def from_float(cls, mod, emulate: bool = False):
+    def from_float(
+        cls, mod, emulate: bool = False, recompute_weight_cast: bool = False
+    ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
+            recompute_weight_cast (bool): whether to recompute the casted weight for backwards
         """
         # TODO Follow up! This is a great idea but we need the mixin base to create real
         # Tensors and the Linear base to create empty params
@@ -344,6 +347,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
+        new_mod.recompute_weight_cast = recompute_weight_cast
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         return new_mod

@@ -205,7 +205,6 @@ class _float8_linear(torch.autograd.Function):
         w_fp8_t = w_fp8.t()
 
         res_bits = float8_mm_helper(x_fp8_reshaped, w_fp8_t)
-
         res_bits = res_bits.reshape(*x_fp8.shape[:-1], res_bits.size(-1))
         return res_bits
 
