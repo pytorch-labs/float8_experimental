@@ -216,6 +216,9 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         sd_out_single_gpu = torch.load(sd_out_single_gpu_fname)
         sd_out_fsdp = torch.load(sd_out_fsdp_fname)
         for k, v1 in sd_out_single_gpu.items():
+            if compile_fsdp:
+                # The state-dict for compiled fsdp has a `_orig_mod` prefix
+                k = f"_orig_mod.{k}"
             v2 = sd_out_fsdp[k]
             v1, v2 = v1.cpu(), v2.cpu()
             if is_fp8 and "noop" in k:
