@@ -19,6 +19,7 @@ from typing import Optional
 import float8_experimental.config as config
 
 import torch
+from float8_experimental.float8_ops import float8_linear
 
 from float8_experimental.float8_tensor import Float8Tensor
 
@@ -172,6 +173,13 @@ class Float8LinearMixin(object):
         # and torch.compile, this option can disable them
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
+        # This flag is used to modify what gets saved for backwards. Its default value
+        # is False, this saves the casted weight for backwards. Note that this typically increases memory usage
+        # Because both the weight parameter and the casted weight are saved on device. If set to true
+        # this will only save the weight parameter and during the backwards pass it will re-cast this weight to fp8.
+        # For traditional FSDP this should be set to True in order to not save the un-sharded weight for backwards.
+        self.recompute_weight_cast = False
+
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
     ) -> None:
@@ -213,6 +221,20 @@ class Float8LinearMixin(object):
             x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
         )
         return x_fp8
+
+    def _maybe_init_amaxes_scales_weight(
+        self, w: torch.Tensor, is_amax_initialized: bool
+    ):
+        scale_fn_name = self.recipe.scale_fn_name
+        _maybe_initialize_amaxes_scales_for_float8_cast(
+            w,
+            self.fp8_amax_w,
+            self.fp8_amax_history_w,
+            self.fp8_scale_w,
+            scale_fn_name,
+            torch.float8_e4m3fn,
+            is_amax_initialized,
+        )
 
     def cast_w_to_float8(
         self, w: torch.Tensor, is_amax_initialized: bool
@@ -284,9 +306,18 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         self.float8_pre_forward(x)
 
         x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        # w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        self._maybe_init_amaxes_scales_weight(self.weight, self.is_amax_initialized)
 
-        y = torch.matmul(x_fp8, w_fp8.t())
+        y = float8_linear(
+            x_fp8,
+            self.weight,
+            self.fp8_scale_w,
+            self.fp8_amax_w,
+            self.emulate,
+            self.recompute_weight_cast,
+        )
+        # y = torch.matmul(x_fp8, w_fp8.t())
 
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y, self.emulate)

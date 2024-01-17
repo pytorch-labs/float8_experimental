@@ -164,7 +164,7 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     )
 
 
-class float8_linear(torch.autograd.Function):
+class _float8_linear(torch.autograd.Function):
     """Custom autograd function for computing torch.nn.Linear on Float8Tensor.
 
     This is needed for a couple reasons, we want to have fine grained control over the
@@ -238,3 +238,27 @@ class float8_linear(torch.autograd.Function):
 
         empty_grads = None, None, None, None, None, None, None, None, None
         return dL_dX, dL_dW, *empty_grads
+
+
+# Need to allow_in_graph because:
+# (1) the forward returns a plain tensor
+# (2) the backward accepts a Float8Tensor subclass
+# dynamo has no good way to be told what the type of
+# the grad_out is today, so it (incorrectly) assumes it is also a plain tensor.
+@torch._dynamo.allow_in_graph
+def float8_linear(
+    x_fp8: torch.Tensor,
+    original_weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    weight_amax_buffer: Optional[torch.Tensor],
+    emulate: bool,
+    recompute_float8_weight: bool,
+):
+    return _float8_linear.apply(
+        x_fp8,
+        original_weight,
+        weight_scale,
+        weight_amax_buffer,
+        emulate,
+        recompute_float8_weight,
+    )
