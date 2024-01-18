@@ -61,7 +61,9 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
+def get_model(
+    K, N, is_fp8, emulate, base_dtype=torch.float32, recompute_weight_cast: bool = False
+):
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
         nn.ReLU(),
@@ -69,7 +71,12 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
         nn.ReLU(),
     )
     if is_fp8:
-        swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
+        swap_linear_with_float8_linear(
+            m,
+            Float8Linear,
+            emulate=emulate,
+            recompute_weight_cast=recompute_weight_cast,
+        )
     return m
 
 
@@ -81,10 +88,15 @@ def fsdp_main(rank, world_size, args):
 
     # TODO: We set fullgraph as an option. However, it currently doesn't work for fullgraph compile.
     # We can investigate and fix it later.
-    is_fp8, emulate, base_dtype, compile, fullgraph = args
-    model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).to(
-        rank
-    )
+    is_fp8, emulate, base_dtype, compile, fullgraph, recompute_weight_cast = args
+    model = get_model(
+        K,
+        N,
+        is_fp8=is_fp8,
+        emulate=emulate,
+        base_dtype=base_dtype,
+        recompute_weight_cast=recompute_weight_cast,
+    ).to(rank)
     model.load_state_dict(torch.load(sd_in_fname))
     # To compile FSDP, we need use_orig_params to True
     model = FSDP(model, use_orig_params=True)
@@ -148,7 +160,13 @@ def fsdp_main(rank, world_size, args):
     cleanup()
 
 
-def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = False):
+def run(
+    mode: str,
+    is_fp8: bool,
+    compile_fsdp: bool = False,
+    fullgraph: bool = False,
+    recompute_weight_cast: bool = False,
+):
     print(f"Mode: {mode}".center(100, "-"))
     base_dtype = torch.bfloat16
     if not os.path.exists(data_dir):
@@ -169,7 +187,12 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         # generate reference input
         ref_input = torch.randn(B, M, K).cuda().to(base_dtype)
         model = get_model(
-            K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype
+            K,
+            N,
+            is_fp8=is_fp8,
+            emulate=emulate,
+            base_dtype=base_dtype,
+            recompute_weight_cast=recompute_weight_cast,
         ).cuda()
         torch.save(ref_input, input_fname)
         torch.save(model.state_dict(), sd_in_fname)
@@ -177,7 +200,12 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
     elif mode == "single_gpu":
         ref_input = torch.load(input_fname).to(base_dtype)
         model = get_model(
-            K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype
+            K,
+            N,
+            is_fp8=is_fp8,
+            emulate=emulate,
+            base_dtype=base_dtype,
+            recompute_weight_cast=recompute_weight_cast,
         ).cuda()
         model.load_state_dict(torch.load(sd_in_fname))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
@@ -199,7 +227,14 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
     elif mode == "fsdp":
         WORLD_SIZE = torch.cuda.device_count()
         # We only compile for fsdp, and compare the numerics with signle-gpu no-compile
-        args = (is_fp8, emulate, base_dtype, compile_fsdp, fullgraph)
+        args = (
+            is_fp8,
+            emulate,
+            base_dtype,
+            compile_fsdp,
+            fullgraph,
+            recompute_weight_cast,
+        )
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == "analyze":

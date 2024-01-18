@@ -48,12 +48,16 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
+def get_model(
+    K, N, is_fp8, emulate, base_dtype=torch.float32, recompute_weight_cast: bool = False
+):
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
         nn.ReLU(),
     )
-    swap_linear_with_float8_linear(m, Float8Linear, emulate=emulate)
+    swap_linear_with_float8_linear(
+        m, Float8Linear, emulate=emulate, recompute_weight_cast=recompute_weight_cast
+    )
     return m
 
 
@@ -63,7 +67,7 @@ def fsdp_main(rank, world_size, args):
     setup(rank, world_size)
     torch.cuda.set_device(rank)
 
-    (emulate,) = args
+    (emulate, recompute_weight_cast) = args
 
     # composability of torch.compile + FSDP + autocast + Float8Linear
     # as fo 2023-12-30
@@ -81,9 +85,14 @@ def fsdp_main(rank, world_size, args):
     # things work e2e. Note that FSDP does not support full-graph compile
     # regardless of float8.
 
-    model = get_model(K, N, is_fp8=True, emulate=emulate, base_dtype=torch.bfloat16).to(
-        rank
-    )
+    model = get_model(
+        K,
+        N,
+        is_fp8=True,
+        emulate=emulate,
+        base_dtype=torch.bfloat16,
+        recompute_weight_cast=recompute_weight_cast,
+    ).to(rank)
 
     # To compile FSDP, we need use_orig_params to True
     model = FSDP(model, use_orig_params=True)
@@ -102,7 +111,8 @@ def fsdp_main(rank, world_size, args):
         sync_float8_func(model)
         optimizer.step()
 
-    print("done!")
+    if rank == 0:
+        print("Success: ✅")
     cleanup()
 
 
@@ -119,7 +129,8 @@ def run():
         emulate = True
 
     WORLD_SIZE = torch.cuda.device_count()
-    args = (emulate,)
+    recompute_weight_cast = True
+    args = (emulate, recompute_weight_cast)
     mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
 

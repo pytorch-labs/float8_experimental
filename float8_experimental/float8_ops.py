@@ -189,7 +189,7 @@ class _float8_linear(torch.autograd.Function):
             emulate=emulate,
         )
         if recompute_float8_weight:
-            # This should be set to True when using traditional fsdp to avoid saving
+            # This should be set to True when using traditional fsdp to avoid
             # saving the unsharded weight for backwards
             ctx.save_for_backward(
                 x_fp8, original_weight, weight_scale, weight_amax_buffer
