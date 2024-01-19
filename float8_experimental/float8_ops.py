@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import torch
 
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, re_construct_float8_weight
 from float8_experimental.float8_utils import is_row_major
 from torch.utils._pytree import tree_map
 
@@ -191,9 +191,7 @@ class _float8_linear(torch.autograd.Function):
         if recompute_float8_weight:
             # This should be set to True when using traditional fsdp to avoid
             # saving the unsharded weight for backwards
-            ctx.save_for_backward(
-                x_fp8, original_weight, weight_scale, weight_amax_buffer
-            )
+            ctx.save_for_backward(x_fp8, original_weight, weight_scale)
         else:
             # Does this interact properly with activation checkpointing?
             ctx.save_for_backward(x_fp8, w_fp8)
@@ -211,19 +209,15 @@ class _float8_linear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, go_fp8: torch.Tensor):
         if ctx.recompute_float8_weight:
-            x_fp8, original_weight, weight_scale, weight_amax_buffer = ctx.saved_tensors
-            w_fp8 = Float8Tensor.to_float8(
-                original_weight,
-                weight_scale,
-                torch.float8_e4m3fn,
-                weight_amax_buffer,
-                emulate=ctx.emulate,
+            x_fp8, original_weight, weight_scale = ctx.saved_tensors
+            w_fp8 = re_construct_float8_weight(
+                original_weight, weight_scale, torch.float8_e4m3fn, emulate=ctx.emulate
             )
         else:
             x_fp8, w_fp8 = ctx.saved_tensors
 
         # calculate dL/dX
-        go_fp8_reshaped = go_fp8.view(-1, go_fp8.size(-1))
+        go_fp8_reshaped = go_fp8.reshape(-1, go_fp8.size(-1))
         w_fp8_t_c_t = w_fp8.t().contiguous().t()
         dL_dX = float8_mm_helper(go_fp8_reshaped, w_fp8_t_c_t)
         dL_dX = dL_dX.view(*go_fp8.shape[:-1], dL_dX.size(-1))

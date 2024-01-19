@@ -43,6 +43,26 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
 
 @torch._dynamo.allow_in_graph
+def re_construct_float8_weight(
+    tensor: torch.Tensor, scale: torch.Tensor, float8_dtype, emulate: bool = False
+):
+    """In the backwards of float8_linear we don't need to fill the amax buffer
+    for the weight tensor since that was done during the forward and we just need to
+    recast the orignal precision tensor using the scale from the forward
+
+    Args:
+        tensor: the tensor to convert
+        scale: the scale to use to convert the tensor, from the forward
+        float8_dtype: the float8 dtype to use
+        emulate: if true using fp32 emulation for the matmuls, helpful
+            if you don't have access to h100 hardware.
+    """
+    tensor_scaled = tensor * scale
+    bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+    return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
+
+
+@torch._dynamo.allow_in_graph
 class FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8
