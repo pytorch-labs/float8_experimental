@@ -75,23 +75,33 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     return a_data, a_scale, b_data, b_scale
 
 
-def float8_mm_helper(a: Float8Tensor, b: Float8Tensor) -> torch.Tensor:
+def float8_addmm_helper(
+    a: Float8Tensor, b: Float8Tensor, bias: Optional[torch.Tensor]
+) -> torch.Tensor:
     """This is a helper function for float8_mm
     Args:
         a: The first matrix multiplication term.
         b: The second matrix multiplication term.
+        bias: The bias term.
     Returns:
         torch.Tensor: The result of the matrix multiplication.
     """
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
+    if bias is not None:
+        assert (
+            bias.dtype == output_dtype
+        ), f"bias dtype {bias.dtype} != output_dtype {output_dtype}"
     if a._emulate:
         assert a._emulate == b._emulate
-        return torch.ops.aten.mm_float8_emulated(
+        out = torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
         )[0]
+        if bias is not None:
+            return out + bias
+        return out
     tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=None
+        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=bias
     )
     return tensor_out
 
@@ -101,18 +111,7 @@ def float8_mm(aten_op, args, kwargs=None):
     assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
     a = args[0]
     b = args[1]
-    return float8_mm_helper(a, b)
-    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
-    output_dtype = a._orig_dtype
-    if a._emulate:
-        assert a._emulate == b._emulate
-        return torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
-    tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=None
-    )
-    return tensor_out
+    return float8_addmm_helper(a, b, None)
 
 
 @implements([aten.addmm.default])
@@ -125,19 +124,7 @@ def float8_addmm(aten_op, args, kwargs=None):
     bias = args[0]
     a = args[1]
     b = args[2]
-    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
-    output_dtype = a._orig_dtype
-    assert bias.dtype == output_dtype, "bias dtype must match output dtype"
-    if a._emulate:
-        assert a._emulate == b._emulate
-        out = torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
-        return out + bias
-    tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=bias
-    )
-    return tensor_out
+    return float8_addmm_helper(a, b, bias)
 
 
 @implements([aten.is_same_size.default])
@@ -174,8 +161,9 @@ class _float8_linear(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        x_fp8: torch.Tensor,
+        x_fp8: Float8Tensor,
         original_weight: torch.Tensor,
+        bias: Optional[torch.Tensor],
         weight_scale: torch.Tensor,
         weight_amax_buffer: Optional[torch.Tensor],
         emulate: bool,
@@ -202,7 +190,7 @@ class _float8_linear(torch.autograd.Function):
 
         w_fp8_t = w_fp8.t()
 
-        res_bits = float8_mm_helper(x_fp8_reshaped, w_fp8_t)
+        res_bits = float8_addmm_helper(x_fp8_reshaped, w_fp8_t, bias)
         res_bits = res_bits.reshape(*x_fp8.shape[:-1], res_bits.size(-1))
         return res_bits
 
@@ -219,20 +207,25 @@ class _float8_linear(torch.autograd.Function):
         # calculate dL/dX
         go_fp8_reshaped = go_fp8.reshape(-1, go_fp8.size(-1))
         w_fp8_t_c_t = w_fp8.t().contiguous().t()
-        dL_dX = float8_mm_helper(go_fp8_reshaped, w_fp8_t_c_t)
+        dL_dX = float8_addmm_helper(go_fp8_reshaped, w_fp8_t_c_t, None)
         dL_dX = dL_dX.view(*go_fp8.shape[:-1], dL_dX.size(-1))
 
         # calculate dL/dW
         x_fp8_reshaped_t_c = x_fp8.view(-1, x_fp8.size(-1)).t().contiguous()
         go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
 
-        dL_dW = float8_mm_helper(x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t)
+        dL_dW = float8_addmm_helper(x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t, None)
         # The contiguous call is not needed for correctness, but allows for a faster backward
         # pass in conjunction with compile for both single-gpu and fsdp.
         dL_dW = dL_dW.t().contiguous()
 
+        if ctx.needs_input_grad[2]:
+            dL_dBias = go_fp8.to_original_precision()
+        else:
+            dL_dBias = None
+
         empty_grads = None, None, None, None, None, None, None, None, None
-        return dL_dX, dL_dW, *empty_grads
+        return dL_dX, dL_dW, dL_dBias, *empty_grads
 
 
 # Need to allow_in_graph because:
@@ -244,6 +237,7 @@ class _float8_linear(torch.autograd.Function):
 def float8_linear(
     x_fp8: torch.Tensor,
     original_weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
     weight_scale: torch.Tensor,
     weight_amax_buffer: Optional[torch.Tensor],
     emulate: bool,
@@ -252,6 +246,7 @@ def float8_linear(
     return _float8_linear.apply(
         x_fp8,
         original_weight,
+        bias,
         weight_scale,
         weight_amax_buffer,
         emulate,

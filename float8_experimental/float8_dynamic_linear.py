@@ -11,7 +11,11 @@ import torch
 from float8_experimental.float8_ops import float8_linear
 
 from float8_experimental.float8_tensor import Float8Tensor
-from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
+from float8_experimental.float8_utils import (
+    get_maybe_autocast_inputs,
+    tensor_to_scale,
+    to_fp8_saturated,
+)
 
 
 @torch._dynamo.allow_in_graph
@@ -48,14 +52,16 @@ class Float8DynamicLinear(torch.nn.Linear):
     """
 
     def forward(self, x):
-        x_fp8 = self.cast_to_float8(x)
-        # w_fp8 = self.cast_to_float8(self.weight)
-
-        # y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
-        weight_scale = tensor_to_scale(self.weight, torch.float8_e4m3fn)
+        # Tried to do this with @custom_fwd/bwd but it didn't work
+        temp_x, temp_weight, temp_bias = get_maybe_autocast_inputs(
+            x, self.weight, self.bias
+        )
+        x_fp8 = self.cast_to_float8(temp_x)
+        weight_scale = tensor_to_scale(temp_weight, torch.float8_e4m3fn)
         y = float8_linear(
             x_fp8,
-            self.weight,
+            temp_weight,
+            None,  # bias
             weight_scale,
             None,
             self.emulate,
@@ -63,7 +69,13 @@ class Float8DynamicLinear(torch.nn.Linear):
         )
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_to_float8e5m2_bw(y)
-        y = y + self.bias if self.bias is not None else y
+
+        # TODO We should use addmm above but this fails the single fsdp test:
+        # FAILED: _orig_mod.0.fp8_amax_w, 0.2197265625, 0.21875
+        # Not immediately clear why the bias being fused in would only effect the numerics
+        # for the weight....
+        if temp_bias is not None:
+            y = y + temp_bias
 
         return y
 

@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Callable
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -94,3 +94,31 @@ def compute_error(x, y):
 def is_row_major(stride):
     assert len(stride) == 2, "is_row_major only supports 2D tensors"
     return stride[0] > stride[1] and stride[1] == 1
+
+
+def get_maybe_autocast_inputs(
+    x: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
+):
+    """If autocast is enabled, cast the inputs to the autocast dtype. Otherwise, return the inputs as is.
+
+    Why do we need this? I tried to implement the autograd function # custom_fwd and custom_bwd
+    decorators, from the amp docs but that didn't work.
+    Args:
+        x: The input tensor.
+        weight: The weight tensor.
+        bias: The bias tensor.
+
+    """
+    if torch.is_autocast_enabled():
+        autocast_dtype = torch.get_autocast_gpu_dtype()
+        temp_x = x.to(autocast_dtype) if x.dtype != autocast_dtype else x
+        temp_weight = (
+            weight.to(autocast_dtype) if weight.dtype != autocast_dtype else weight
+        )
+        if bias is not None and bias.dtype != autocast_dtype:
+            temp_bias = bias.to(autocast_dtype)
+        else:
+            temp_bias = bias
+        return temp_x, temp_weight, temp_bias
+    else:
+        return x, weight, bias
