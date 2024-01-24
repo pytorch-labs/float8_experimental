@@ -14,6 +14,9 @@ import torch.nn as nn
 from float8_experimental.float8_linear_utils import get_float8_linear, LinearType
 from float8_experimental.float8_tensor import Float8Tensor
 
+from torch._dynamo.test_case import TestCase as DynamoTestCase
+from torch._dynamo.testing import CompileCounterWithBackend
+
 # Setting to unblock for calling contiguous in backwards
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
 
@@ -78,7 +81,7 @@ def test_inductor(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtyp
     _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
 
 
-class TestGraphBreaks:
+class TestGraphBreaks(DynamoTestCase):
     class MockLinear(torch.nn.Module):
         def __init__(self, graph_break: bool):
             super().__init__()
@@ -103,12 +106,14 @@ class TestGraphBreaks:
     @pytest.mark.xfail(reason="TODO: Fix this test, see TODO in MockLinear")
     def test_float8_with_graph_break_in_the_middle(self):
         """Test that having Float8Tensor object at the boundary of a subgraph"""
+        cnts = CompileCounterWithBackend("inductor")
         mod = self.MockLinear(graph_break=True).cuda()
         compiled_mod = copy.deepcopy(mod)
-        compiled_mod = torch.compile(compiled_mod)
+        compiled_mod = torch.compile(compiled_mod, backend=cnts)
         x = torch.randn(16, 16, device="cuda")
         y_eager = mod(x)
         y_compiled = compiled_mod(x)
+        self.assertEqual(cnts.frame_count, 2, "Compiled graph should have 2 frames!")
         torch.testing.assert_close(y_eager, y_compiled)
 
     def test_float8_graph_input(self):
@@ -117,24 +122,30 @@ class TestGraphBreaks:
         def to_float(x):
             return x.to_original_precision()
 
-        to_float = torch.compile(to_float)
-
+        cnts = CompileCounterWithBackend("inductor")
         mod = self.MockLinear(graph_break=False).cuda()
         x = torch.randn(2, 2, device="cuda")
-        compiled_to_float = torch.compile(to_float)
+        compiled_to_float = torch.compile(to_float, backend=cnts)
         y = mod(x)
         y2_eager = to_float(y)
         y2_compiled = compiled_to_float(y)
+        self.assertEqual(
+            cnts.frame_count,
+            1,
+            "to_float was not compiled into 1 frame and likely encountered a skip!",
+        )
         torch.testing.assert_close(y2_eager, y2_compiled)
 
     @pytest.mark.xfail(reason="TODO: Fix this test, see TODO in MockLinear")
     def test_float8_graph_output(self):
         """Test that having Float8Tensor object as a graph output works"""
+        cnts = CompileCounterWithBackend("inductor")
         mod = self.MockLinear(graph_break=False).cuda()
-        compiled_mod = torch.compile(mod)
+        compiled_mod = torch.compile(mod, backend=cnts)
         x = torch.randn(16, 16, device="cuda")
         y_compiled = compiled_mod(x)
 
+        self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
         tensors, ctx = y_compiled.__tensor_flatten__()
         for tensor in tensors:
             assert not isinstance(
