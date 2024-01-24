@@ -135,12 +135,11 @@ class TestGraphBreaks:
         x = torch.randn(16, 16, device="cuda")
         y_compiled = compiled_mod(x)
 
-        assert not isinstance(
-            y_compiled._data, torch._subclasses.fake_tensor.FakeTensor
-        ), "Float8Tensor._data should not be a FakeTensor!"
-        assert isinstance(
-            y_compiled._scale, torch._subclasses.fake_tensor.FakeTensor
-        ), "Float8Tensor._scale should not be a FakeTensor!"
+        tensors, ctx = y_compiled.__tensor_flatten__()
+        for tensor in tensors:
+            assert not isinstance(
+                getattr(y_compiled, tensor), torch._subclasses.fake_tensor.FakeTensor
+            ), "Float8Tensor should not contain any FakeTensors!"
         assert isinstance(
             y_compiled._orig_dtype, torch.dtype
         ), "Float8Tensor._orig_dtype should be a dtype but got {}".format(
