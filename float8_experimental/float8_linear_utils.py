@@ -23,13 +23,17 @@ REQUIRES_SYNC = {LinearType.DELAYED}
 
 
 def get_float8_linear(
-    linear_type: LinearType, linear_ref: torch.nn.Linear, emulate: bool = False
+    linear_type: LinearType,
+    linear_ref: torch.nn.Linear,
+    emulate: bool = False,
+    use_activation_hooks: bool = False,
 ):
     """Returns a Float8Linear module of the given type, initialized from linear_ref.
     Args:
         linear_type: The type of Float8Linear to return.
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
+        use_activation_hooks: Whether to use activation hooks for dynamic linear.
     """
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
@@ -37,9 +41,12 @@ def get_float8_linear(
     }
     if linear_type not in LINEAR_TYPE_MAP:
         raise ValueError(f"linear_type must be one of {LINEAR_TYPE_MAP.keys()}")
-
+    if use_activation_hooks and linear_type != LinearType.DYNAMIC:
+        raise ValueError("use_activation_hooks is only supported for dynamic linear")
     return LINEAR_TYPE_MAP[linear_type].from_float(
-        copy.deepcopy(linear_ref), emulate=emulate
+        copy.deepcopy(linear_ref),
+        emulate=emulate,
+        use_activation_hooks=use_activation_hooks,
     )
 
 

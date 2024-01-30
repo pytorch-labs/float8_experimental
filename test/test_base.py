@@ -50,8 +50,15 @@ class TestFloat8Tensor(unittest.TestCase):
 
 
 class TestFloat8Linear:
-    def _test_linear_impl(self, x, m_ref, linear_type: LinearType, emulate: bool):
-        m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
+    def _test_linear_impl(
+        self,
+        x,
+        m_ref,
+        linear_type: LinearType,
+        emulate: bool,
+        use_activation_hooks: bool = False,
+    ):
+        m_fp8 = get_float8_linear(linear_type, m_ref, emulate, use_activation_hooks)
         for _ in range(2):
             if linear_requires_sync(linear_type):
                 sync_float8_amax_and_scale_history(m_fp8)
@@ -112,7 +119,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
-    def test_linear_nobias(self, x_shape, linear_type: LinearType, emulate: bool):
+    @pytest.mark.parametrize("use_activation_hooks", [True, False])
+    def test_linear_nobias(
+        self,
+        x_shape,
+        linear_type: LinearType,
+        emulate: bool,
+        use_activation_hooks: bool,
+    ):
         if not emulate:
             if not torch.cuda.is_available():
                 warnings.warn("CUDA not available")
@@ -122,10 +136,12 @@ class TestFloat8Linear:
                     f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
                 )
                 pytest.skip()
+        if use_activation_hooks and linear_type != LinearType.DYNAMIC:
+            pytest.skip("use_activation_hooks is only supported for dynamic linear")
 
         x = torch.randn(*x_shape, device="cuda")
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
-        self._test_linear_impl(x, m_ref, linear_type, emulate)
+        self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
@@ -133,8 +149,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
+    @pytest.mark.parametrize("use_activation_hooks", [True, False])
     def test_linear_bias(
-        self, x_shape, linear_type: LinearType, emulate: bool, linear_dtype: torch.dtype
+        self,
+        x_shape,
+        linear_type: LinearType,
+        emulate: bool,
+        linear_dtype: torch.dtype,
+        use_activation_hooks: bool,
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -146,27 +168,59 @@ class TestFloat8Linear:
                 )
                 pytest.skip()
 
+        if use_activation_hooks and linear_type != LinearType.DYNAMIC:
+            pytest.skip("use_activation_hooks is only supported for dynamic linear")
+
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
-        self._test_linear_impl(x, m_ref, linear_type, emulate)
+        self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
 
-        m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = Float8Linear.from_float(m, emulate)
+    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+    @pytest.mark.parametrize(
+        "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
+    )
+    @pytest.mark.parametrize("use_activation_hooks", [True, False])
+    def test_autocast_outputs(
+        self,
+        linear_type: LinearType,
+        emulate: bool,
+        linear_dtype: torch.dtype,
+        use_activation_hooks: bool,
+    ):
+        if not emulate:
+            if not torch.cuda.is_available():
+                warnings.warn("CUDA not available")
+                pytest.skip()
+            elif torch.cuda.get_device_capability() < (9, 0):
+                warnings.warn(
+                    f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
+                )
+                pytest.skip()
+
+        if use_activation_hooks and linear_type != LinearType.DYNAMIC:
+            pytest.skip("use_activation_hooks is only supported for dynamic linear")
+
+        m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
+        m = get_float8_linear(linear_type, m_ref, emulate, use_activation_hooks)
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
-        sync_float8_amax_and_scale_history(m)
+        if linear_requires_sync(linear_type):
+            sync_float8_amax_and_scale_history(m)
         y = m(x)
         assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast("cuda"):
-            sync_float8_amax_and_scale_history(m)
+            if linear_requires_sync(linear_type):
+                sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            sync_float8_amax_and_scale_history(m)
+            if linear_requires_sync(linear_type):
+                sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert (
             y.dtype == torch.bfloat16
@@ -180,11 +234,6 @@ class TestFloat8Linear:
         emulate = (
             not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
         )
-        x_shape = (16, 16)
-
-        x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
-        m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
-        self._test_linear_impl(x, m_ref, linear_type, emulate)
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         m = Float8Linear.from_float(m, emulate)
