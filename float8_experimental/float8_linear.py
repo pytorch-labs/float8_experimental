@@ -109,11 +109,18 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 @dataclasses.dataclass
 class DelayedScalingRecipe:
     # Controls the history length of amax buffers
-    history_len = 16
+    history_len: int
 
     # Controls the way to calculate current scale from amax history
     # TODO(future): add other functions as needed, hardcoded or user defined
-    scale_fn_name = "max"
+    scale_fn_name: str
+
+    def __init__(self, history_len: int = 16, scale_fn_name: str = "max"):
+        self.history_len = history_len
+        self.scale_fn_name = scale_fn_name
+        assert (
+            self.scale_fn_name == "max"
+        ), f"{self.scale_fn_name} is not implemented yet. Only max is supported for now."
 
 
 class Float8LinearMixin(object):
