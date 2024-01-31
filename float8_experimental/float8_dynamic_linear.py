@@ -43,12 +43,16 @@ def cast_x_to_float8_e4m3fn_pre_hook(module, args):
     return module.cast_to_float8_e4m3fn(args[0])
 
 
-def cast_dldy_to_float8_e5m2_backward_pre_hook(module, grad_output):
+def cast_grad_to_float8_e5m2_backward_forward_hook(module, input, output):
+    """This is a forward hook that sends the output of the model through
+    a no-op in the forward but a cast to float8_e5m2 in the backward.
+
+    Args:
+        module (nn.Module): the module to cast the output of
+        input (Tensor): the input to the module forward call
+        output (Tensor): the output of the module forward
     """
-    Hook to cast the incoming gradient to `torch.float8_e5m2`
-    """
-    gradY = grad_output[0]
-    return (to_fp8_no_autograd(gradY, torch.float8_e5m2, module.emulate),)
+    return module.cast_to_float8_e5m2_bw(output)
 
 
 class Float8DynamicLinear(torch.nn.Linear):
@@ -115,7 +119,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         if new_mod.use_activation_hooks:
             # install the hooks
             new_mod.register_forward_pre_hook(cast_x_to_float8_e4m3fn_pre_hook)
-            new_mod.register_full_backward_pre_hook(
-                cast_dldy_to_float8_e5m2_backward_pre_hook
+            new_mod.register_forward_hook(
+                cast_grad_to_float8_e5m2_backward_forward_hook
             )
         return new_mod
