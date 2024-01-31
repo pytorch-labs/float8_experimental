@@ -27,6 +27,7 @@ def _test_compile_base(
     emulate: bool,
     linear_type: LinearType,
     dtype: torch.dtype,
+    recompute_weight_cast: bool,
 ):
     random.seed(0)
     torch.manual_seed(0)
@@ -36,7 +37,9 @@ def _test_compile_base(
     x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
     m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
 
-    m_fp8 = get_float8_linear(linear_type, m_ref, emulate=emulate)
+    m_fp8 = get_float8_linear(
+        linear_type, m_ref, emulate=emulate, recompute_weight_cast=recompute_weight_cast
+    )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
     m_ref = torch.compile(m_ref, backend=backend, fullgraph=fullgraph)
@@ -55,30 +58,57 @@ def _test_compile_base(
 @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("recompute_weight_cast", [False, True])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-def test_eager_only(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+def test_eager_only(
+    fullgraph,
+    emulate: bool,
+    linear_type: bool,
+    dtype: torch.dtype,
+    recompute_weight_cast: bool,
+):
     torch._dynamo.reset()
-    _test_compile_base("eager", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "eager", fullgraph, emulate, linear_type, dtype, recompute_weight_cast
+    )
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("recompute_weight_cast", [False, True])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-def test_aot_eager(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+def test_aot_eager(
+    fullgraph,
+    emulate: bool,
+    linear_type: bool,
+    dtype: torch.dtype,
+    recompute_weight_cast: bool,
+):
     torch._dynamo.reset()
-    _test_compile_base("aot_eager", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "aot_eager", fullgraph, emulate, linear_type, dtype, recompute_weight_cast
+    )
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
 @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+@pytest.mark.parametrize("recompute_weight_cast", [False, True])
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
-def test_inductor(fullgraph, emulate: bool, linear_type: bool, dtype: torch.dtype):
+def test_inductor(
+    fullgraph,
+    emulate: bool,
+    linear_type: bool,
+    dtype: torch.dtype,
+    recompute_weight_cast: bool,
+):
     torch._dynamo.reset()
-    _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "inductor", fullgraph, emulate, linear_type, dtype, recompute_weight_cast
+    )
 
 
 class TestGraphBreaks(DynamoTestCase):

@@ -19,6 +19,7 @@ from typing import Optional
 import float8_experimental.config as config
 
 import torch
+from float8_experimental.float8_ops import float8_linear
 
 from float8_experimental.float8_tensor import Float8Tensor
 
@@ -26,6 +27,7 @@ from float8_experimental.float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    get_maybe_autocast_inputs,
     tensor_to_amax,
     to_fp8_saturated,
 )
@@ -179,6 +181,13 @@ class Float8LinearMixin(object):
         # and torch.compile, this option can disable them
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
+        # This flag is used to modify what gets saved for backwards. Its default value
+        # is False, this saves the casted weight for backwards. Note that this typically increases memory usage
+        # Because both the weight parameter and the casted weight are saved on device. If set to true
+        # this will only save the weight parameter and during the backwards pass it will re-cast this weight to fp8.
+        # For traditional FSDP this should be set to True in order to not save the un-sharded weight for backwards.
+        self.recompute_weight_cast = False
+
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
     ) -> None:
@@ -198,14 +207,6 @@ class Float8LinearMixin(object):
     def cast_x_to_float8(
         self, x: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
-        # Duplicate the autocast logic for F.linear, so that the output
-        # of our module has the right original precision
-        if torch.is_autocast_enabled():
-            # For now, hardcode to GPU's autocast dtype
-            # if we need CPU support in the future, we can add it
-            autocast_dtype = torch.get_autocast_gpu_dtype()
-            x = x.to(autocast_dtype)
-
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             x,
@@ -220,6 +221,20 @@ class Float8LinearMixin(object):
             x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
         )
         return x_fp8
+
+    def _maybe_init_amaxes_scales_weight(
+        self, w: torch.Tensor, is_amax_initialized: bool
+    ):
+        scale_fn_name = self.recipe.scale_fn_name
+        _maybe_initialize_amaxes_scales_for_float8_cast(
+            w,
+            self.fp8_amax_w,
+            self.fp8_amax_history_w,
+            self.fp8_scale_w,
+            scale_fn_name,
+            torch.float8_e4m3fn,
+            is_amax_initialized,
+        )
 
     def cast_w_to_float8(
         self, w: torch.Tensor, is_amax_initialized: bool
@@ -288,30 +303,48 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     """
 
     def forward(self, x):
+        temp_x, temp_weight, temp_bias = get_maybe_autocast_inputs(
+            x, self.weight, self.bias
+        )
         self.float8_pre_forward(x)
 
-        x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        x_fp8 = self.cast_x_to_float8(temp_x, self.is_amax_initialized)
+        self._maybe_init_amaxes_scales_weight(self.weight, self.is_amax_initialized)
 
-        y = torch.matmul(x_fp8, w_fp8.t())
+        y = float8_linear(
+            x_fp8,
+            temp_weight,
+            None,  # bias
+            self.fp8_scale_w,
+            self.fp8_amax_w,
+            self.emulate,
+            self.recompute_weight_cast,
+        )
 
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y, self.emulate)
 
-        if self.bias is not None:
-            y = y + self.bias.to(y.dtype)
+        # TODO We should use addmm above but this fails the single fsdp test:
+        # FAILED: _orig_mod.0.fp8_amax_w, 0.2197265625, 0.21875
+        # Not immediately clear why the bias being fused in would only effect the numerics
+        # for the weight....
+        if temp_bias is not None:
+            y = y + temp_bias
 
         self.float8_post_forward()
         return y
 
     @classmethod
-    def from_float(cls, mod, emulate: bool = False):
+    def from_float(
+        cls, mod, emulate: bool = False, recompute_weight_cast: bool = False
+    ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
+            recompute_weight_cast (bool): whether to recompute the casted weight for backwards
         """
         # TODO Follow up! This is a great idea but we need the mixin base to create real
         # Tensors and the Linear base to create empty params
@@ -320,6 +353,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
+        new_mod.recompute_weight_cast = recompute_weight_cast
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         return new_mod

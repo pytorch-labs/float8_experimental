@@ -87,7 +87,9 @@ class LinearParams:
     torch_compile: Optional[bool] = False
 
 
-def main(profile_path: Path, compile: bool, linear_type: str):
+def main(
+    profile_path: Path, compile: bool, linear_type: str, recompute_weight_cast: bool
+):
     profile_path = Path(profile_path)
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
     params = LinearParams(
@@ -110,7 +112,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         dtype=params.ref_dtype,
     )
     linear_type = LinearType[linear_type.upper()]
-    linear_float8 = get_float8_linear(linear_type, linear_ref)
+    linear_float8 = get_float8_linear(
+        linear_type, linear_ref, recompute_weight_cast=recompute_weight_cast
+    )
 
     input_tensor = torch.randn(
         params.M, params.K, device="cuda", dtype=params.ref_dtype, requires_grad=True

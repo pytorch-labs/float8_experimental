@@ -3,12 +3,12 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, re_construct_float8_weight
 from float8_experimental.float8_utils import is_row_major
 from torch.utils._pytree import tree_map
 
@@ -75,22 +75,43 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     return a_data, a_scale, b_data, b_scale
 
 
+def float8_addmm_helper(
+    a: Float8Tensor, b: Float8Tensor, bias: Optional[torch.Tensor]
+) -> torch.Tensor:
+    """This is a helper function for float8_mm
+    Args:
+        a: The first matrix multiplication term.
+        b: The second matrix multiplication term.
+        bias: The bias term.
+    Returns:
+        torch.Tensor: The result of the matrix multiplication.
+    """
+    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
+    output_dtype = a._orig_dtype
+    if bias is not None:
+        assert (
+            bias.dtype == output_dtype
+        ), f"bias dtype {bias.dtype} != output_dtype {output_dtype}"
+    if a._emulate:
+        assert a._emulate == b._emulate
+        out = torch.ops.aten.mm_float8_emulated(
+            a._data, a._scale, b._data, b._scale, output_dtype
+        )[0]
+        if bias is not None:
+            return out + bias
+        return out
+    tensor_out, amax = addmm_float8_unwrapped(
+        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=bias
+    )
+    return tensor_out
+
+
 @implements([aten.mm.default])
 def float8_mm(aten_op, args, kwargs=None):
     assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
     a = args[0]
     b = args[1]
-    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
-    output_dtype = a._orig_dtype
-    if a._emulate:
-        assert a._emulate == b._emulate
-        return torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
-    tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=None
-    )
-    return tensor_out
+    return float8_addmm_helper(a, b, None)
 
 
 @implements([aten.addmm.default])
@@ -103,19 +124,7 @@ def float8_addmm(aten_op, args, kwargs=None):
     bias = args[0]
     a = args[1]
     b = args[2]
-    a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
-    output_dtype = a._orig_dtype
-    assert bias.dtype == output_dtype, "bias dtype must match output dtype"
-    if a._emulate:
-        assert a._emulate == b._emulate
-        out = torch.ops.aten.mm_float8_emulated(
-            a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
-        return out + bias
-    tensor_out, amax = addmm_float8_unwrapped(
-        a_data, a_scale, b_data, b_scale, output_dtype, output_scale=None, bias=bias
-    )
-    return tensor_out
+    return float8_addmm_helper(a, b, bias)
 
 
 @implements([aten.is_same_size.default])
@@ -139,4 +148,107 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     }, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
+    )
+
+
+class _float8_linear(torch.autograd.Function):
+    """Custom autograd function for computing torch.nn.Linear on Float8Tensor.
+
+    This is needed for a couple reasons, we want to have fine grained control over the
+    recomputation of casted values for backward.
+    """
+
+    @staticmethod
+    def forward(
+        ctx,
+        x_fp8: Float8Tensor,
+        original_weight: torch.Tensor,
+        bias: Optional[torch.Tensor],
+        weight_scale: torch.Tensor,
+        weight_amax_buffer: Optional[torch.Tensor],
+        emulate: bool,
+        recompute_float8_weight: bool,
+    ):
+        w_fp8 = Float8Tensor.to_float8(
+            original_weight,
+            weight_scale,
+            torch.float8_e4m3fn,
+            weight_amax_buffer,
+            emulate=emulate,
+        )
+        if recompute_float8_weight:
+            # This should be set to True when using traditional fsdp to avoid
+            # saving the unsharded weight for backwards
+            ctx.save_for_backward(x_fp8, original_weight, weight_scale)
+        else:
+            # Does this interact properly with activation checkpointing?
+            ctx.save_for_backward(x_fp8, w_fp8)
+
+        ctx.recompute_float8_weight = recompute_float8_weight
+        ctx.emulate = emulate
+        x_fp8_reshaped = x_fp8.reshape(-1, x_fp8.size(-1))
+
+        w_fp8_t = w_fp8.t()
+
+        res_bits = float8_addmm_helper(x_fp8_reshaped, w_fp8_t, bias)
+        res_bits = res_bits.reshape(*x_fp8.shape[:-1], res_bits.size(-1))
+        return res_bits
+
+    @staticmethod
+    def backward(ctx, go_fp8: torch.Tensor):
+        if ctx.recompute_float8_weight:
+            x_fp8, original_weight, weight_scale = ctx.saved_tensors
+            w_fp8 = re_construct_float8_weight(
+                original_weight, weight_scale, torch.float8_e4m3fn, emulate=ctx.emulate
+            )
+        else:
+            x_fp8, w_fp8 = ctx.saved_tensors
+
+        # calculate dL/dX
+        go_fp8_reshaped = go_fp8.reshape(-1, go_fp8.size(-1))
+        w_fp8_t_c_t = w_fp8.t().contiguous().t()
+        dL_dX = float8_addmm_helper(go_fp8_reshaped, w_fp8_t_c_t, None)
+        dL_dX = dL_dX.view(*go_fp8.shape[:-1], dL_dX.size(-1))
+
+        # calculate dL/dW
+        x_fp8_reshaped_t_c = x_fp8.view(-1, x_fp8.size(-1)).t().contiguous()
+        go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
+
+        dL_dW = float8_addmm_helper(x_fp8_reshaped_t_c, go_fp8_reshaped_t_c_t, None)
+        # The contiguous call is not needed for correctness, but allows for a faster backward
+        # pass in conjunction with compile for both single-gpu and fsdp.
+        dL_dW = dL_dW.t().contiguous()
+
+        if ctx.needs_input_grad[2]:
+            dL_dBias = go_fp8.to_original_precision()
+        else:
+            dL_dBias = None
+
+        empty_grads = None, None, None, None, None, None, None, None, None
+        return dL_dX, dL_dW, dL_dBias, *empty_grads
+
+
+# Need to allow_in_graph because:
+# (1) the forward returns a plain tensor
+# (2) the backward accepts a Float8Tensor subclass
+# dynamo has no good way to be told what the type of
+# the grad_out is today, so it (incorrectly) assumes it is also a plain tensor.
+@torch._dynamo.allow_in_graph
+def float8_linear(
+    x_fp8: torch.Tensor,
+    original_weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    weight_scale: torch.Tensor,
+    weight_amax_buffer: Optional[torch.Tensor],
+    emulate: bool,
+    recompute_float8_weight: bool,
+):
+    return _float8_linear.apply(
+        x_fp8,
+        original_weight,
+        bias,
+        weight_scale,
+        weight_amax_buffer,
+        emulate,
+        recompute_float8_weight,
     )
