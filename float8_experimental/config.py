@@ -14,3 +14,8 @@ enable_amax_init = True
 # this doesn't work with autocast + torch.compile + FSDP. Enabling this
 # option is useful for safety, but not strictly necessary.
 enable_pre_and_post_forward = True
+
+# If True, dynamic linear uses hooks for activation casting
+# TODO(before land): add test coverage for both cases
+dynamic_use_activation_hooks = True
+# dynamic_use_activation_hooks = False
