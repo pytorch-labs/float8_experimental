@@ -11,7 +11,7 @@ import torch.distributed as dist
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
+from float8_experimental.float8_utils import amax_history_to_scale
 
 
 class LinearType(Enum):
