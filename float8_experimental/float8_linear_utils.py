@@ -72,6 +72,8 @@ def swap_linear_with_float8_linear(
     module_cls: Type[nn.Module],
     emulate: bool = False,
     skip_fqn_list: Optional[List[str]] = None,
+    use_activation_hooks: bool = False,
+    use_fp8_all_gather: bool = False,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -90,7 +92,9 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(module, emulate)
+        return module_cls.from_float(
+            module, emulate, use_activation_hooks, use_fp8_all_gather
+        )
 
     # Mark all modules to skip as visited
     root_module = module
@@ -112,7 +116,13 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            setattr(parent_module, module_name, module_cls.from_float(module, emulate))
+            float8linear_module = module_cls.from_float(
+                module,
+                emulate=emulate,
+                use_activation_hooks=use_activation_hooks,
+                use_fp8_all_gather=use_fp8_all_gather,
+            )
+            parent_module.register_module(module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
     # Without this explicit `del`, this set only gets deleted upon an explicit

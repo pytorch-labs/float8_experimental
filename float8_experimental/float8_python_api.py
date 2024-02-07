@@ -12,8 +12,13 @@ to simplify the product code.
 
 from typing import Optional, Tuple
 
+import float8_experimental.float8_aten_api
+
 import torch
 from float8_experimental.float8_tensor import Float8Tensor
+
+# HACK: Avoid ufmt from removing the import.
+_ = float8_experimental.float8_aten_api.mm_float8_emulated
 
 
 def addmm_float8_unwrapped(
