@@ -144,9 +144,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
         # inspection of the fw+bw torch.compile without the scale
         # syncing code
         # TODO(future): make this better
-        if linear_requires_sync(linear_type):
-            with record_function("scale_amax_and_scales"):
-                sync_float8_amax_and_scale_history(linear_float8)
+        # if linear_requires_sync(linear_type):
+        #     with record_function("scale_amax_and_scales"):
+        sync_float8_amax_and_scale_history(linear_float8)
         out = float8_forw_backward(x)
 
         # out.sum().backward() is also not torch.compile fullgraph
@@ -156,7 +156,8 @@ def main(profile_path: Path, compile: bool, linear_type: str):
 
     if params.torch_compile:
         ref_forw_backward = torch.compile(ref_forw_backward)
-        float8_forw_backward = torch.compile(float8_forw_backward, fullgraph=True)
+        float8_forw_backward_wrapper = torch.compile(float8_forw_backward_wrapper, fullgraph=True)
+
 
     for _ in range(5):
         ref_forw_backward(input_tensor)
