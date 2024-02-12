@@ -13,6 +13,7 @@ from float8_experimental.float8_utils import is_row_major
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
+c10d_functional = torch.ops.c10d_functional
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
 
 
@@ -140,3 +141,29 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     return Float8Tensor(
         args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._emulate
     )
+
+
+@implements([c10d_functional.all_gather_into_tensor.default])
+def allgather_fp8(aten_op, args, kwargs=None):
+    """
+    override funcol with FP8 handling
+    """
+    fp8_input = args[0]
+    assert isinstance(fp8_input, Float8Tensor)
+
+    fp8_data = fp8_input._data
+    fp8_data = fp8_data.view(torch.int8)
+    fp8_data = fp8_data.contiguous()
+    fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
+    fp8_out = fp8_out.view(fp8_input._data.dtype)
+    return Float8Tensor(fp8_out, fp8_input._scale, fp8_input._orig_dtype)
+
+
+@implements([c10d_functional.wait_tensor.default])
+def wait_tensor_fp8(aten_op, args, kwargs=None):
+    fp8_input = args[0]
+    assert isinstance(fp8_input, Float8Tensor)
+
+    fp8_data = fp8_input._data
+    fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
+    return Float8Tensor(fp8_out, fp8_input._scale, fp8_input._orig_dtype)
