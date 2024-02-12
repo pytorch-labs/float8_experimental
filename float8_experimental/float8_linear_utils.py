@@ -5,9 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 import copy
 from enum import auto, Enum
+from typing import List, Optional, Type
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
@@ -66,32 +68,53 @@ def _update_history_with_new_amax(new_amax, amax_history):
 
 
 def swap_linear_with_float8_linear(
-    model,
-    module,
-    emulate=False,
-    skip_fqn_list=None,
-    cur_fqn="",
-):
+    module: nn.Module,
+    module_cls: Type[nn.Module],
+    emulate: bool = False,
+    skip_fqn_list: Optional[List[str]] = None,
+) -> nn.Module:
     """
-    Replaces all instances of torch.nn.Linear in the given model with module.
+    Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
+    of ``module_cls`` (either ``Float8Linear`` or ``Float8DynamicLinear``).
 
     Args:
-        model (torch.nn.Module): The model to modify.
-        module (Float8Linear): The Float8Linear module to use.
-        emulate (bool, optional): Whether to emulate the fp8 matmul logic in float32.
-        skip_fqn_list (List[str], optional): If specified, a list of FQNs to skip
-        cur_fqn (str, optional): Current fqn, used to implement skip_fqn_list
+        module (torch.nn.Module): Module to modify.
+        module_cls (Union[Type[Float8Linear], Type[Float8DynamicLinear]]): Float8 linear class for the swap.
+        emulate (bool, optional): Whether to emulate the fp8 matmul logic in fp32.
+        skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
+            Linear submodules of these skipped modules will also be skipped.
     """
-    name_to_child = dict(model.named_children())
-    for name, child in name_to_child.items():
-        new_fqn = name if cur_fqn == "" else f"{cur_fqn}.{name}"
-        if ((skip_fqn_list is None) or (new_fqn not in skip_fqn_list)) and isinstance(
-            child, torch.nn.Linear
-        ):
-            new_child = module.from_float(child, emulate)
-            setattr(model, name, new_child)
-        else:
-            swap_linear_with_float8_linear(child, module, emulate)
+    module_names_to_skip = set(skip_fqn_list or [])
+    if isinstance(module, nn.Linear):
+        if len(list(module.children())) > 0:
+            raise AssertionError(
+                f"Does not support a root nn.Linear with children: {module}"
+            )
+        return module_cls.from_float(module, emulate)
+
+    # Mark all modules to skip as visited
+    root_module = module
+    visited_modules = {root_module}
+    for module_name, module in root_module.named_modules():
+        if module_name in module_names_to_skip:
+            visited_modules.add(module)
+
+    # Run a post-order traversal to swap linears
+    def post_order_traversal(
+        module: nn.Module, module_name: str, parent_module: Optional[nn.Module]
+    ):
+        for child_module_name, child_module in module.named_children():
+            if child_module not in visited_modules:
+                visited_modules.add(child_module)
+                post_order_traversal(child_module, child_module_name, module)
+        if isinstance(module, nn.Linear):
+            assert (
+                parent_module is not None
+            ), f"Linear root module should return early: {module}"
+            setattr(parent_module, module_name, module_cls.from_float(module, emulate))
+
+    post_order_traversal(root_module, "", None)
+    return root_module
 
 
 def get_float8_layers(model: torch.nn.Module, fp8_classes=None):
