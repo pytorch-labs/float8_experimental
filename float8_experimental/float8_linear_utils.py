@@ -7,6 +7,8 @@ import copy
 from enum import auto, Enum
 from typing import List, Optional, Type
 
+import float8_experimental.config as fp8_config
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -121,21 +123,23 @@ def swap_linear_with_float8_linear(
     return root_module
 
 
-def get_float8_layers(model: torch.nn.Module, fp8_classes=None):
-    if fp8_classes is None:
-        fp8_classes = Float8Linear
+def get_float8_layers(model: torch.nn.Module):
+    """Iterates through the model and returns all the Float8Linear layers.
+    Args:
+        model (torch.nn.Module): The model to look for Float8Linear layers in.
+    """
 
     # Get all fp8 layers and tensors
     fp8_layers = [
-        child for name, child in model.named_modules() if isinstance(child, fp8_classes)
+        child
+        for name, child in model.named_modules()
+        if isinstance(child, Float8Linear)
     ]
 
     return fp8_layers
 
 
-def sync_float8_amax_and_scale_history(
-    model: torch.nn.Module, fp8_classes=None, fp8_layers=None
-) -> None:
+def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) -> None:
     """
     Manages the float8 amax and scale bookkeeping. In detail, it does the
     following:
@@ -147,11 +151,13 @@ def sync_float8_amax_and_scale_history(
 
     TODO(future): design the UX for this (context manager, etc)
 
+    PERFORMANCE NOTE:
+        When you can it is much more efficient to call te get_float8_layers once a
+        the beginning of the training loop and pass the result to this function.
+        Because of how this interacts with torch.compile
+
     Args:
         model (torch.nn.Module): The model to track amaxes for
-        fp8_classes (optional): The fp8 classes to look for in the model.
-            The default is Float8Linear.
-            When using with TP, users can pass in the customized TP classes instead.
         fp8_layers (optional): If fp8_layers are provided, fp8_classes are ignored,
             and we loop over all fp8_layers to sync and update amax scale histories.
             Users can use get_float8_layers to get all fp8 layers.
@@ -163,7 +169,7 @@ def sync_float8_amax_and_scale_history(
     # make the history update faster.
 
     if fp8_layers is None:
-        fp8_layers = get_float8_layers(model, fp8_classes)
+        fp8_layers = get_float8_layers(model)
 
     if dist.is_initialized():
         fp8_amax_x_tensor = torch.tensor(
@@ -237,5 +243,6 @@ def sync_float8_amax_and_scale_history(
 
         #
         # 4. set a flag to signal amaxes/scales are ready
-        #
-        child.amax_and_scale_synced = True
+        # We only update the flag if we know it will be checked by the modules
+        if fp8_config.enable_amax_init:
+            child.amax_and_scale_synced = True
