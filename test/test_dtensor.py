@@ -12,12 +12,11 @@ import os
 
 import torch
 import torch.nn as nn
-from torch.distributed.device_mesh import init_device_mesh, DeviceMesh
-from torch.distributed._tensor import DTensor, Shard, Replicate
-
 
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
+from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 
 def setup_distributed():
@@ -86,6 +85,7 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     # after allgather the out shape should be replicate
     assert out_local.shape == (size * world_size, size)
     from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
     if isinstance(out_local, AsyncCollectiveTensor):
         out_local = out_local.wait()
 
