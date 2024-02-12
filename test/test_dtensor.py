@@ -12,8 +12,6 @@ import os
 
 import torch
 import torch.nn as nn
-from torch.distributed.device_mesh import init_device_mesh, DeviceMesh
-from torch.distributed._tensor import DTensor, distribute_tensor, Shard, Replicate
 
 # from fairscale.nn.model_parallel.layers import ColumnParallelLinear, RowParallelLinear
 
@@ -22,6 +20,8 @@ from float8_experimental.distributed_utils import _AllGatherFwSplitBw
 from float8_experimental.float8_python_api import mm_float8
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error, tensor_to_scale
+from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 
 def setup_distributed():
