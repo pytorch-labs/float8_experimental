@@ -23,7 +23,7 @@ EPS = 1e-12
 
 @torch.no_grad()
 def amax_to_scale(amax, float8_dtype, orig_dtype):
-    scale = torch.empty((1,), device=amax.device, dtype=torch.float32)
+    scale = torch.empty_like(amax, dtype=torch.float32)
     if float8_dtype == torch.float8_e4m3fn:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     else:  # e5m2
@@ -49,6 +49,22 @@ def amax_history_to_scale(
         amax = torch.max(amax_history)
         return amax_to_scale(amax, float8_dtype, orig_dtype)
     raise NotImplementedError()
+
+
+@torch.no_grad()
+def amax_history_to_scale_stack(
+    amax_history: torch.Tensor,
+    float8_dtype: torch.dtype,
+    orig_dtype: torch.dtype,
+    history_to_scale_fn_type: str,
+) -> torch.Tensor:
+    """Takes in a stack of amax_history tensors and returns a scale tensor."""
+    if history_to_scale_fn_type == "max":
+        amax_stack = torch.max(amax_history, dim=1).values
+        return amax_to_scale(amax_stack, float8_dtype, orig_dtype)
+    raise NotImplementedError(
+        "Invalid history_to_scale_fn_type, only 'max' is supported."
+    )
 
 
 @torch.no_grad()

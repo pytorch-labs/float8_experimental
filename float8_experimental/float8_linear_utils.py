@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
+import logging
 from enum import auto, Enum
 from typing import List, Optional, Type
 
@@ -15,7 +16,10 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import amax_history_to_scale
+from float8_experimental.float8_utils import amax_history_to_scale_stack
+
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 
 class LinearType(Enum):
@@ -67,6 +71,26 @@ def _update_history_with_new_amax(new_amax, amax_history):
     new_amax_history = torch.roll(amax_history, 1)
     new_amax_history[0] = new_amax
     amax_history.copy_(new_amax_history)
+
+
+def _update_history_stack(
+    new_amax: torch.Tensor, amax_history_stack: torch.Tensor
+) -> torch.Tensor:
+    """
+    Updates `amax_history` (the last N cur_amax values) inplace with the value
+    of `new_amax`.
+
+    Args:
+        new_amax (torch.Tensor): The new amax value to add to the history. (n_amaxes, 1)
+        amax_history_stack (torch.Tensor): The history of amax values. (n_amaxes, history_length)
+    """
+    assert amax_history_stack.dim() == 2, "amax_history_stack must be 2D"
+    assert new_amax.size(0) == amax_history_stack.size(
+        0
+    ), "new_amax must have the same size as the second dimension of amax_history_stack"
+    new_amax_history_stack = torch.roll(amax_history_stack, 1, dims=1)
+    new_amax_history_stack[:, 0] = new_amax.squeeze(-1)
+    amax_history_stack.copy_(new_amax_history_stack)
 
 
 def swap_linear_with_float8_linear(
@@ -162,84 +186,89 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             and we loop over all fp8_layers to sync and update amax scale histories.
             Users can use get_float8_layers to get all fp8 layers.
     """
-
-    # For now, this is written in a naive way to maximize code readability.
-    # TODO(future): benchmark and optimize as needed, we have combined all
-    # the reductions into one and we can probably try other optimizatons to
-    # make the history update faster.
-
     if fp8_layers is None:
         fp8_layers = get_float8_layers(model)
 
+    if len(fp8_layers) == 0:
+        log.warn(
+            "Calling sync_float8_amax_and_scale_history on a module with no Float8Linear layers"
+        )
+        return
+
+    fp8_amax_x_tensor_list = [child.fp8_amax_x for child in fp8_layers]
+    fp8_amax_w_tensor_list = [child.fp8_amax_w for child in fp8_layers]
+    fp8_amax_dL_dY_tensor_list = [child.fp8_amax_dL_dY for child in fp8_layers]
+
+    assert (
+        len(fp8_amax_x_tensor_list)
+        == len(fp8_amax_w_tensor_list)
+        == len(fp8_amax_dL_dY_tensor_list)
+    ), "Mismatched lengths of amax tensors."
+
     if dist.is_initialized():
-        fp8_amax_x_tensors = [child.fp8_amax_x for child in fp8_layers]
-        fp8_amax_w_tensors = [child.fp8_amax_w for child in fp8_layers]
-        fp8_amax_dL_dY_tensors = [child.fp8_amax_dL_dY for child in fp8_layers]
+        # Combine all the amax tensors into one tensor and reduce it
+        fp8_amax_x_tensor = torch.cat(fp8_amax_x_tensor_list)
+        fp8_amax_w_tensor = torch.cat(fp8_amax_w_tensor_list)
+        fp8_amax_dL_dY_tensor = torch.cat(fp8_amax_dL_dY_tensor_list)
 
-        assert (
-            len(fp8_amax_x_tensors)
-            == len(fp8_amax_w_tensors)
-            == len(fp8_amax_dL_dY_tensors)
-        ), "Mismatched lengths of amax tensors."
-        if len(fp8_amax_x_tensors) > 0:
-            # Combine all the amax tensors into one tensor and reduce it
-            fp8_amax_x_tensor = torch.cat(fp8_amax_x_tensors)
-            fp8_amax_w_tensor = torch.cat(fp8_amax_w_tensors)
-            fp8_amax_dL_dY_tensor = torch.cat(fp8_amax_dL_dY_tensors)
+        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
+        dist.all_reduce(fp8_amax_w_tensor, op=dist.ReduceOp.MAX)
+        dist.all_reduce(fp8_amax_dL_dY_tensor, op=dist.ReduceOp.MAX)
 
-            dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
-            dist.all_reduce(fp8_amax_w_tensor, op=dist.ReduceOp.MAX)
-            dist.all_reduce(fp8_amax_dL_dY_tensor, op=dist.ReduceOp.MAX)
+        # Reassign the reduced amax values to the original tensors
+        for idx in range(len(fp8_layers)):
+            child = fp8_layers[idx]
+            # Do we need this extra clone?
+            child.fp8_amax_x.copy_(fp8_amax_x_tensor[idx].clone())
+            child.fp8_amax_w.copy_(fp8_amax_w_tensor[idx].clone())
+            child.fp8_amax_dL_dY.copy_(fp8_amax_dL_dY_tensor[idx].clone())
 
-            # Reassign the reduced amax values to the original tensors
+    # We create two stacked tensors, one for the amax history and one for the current scales
+    fp8_amax_x_tensors = torch.vstack(fp8_amax_x_tensor_list)
+    fp8_amax_w_tensors = torch.vstack(fp8_amax_w_tensor_list)
+    fp8_amax_dL_dY_tensors = torch.vstack(fp8_amax_dL_dY_tensor_list)
 
-            for idx in range(len(fp8_layers)):
-                child = fp8_layers[idx]
-                child.fp8_amax_x.copy_(fp8_amax_x_tensor[idx].clone())
-                child.fp8_amax_w.copy_(fp8_amax_w_tensor[idx].clone())
-                child.fp8_amax_dL_dY.copy_(fp8_amax_dL_dY_tensor[idx].clone())
+    fp8_x_amax_history_stack = torch.stack(
+        [child.fp8_amax_history_x for child in fp8_layers]
+    )
+    fp8_w_amax_history_stack = torch.stack(
+        [child.fp8_amax_history_w for child in fp8_layers]
+    )
+    fp8_dL_dY_amax_history_stack = torch.stack(
+        [child.fp8_amax_history_dL_dY for child in fp8_layers]
+    )
 
-    # Itearte over all the layers and update the amax history and scales
+    _update_history_stack(fp8_amax_x_tensors, fp8_x_amax_history_stack)
+    _update_history_stack(fp8_amax_w_tensors, fp8_w_amax_history_stack)
+    _update_history_stack(fp8_amax_dL_dY_tensors, fp8_dL_dY_amax_history_stack)
+
+    # TODO This way to get the activation dtype is not ideal
+    x_dtypes = {child.last_seen_input_dtype for child in fp8_layers}
+    assert len(x_dtypes) == 1, "All layers must have the same last seen input_dtype"
+    x_dtype = next(iter(x_dtypes))
+
+    scale_fn_recipes = {child.recipe.scale_fn_name for child in fp8_layers}
+    assert len(scale_fn_recipes) == 1, "All layers must have the same scale_fn recipe"
+    scale_fn_recipe = next(iter(scale_fn_recipes))
+
+    # We are not reading the
+    new_x_scales = amax_history_to_scale_stack(
+        fp8_x_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+    )
+    new_w_scales = amax_history_to_scale_stack(
+        fp8_w_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+    )
+    new_dL_dY_scales = amax_history_to_scale_stack(
+        fp8_dL_dY_amax_history_stack, torch.float8_e5m2, x_dtype, scale_fn_recipe
+    )
+
+    # Iterate through the layers and update the scales, and set the flag to signal that the amaxes/scales are ready
     for idx in range(len(fp8_layers)):
         child = fp8_layers[idx]
+        child.fp8_scale_x.copy_(new_x_scales[idx])
+        child.fp8_scale_w.copy_(new_w_scales[idx])
+        child.fp8_scale_dL_dY.copy_(new_dL_dY_scales[idx])
 
-        #
-        # 2. adds the `amax` values to history
-        #
-        _update_history_with_new_amax(child.fp8_amax_x, child.fp8_amax_history_x)
-        _update_history_with_new_amax(child.fp8_amax_w, child.fp8_amax_history_w)
-        _update_history_with_new_amax(
-            child.fp8_amax_dL_dY, child.fp8_amax_history_dL_dY
-        )
-
-        #
-        # 3. calculate the scales
-        #
-        # TODO what to do with x_dtype
-        x_dtype = child.last_seen_input_dtype
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_x,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_x.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_w,
-            torch.float8_e4m3fn,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_w.copy_(new_scale)
-        new_scale = amax_history_to_scale(
-            child.fp8_amax_history_dL_dY,
-            torch.float8_e5m2,
-            x_dtype,
-            child.recipe.scale_fn_name,
-        )
-        child.fp8_scale_dL_dY.copy_(new_scale)
-
-        #
         # 4. set a flag to signal amaxes/scales are ready
         # We only update the flag if we know it will be checked by the modules
         if fp8_config.enable_amax_init:
