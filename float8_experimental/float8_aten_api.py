@@ -10,12 +10,7 @@ are emulated. In the future, they should be calling NVIDIA's float8 kernels.
 
 import torch
 
-from float8_experimental.float8_utils import (
-    E4M3_MAX_POS,
-    E5M2_MAX_POS,
-    tensor_to_amax,
-    to_fp8_saturated,
-)
+from float8_experimental.float8_utils import tensor_to_amax
 from torch.library import Library
 
 
