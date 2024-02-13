@@ -245,6 +245,8 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             reduced_fp8_amax_w_tensor,
             reduced_fp8_amax_dL_dY_tensor,
         ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
+
+        # TODO foreach is not supported with AsyncCollectiveTensor
         for idx, child in enumerate(fp8_layers):
             child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
             child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
