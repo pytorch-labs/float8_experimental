@@ -234,15 +234,17 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
 
     if dist.is_initialized():
         # Combine all the amax tensors into one tensor and reduce it
-        fp8_amax_x_tensor = torch.cat(fp8_amax_x_tensor_list)
-        fp8_amax_w_tensor = torch.cat(fp8_amax_w_tensor_list)
-        fp8_amax_dL_dY_tensor = torch.cat(fp8_amax_dL_dY_tensor_list)
-
-        reduced_fp8_amax_tensor = all_reduce(fp8_amax_x_tensor, "MAX", _get_default_group())
-        reduced_fp8_amax_w_tensor = all_reduce(fp8_amax_w_tensor, "MAX", _get_default_group())
-        reduced_fp8_amax_dL_dY_tensor = all_reduce(fp8_amax_dL_dY_tensor, "MAX", _get_default_group())
-
-        # Reassign the reduced amax values to the original tensors
+        all_amax_tensors = torch.cat(
+            fp8_amax_x_tensor_list + fp8_amax_w_tensor_list + fp8_amax_dL_dY_tensor_list
+        )
+        all_reduced_amax_tensor = all_reduce(
+            all_amax_tensors, "MAX", _get_default_group()
+        )
+        (
+            reduced_fp8_amax_tensor,
+            reduced_fp8_amax_w_tensor,
+            reduced_fp8_amax_dL_dY_tensor,
+        ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
         for idx, child in enumerate(fp8_layers):
             child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
             child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
