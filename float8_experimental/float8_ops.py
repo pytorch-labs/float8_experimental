@@ -149,10 +149,12 @@ def allgather_fp8(aten_op, args, kwargs=None):
     override funcol with FP8 handling
     """
     fp8_input = args[0]
-    assert isinstance(fp8_input, Float8Tensor)
+    assert isinstance(
+        fp8_input, Float8Tensor
+    ), f"expecting a Float8Tensor for allgather but found {type(fp8_input)}"
 
     fp8_data = fp8_input._data
-    fp8_data = fp8_data.view(torch.int8)
+    fp8_data = fp8_data.view(torch.uint8)
     fp8_data = fp8_data.contiguous()
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     fp8_out = fp8_out.view(fp8_input._data.dtype)

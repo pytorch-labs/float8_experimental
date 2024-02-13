@@ -7,7 +7,6 @@
 Test numerics of manually defined float16 TP vs float8 TP of toy models
 """
 
-import copy
 import os
 
 import torch
