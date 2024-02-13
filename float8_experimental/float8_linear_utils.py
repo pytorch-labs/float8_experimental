@@ -172,38 +172,36 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         fp8_layers = get_float8_layers(model)
 
     if dist.is_initialized():
-        fp8_amax_x_tensor = torch.tensor(
-            [child.fp8_amax_x for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        fp8_amax_w_tensor = torch.tensor(
-            [child.fp8_amax_w for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        fp8_amax_dL_dY_tensor = torch.tensor(
-            [child.fp8_amax_dL_dY for child in fp8_layers],
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=False,
-        )
-        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_w_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_dL_dY_tensor, op=dist.ReduceOp.MAX)
+        fp8_amax_x_tensors = [child.fp8_amax_x for child in fp8_layers]
+        fp8_amax_w_tensors = [child.fp8_amax_w for child in fp8_layers]
+        fp8_amax_dL_dY_tensors = [child.fp8_amax_dL_dY for child in fp8_layers]
 
+        assert (
+            len(fp8_amax_x_tensors)
+            == len(fp8_amax_w_tensors)
+            == len(fp8_amax_dL_dY_tensors)
+        ), "Mismatched lengths of amax tensors."
+        if len(fp8_amax_x_tensors) > 0:
+            # Combine all the amax tensors into one tensor and reduce it
+            fp8_amax_x_tensor = torch.cat(fp8_amax_x_tensors)
+            fp8_amax_w_tensor = torch.cat(fp8_amax_w_tensors)
+            fp8_amax_dL_dY_tensor = torch.cat(fp8_amax_dL_dY_tensors)
+
+            dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
+            dist.all_reduce(fp8_amax_w_tensor, op=dist.ReduceOp.MAX)
+            dist.all_reduce(fp8_amax_dL_dY_tensor, op=dist.ReduceOp.MAX)
+
+            # Reassign the reduced amax values to the original tensors
+
+            for idx in range(len(fp8_layers)):
+                child = fp8_layers[idx]
+                child.fp8_amax_x.copy_(fp8_amax_x_tensor[idx].clone())
+                child.fp8_amax_w.copy_(fp8_amax_w_tensor[idx].clone())
+                child.fp8_amax_dL_dY.copy_(fp8_amax_dL_dY_tensor[idx].clone())
+
+    # Itearte over all the layers and update the amax history and scales
     for idx in range(len(fp8_layers)):
         child = fp8_layers[idx]
-
-        #
-        # 1. in distributed contexts, syncs amax values across workers
-        #
-        if dist.is_initialized():
-            child.fp8_amax_x = fp8_amax_x_tensor[idx].clone()
-            child.fp8_amax_w = fp8_amax_w_tensor[idx].clone()
-            child.fp8_amax_dL_dY = fp8_amax_dL_dY_tensor[idx].clone()
 
         #
         # 2. adds the `amax` values to history
