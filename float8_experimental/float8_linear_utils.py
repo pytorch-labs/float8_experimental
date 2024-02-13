@@ -17,6 +17,8 @@ from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import amax_history_to_scale_stack
+from torch.distributed._functional_collectives import all_reduce
+from torch.distributed.distributed_c10d import _get_default_group
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
@@ -236,15 +238,15 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         fp8_amax_w_tensor = torch.cat(fp8_amax_w_tensor_list)
         fp8_amax_dL_dY_tensor = torch.cat(fp8_amax_dL_dY_tensor_list)
 
-        dist.all_reduce(fp8_amax_x_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_w_tensor, op=dist.ReduceOp.MAX)
-        dist.all_reduce(fp8_amax_dL_dY_tensor, op=dist.ReduceOp.MAX)
+        reduced_fp8_amax_tensor = all_reduce(fp8_amax_x_tensor, "MAX", _get_default_group())
+        reduced_fp8_amax_w_tensor = all_reduce(fp8_amax_w_tensor, "MAX", _get_default_group())
+        reduced_fp8_amax_dL_dY_tensor = all_reduce(fp8_amax_dL_dY_tensor, "MAX", _get_default_group())
 
         # Reassign the reduced amax values to the original tensors
         for idx, child in enumerate(fp8_layers):
-            child.fp8_amax_x.copy_(fp8_amax_x_tensor[idx])
-            child.fp8_amax_w.copy_(fp8_amax_w_tensor[idx])
-            child.fp8_amax_dL_dY.copy_(fp8_amax_dL_dY_tensor[idx])
+            child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
+            child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
+            child.fp8_amax_dL_dY.copy_(reduced_fp8_amax_dL_dY_tensor[idx])
 
     # We create two stacked tensors, one for the amax history and one for the current scales
     fp8_amax_x_tensors = torch.vstack(fp8_amax_x_tensor_list)
