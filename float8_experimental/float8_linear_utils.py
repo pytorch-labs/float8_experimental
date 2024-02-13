@@ -103,6 +103,7 @@ def swap_linear_with_float8_linear(
     def post_order_traversal(
         module: nn.Module, module_name: str, parent_module: Optional[nn.Module]
     ):
+        nonlocal visited_modules
         for child_module_name, child_module in module.named_children():
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
@@ -114,6 +115,9 @@ def swap_linear_with_float8_linear(
             setattr(parent_module, module_name, module_cls.from_float(module, emulate))
 
     post_order_traversal(root_module, "", None)
+    # Without this explicit `del`, this set only gets deleted upon an explicit
+    # garbage collection (not from when its refcount hits zero)
+    del visited_modules
     return root_module
 
 
