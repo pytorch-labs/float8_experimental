@@ -196,25 +196,25 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         return
 
     # Loop over all fp8 layers and grab the needed tensors
-    fp8_amax_x_tensor_list = []
-    fp8_amax_w_tensor_list = []
-    fp8_amax_dL_dY_tensor_list = []
+    fp8_amax_x_tensor_list = [None] * len(fp8_layers)
+    fp8_amax_w_tensor_list = [None] * len(fp8_layers)
+    fp8_amax_dL_dY_tensor_list = [None] * len(fp8_layers)
 
-    fp8_x_amax_history_stack = []
-    fp8_w_amax_history_stack = []
-    fp8_dL_dY_amax_history_stack = []
+    fp8_x_amax_history_stack = [None] * len(fp8_layers)
+    fp8_w_amax_history_stack = [None] * len(fp8_layers)
+    fp8_dL_dY_amax_history_stack = [None] * len(fp8_layers)
 
     x_dtypes = set()
     scale_fn_recipes = set()
 
-    for child in fp8_layers:
-        fp8_amax_x_tensor_list.append(child.fp8_amax_x)
-        fp8_amax_w_tensor_list.append(child.fp8_amax_w)
-        fp8_amax_dL_dY_tensor_list.append(child.fp8_amax_dL_dY)
+    for idx, child in enumerate(fp8_layers):
+        fp8_amax_x_tensor_list[idx] = child.fp8_amax_x
+        fp8_amax_w_tensor_list[idx] = child.fp8_amax_w
+        fp8_amax_dL_dY_tensor_list[idx] = child.fp8_amax_dL_dY
 
-        fp8_x_amax_history_stack.append(child.fp8_amax_history_x)
-        fp8_w_amax_history_stack.append(child.fp8_amax_history_w)
-        fp8_dL_dY_amax_history_stack.append(child.fp8_amax_history_dL_dY)
+        fp8_x_amax_history_stack[idx] = child.fp8_amax_history_x
+        fp8_w_amax_history_stack[idx] = child.fp8_amax_history_w
+        fp8_dL_dY_amax_history_stack[idx] = child.fp8_amax_history_dL_dY
 
         x_dtypes.add(child.last_seen_input_dtype)
         scale_fn_recipes.add(child.recipe.scale_fn_name)
