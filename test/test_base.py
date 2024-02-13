@@ -3,22 +3,22 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-import copy
 import itertools
 import random
 import unittest
 import warnings
-from enum import Enum
 
 import pytest
 
 import torch
 import torch.nn as nn
+from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     get_float8_linear,
     linear_requires_sync,
     LinearType,
+    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_python_api import mm_float8
@@ -343,6 +343,71 @@ class TestNumerics:
         x = torch.tensor([target_amax], dtype=torch.float16, device="cuda")
         scale = tensor_to_scale(x, float8_dtype)
         assert not torch.any(torch.isinf(scale))
+
+
+class TestFloat8LinearUtils(unittest.TestCase):
+    def test_swap_root_linear(self):
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            module = nn.Linear(3, 3)
+            module = swap_linear_with_float8_linear(module, module_cls, emulate)
+            self.assertIsInstance(module, module_cls)
+            self.assertEqual(module.emulate, emulate)
+
+    def test_swap_root_linear_with_children_raises(self):
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            module = nn.Linear(3, 3)
+            module.child = nn.Sequential(nn.Linear(3, 3))
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Does not support a root nn.Linear with children",
+            ):
+                swap_linear_with_float8_linear(module, module_cls, emulate)
+
+    def test_swap_submodule_linears(self):
+        class MLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.lin1 = nn.Linear(dim, 4 * dim)
+                self.lin2 = nn.Linear(4 * dim, dim)
+
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
+            model = swap_linear_with_float8_linear(model, module_cls, emulate)
+            self.assertIsInstance(model[0].lin1, module_cls)
+            self.assertIsInstance(model[0].lin2, module_cls)
+            self.assertIsInstance(model[1], module_cls)
+            self.assertIsInstance(model[2].lin1, module_cls)
+            self.assertIsInstance(model[2].lin2, module_cls)
+
+    def test_swap_submodule_linears_with_skip(self):
+        class MLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.lin1 = nn.Linear(dim, 4 * dim)
+                self.lin2 = nn.Linear(4 * dim, dim)
+
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
+            skip_fqn_list = ["2", "0.lin2"]
+            model = swap_linear_with_float8_linear(
+                model, module_cls, emulate, skip_fqn_list
+            )
+            self.assertIsInstance(model[0].lin1, module_cls)
+            self.assertNotIsInstance(model[0].lin2, module_cls)
+            self.assertIsInstance(model[0].lin2, nn.Linear)
+            self.assertIsInstance(model[1], module_cls)
+            self.assertNotIsInstance(model[2].lin2, module_cls)
+            self.assertNotIsInstance(model[2].lin2, module_cls)
+            self.assertIsInstance(model[2].lin1, nn.Linear)
+            self.assertIsInstance(model[2].lin2, nn.Linear)
 
 
 if __name__ == "__main__":
