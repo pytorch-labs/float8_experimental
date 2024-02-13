@@ -6,12 +6,10 @@
 """
 A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
-
-import float8_experimental.config as config
 import torch
 
 from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
-from float8_experimental.float8_utils import tensor_to_scale, to_fp8_saturated
+from float8_experimental.float8_utils import tensor_to_scale
 
 
 @torch._dynamo.allow_in_graph
