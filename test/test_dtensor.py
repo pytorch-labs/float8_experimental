@@ -58,9 +58,9 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         assert isinstance(dist_y_fp8.to_local(), Float8Tensor)
         assert dist_x_fp8.to_local()._orig_dtype == torch.float32
         out_fp8 = torch.mm(dist_x_fp8, dist_y_fp8)
+        local_fp8_out = out_fp8.to_local()
         assert out_fp8.shape == expected_dt_out_shape[idx], (idx, local_fp8_out.shape)
 
-        local_fp8_out = out_fp8.to_local()
         # after mm the out dtype should be fp32
         assert local_fp8_out.dtype == torch.float32
 
