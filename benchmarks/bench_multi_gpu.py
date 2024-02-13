@@ -5,8 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-import warnings
-from typing import Callable, List, Optional, Tuple
+from typing import Callable
 
 import fire
 
@@ -20,11 +19,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from torch.distributed.fsdp import (
-    FullStateDictConfig,
-    FullyShardedDataParallel as FSDP,
-    StateDictType,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 torch.manual_seed(0)
