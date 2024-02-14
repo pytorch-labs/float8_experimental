@@ -162,6 +162,7 @@ def get_float8_layers(model: torch.nn.Module):
     return fp8_layers
 
 
+@torch.no_grad()
 def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) -> None:
     """
     Manages the float8 amax and scale bookkeeping. In detail, it does the
