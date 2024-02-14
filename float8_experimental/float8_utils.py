@@ -63,7 +63,7 @@ def amax_history_to_scale_stack(
         amax_stack = torch.max(amax_history, dim=1).values
         return amax_to_scale(amax_stack, float8_dtype, orig_dtype)
     raise NotImplementedError(
-        "Invalid history_to_scale_fn_type, only 'max' is supported."
+        f"Invalid history_to_scale_fn_type, only 'max' is supported. Got: {history_to_scale_fn_type}"
     )
 
 
