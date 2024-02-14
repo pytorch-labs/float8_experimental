@@ -210,10 +210,16 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         scale_fn_recipes.add(child.recipe.scale_fn_name)
 
     # TODO This way to get the activation dtype is not ideal
-    assert len(x_dtypes) == 1, "All layers must have the same last seen input_dtype"
+    if len(x_dtypes) != 1:
+        raise ValueError(
+            f"All layers must have the same last seen input_dtype, got {x_dtypes}"
+        )
     x_dtype = next(iter(x_dtypes))
 
-    assert len(scale_fn_recipes) == 1, "All layers must have the same scale_fn recipe"
+    if len(scale_fn_recipes) != 1:
+        raise ValueError(
+            f"All layers must have the same scale_fn recipe, got {scale_fn_recipes}"
+        )
     scale_fn_recipe = next(iter(scale_fn_recipes))
 
     assert (
