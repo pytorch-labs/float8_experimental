@@ -266,6 +266,8 @@ class Float8LinearMixin(object):
             self.is_amax_initialized
             and (not self.amax_and_scale_synced)
             and torch.is_grad_enabled()
+            # Skip if running in backward from activation checkpointing
+            and torch._C._current_graph_task_id() == -1
         ):
             raise AssertionError(
                 "amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward"
