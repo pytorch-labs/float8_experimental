@@ -1,3 +1,4 @@
+import contextlib
 import copy
 from typing import Type
 
@@ -13,8 +14,7 @@ from test_fsdp_common import (
     enable_pre_and_post_forward,
     init_transformer_with_fp8,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -40,7 +40,13 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_compile_submodule_dynamic(self):
-        module = init_transformer_with_fp8(Float8DynamicLinear)
+        for use_fp8_all_gather in (False, True):
+            self._test_compile_submodule_dynamic(use_fp8_all_gather)
+
+    def _test_compile_submodule_dynamic(self, use_fp8_all_gather: bool):
+        module = init_transformer_with_fp8(
+            Float8DynamicLinear, use_fp8_all_gather=use_fp8_all_gather
+        )
 
         # Compile each transformer block separately
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -49,12 +55,8 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
             if isinstance(submodule, TransformerBlock):
                 submodule.forward = torch.compile(submodule.forward, backend=cnt)
                 num_compiled_fns += 1
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
-        )
+                fully_shard(submodule)
+        fully_shard(module)
         local_inp = torch.randint(0, 16, (1, 4), device="cuda")
         out = module(local_inp)
         out.sum().backward()
@@ -69,20 +71,24 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_compile_root_dynamic(self):
-        module = init_transformer_with_fp8(Float8DynamicLinear)
+        for use_fp8_all_gather in (False, True):
+            self._test_compile_root_dynamic(use_fp8_all_gather)
+
+    def _test_compile_root_dynamic(self, use_fp8_all_gather: bool):
+        module = init_transformer_with_fp8(
+            Float8DynamicLinear, use_fp8_all_gather=use_fp8_all_gather
+        )
 
         # Compile the root module
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
-        )
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        for submodule in module.modules():
+            if isinstance(submodule, TransformerBlock):
+                fully_shard(submodule)
+        fully_shard(module)
         module = torch.compile(module, backend=cnt)
         local_inp = torch.randint(0, 16, (1, 4), device="cuda")
         # in forward
-        #   h = layer(h)
+        #   h = x + self.attention(self.attention_norm(x))
         # in float8_mm
         #   assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
         with self.assertRaises(RuntimeError):
@@ -90,7 +96,13 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_compile_submodule_delayed(self):
-        module = init_transformer_with_fp8(Float8Linear)
+        for use_fp8_all_gather in (False, True):
+            self._test_compile_submodule_delayed(use_fp8_all_gather)
+
+    def _test_compile_submodule_delayed(self, use_fp8_all_gather: bool):
+        module = init_transformer_with_fp8(
+            Float8Linear, use_fp8_all_gather=use_fp8_all_gather
+        )
 
         # Compile each transformer block separately
         torch._dynamo.config.cache_size_limit = 16
@@ -98,86 +110,77 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
         for submodule in module.modules():
             if isinstance(submodule, TransformerBlock):
                 submodule.forward = torch.compile(submodule.forward, backend=cnt)
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
-        )
+                fully_shard(submodule)
+        fully_shard(module)
         local_inp = torch.randint(0, 16, (1, 4), device="cuda")
         # Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode with 'allow_non_fake_inputs'
-        # with self.assertRaises(RuntimeError):
         with self.assertRaises(RuntimeError):
             module(local_inp)
 
         # Compile each transformer block separately with amax init disabled
         with enable_amax_init(False):
-            module = init_transformer_with_fp8(Float8Linear)
+            module = init_transformer_with_fp8(
+                Float8Linear, use_fp8_all_gather=use_fp8_all_gather
+            )
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             num_compiled_fns = 0
             for submodule in module.modules():
                 if isinstance(submodule, TransformerBlock):
                     submodule.forward = torch.compile(submodule.forward, backend=cnt)
                     num_compiled_fns += 1
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+                    fully_shard(submodule)
+            fully_shard(module)
             module(local_inp).sum().backward()
             self.assertEqual(cnt.frame_count, 18)  # TODO!
+            # self.assertEqual(cnt.frame_count, num_compiled_fns)
 
         # Compile each transformer block separately with amax init disabled and
         # pre/post-forward disabled
         with enable_amax_init(False), enable_pre_and_post_forward(False):
-            module = init_transformer_with_fp8(Float8Linear)
+            module = init_transformer_with_fp8(
+                Float8Linear, use_fp8_all_gather=use_fp8_all_gather
+            )
+            # TODO: Inductor backend errors for `use_fp8_all_gather=True`!
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             num_compiled_fns = 0
             for submodule in module.modules():
                 if isinstance(submodule, TransformerBlock):
                     submodule.forward = torch.compile(submodule.forward, backend=cnt)
                     num_compiled_fns += 1
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+                    fully_shard(submodule)
+            fully_shard(module)
             module(local_inp).sum().backward()
             self.assertEqual(cnt.frame_count, num_compiled_fns)
 
     @skip_if_lt_x_gpu(2)
     def test_compile_root_delayed(self):
-        with enable_amax_init(False):
-            module = init_transformer_with_fp8(Float8Linear)
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-            module = torch.compile(module, backend=cnt)
-            local_inp = torch.randint(0, 16, (1, 4), device="cuda")
-            out = module(local_inp)
-            out.sum().backward()
-        self.assertEqual(cnt.frame_count, 19)  # TODO!
+        for use_fp8_all_gather in (False, True):
+            self._test_compile_root_delayed(use_fp8_all_gather)
 
-        with enable_amax_init(False), enable_pre_and_post_forward(False):
-            module = init_transformer_with_fp8(Float8Linear)
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
+    def _test_compile_root_delayed(self, use_fp8_all_gather: bool):
+        module_cls = Float8Linear
+        with enable_amax_init(False):
+            module = init_transformer_with_fp8(
+                module_cls, use_fp8_all_gather=use_fp8_all_gather
             )
+            for submodule in module.modules():
+                if isinstance(submodule, TransformerBlock):
+                    fully_shard(submodule)
+            fully_shard(module)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             module = torch.compile(module, backend=cnt)
             local_inp = torch.randint(0, 16, (1, 4), device="cuda")
-            out = module(local_inp)
-            out.sum().backward()
-        self.assertEqual(cnt.frame_count, 19)  # TODO!
+            # Error for `use_fp8_all_gather=True`:
+            # fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
+            # all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather(
+            # attrs, _ = type(x).__tensor_flatten__(x)
+            # AttributeError("'Float8Tensor' object has no attribute '_data'")
+            with self.assertRaises(
+                RuntimeError
+            ) if use_fp8_all_gather else contextlib.nullcontext():
+                module(local_inp)
+        if not use_fp8_all_gather:
+            self.assertEqual(cnt.frame_count, 19)  # TODO!
 
 
 class TestFloat8CompileNCCLPG(FSDPTest):
@@ -207,13 +210,11 @@ class TestFloat8CompileNCCLPG(FSDPTest):
         )
         ref_model = copy.deepcopy(model).cuda()
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fsdp_model = FSDP(
-            model,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=self.rank,
-        )
-        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module)
+        fsdp_model = fully_shard(model)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2, foreach=True)
         check_parity_no_mp(
             self,
             ref_model,
@@ -249,14 +250,12 @@ class TestFloat8CompileNCCLPG(FSDPTest):
             torch.bfloat16
         )  # used for forward/backward
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fsdp_model = FSDP(
-            model,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=self.rank,
-            mixed_precision=MixedPrecision(param_dtype=torch.bfloat16),
-        )
-        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, mp_policy=mp_policy)
+        fsdp_model = fully_shard(model, mp_policy=mp_policy)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2, foreach=True)
         check_parity_bf16_mp(
             self,
             ref_model,

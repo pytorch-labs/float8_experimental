@@ -9,6 +9,6 @@ pytest test/test_compile.py
 ./test/test_fsdp.sh
 ./test/test_fsdp_compile.sh
 ./test/test_tp.sh
-pytest test/test_fsdp/test_flat_param_fsdp_compile.py
+pytest test/test_fsdp/*
 
 echo "all tests successful"

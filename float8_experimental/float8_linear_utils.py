@@ -74,6 +74,7 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     use_activation_hooks: bool = False,
+    use_fp8_all_gather: bool = False,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -86,6 +87,7 @@ def swap_linear_with_float8_linear(
             Linear submodules of these skipped modules will also be skipped.
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
         use_activation_hooks (bool): Whether to cast activations to fp8 using module hooks.
+        use_fp8_all_gather (bool): Whether to cast to fp8 before all-gather when using FSDP.
     """
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear):
@@ -94,7 +96,10 @@ def swap_linear_with_float8_linear(
                 f"Does not support a root nn.Linear with children: {module}"
             )
         return module_cls.from_float(
-            module, emulate=emulate, use_activation_hooks=use_activation_hooks
+            module,
+            emulate=emulate,
+            use_activation_hooks=use_activation_hooks,
+            use_fp8_all_gather=use_fp8_all_gather,
         )
 
     # Mark all modules to skip as visited
@@ -118,7 +123,10 @@ def swap_linear_with_float8_linear(
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
             float8linear_module = module_cls.from_float(
-                module, emulate=emulate, use_activation_hooks=use_activation_hooks
+                module,
+                emulate=emulate,
+                use_activation_hooks=use_activation_hooks,
+                use_fp8_all_gather=use_fp8_all_gather,
             )
             setattr(parent_module, module_name, float8linear_module)
 
