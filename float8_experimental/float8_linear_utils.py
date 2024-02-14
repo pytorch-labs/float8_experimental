@@ -17,8 +17,7 @@ from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import amax_history_to_scale_stack
-from torch.distributed._functional_collectives import all_reduce
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
@@ -238,8 +237,11 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             fp8_amax_x_tensor_list + fp8_amax_w_tensor_list + fp8_amax_dL_dY_tensor_list
         )
         all_reduced_amax_tensor = all_reduce(
-            all_amax_tensors, "MAX", _get_default_group()
+            all_amax_tensors, "MAX", list(range(dist.get_world_size()))
         )
+        if isinstance(all_reduced_amax_tensor, AsyncCollectiveTensor):
+            all_reduced_amax_tensor = all_reduced_amax_tensor.wait()
+
         (
             reduced_fp8_amax_tensor,
             reduced_fp8_amax_w_tensor,
