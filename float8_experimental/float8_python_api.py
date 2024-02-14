@@ -12,6 +12,8 @@ to simplify the product code.
 
 from typing import Optional, Tuple
 
+import float8_experimental.float8_aten_api  # noqa
+
 import torch
 from float8_experimental.float8_tensor import Float8Tensor
 
