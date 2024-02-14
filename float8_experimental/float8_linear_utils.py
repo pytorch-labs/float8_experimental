@@ -64,16 +64,6 @@ def linear_requires_sync(linear_type: LinearType):
     return linear_type in REQUIRES_SYNC
 
 
-def _update_history_with_new_amax(new_amax, amax_history):
-    """
-    Updates `amax_history` (the last N cur_amax values) inplace with the value
-    of `new_amax`.
-    """
-    new_amax_history = torch.roll(amax_history, 1)
-    new_amax_history[0] = new_amax
-    amax_history.copy_(new_amax_history)
-
-
 def _update_history_stack(
     new_amax: torch.Tensor, amax_history_stack: torch.Tensor
 ) -> torch.Tensor:
@@ -85,10 +75,12 @@ def _update_history_stack(
         new_amax (torch.Tensor): The new amax value to add to the history. (n_amaxes, 1)
         amax_history_stack (torch.Tensor): The history of amax values. (n_amaxes, history_length)
     """
-    assert amax_history_stack.dim() == 2, "amax_history_stack must be 2D"
+    assert (
+        amax_history_stack.dim() == 2
+    ), f"Expected amat_history_stack to be 2D, got {amax_history_stack.shape()}"
     assert new_amax.size(0) == amax_history_stack.size(
         0
-    ), "new_amax must have the same size as the second dimension of amax_history_stack"
+    ), f"Expected new_amax to have the same size as the first dimension of amax_history_stack, got {new_amax.size(0)} and {amax_history_stack.size(0)}"
     new_amax_history_stack = torch.roll(amax_history_stack, 1, dims=1)
     new_amax_history_stack[:, 0] = new_amax.squeeze(-1)
     amax_history_stack.copy_(new_amax_history_stack)
@@ -155,9 +147,7 @@ def get_float8_layers(model: torch.nn.Module):
     """
 
     # Get all fp8 layers and tensors
-    fp8_layers = [
-        child for _, child in model.named_modules() if isinstance(child, Float8Linear)
-    ]
+    fp8_layers = [child for child in model.modules() if isinstance(child, Float8Linear)]
 
     return fp8_layers
 
@@ -176,7 +166,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     TODO(future): design the UX for this (context manager, etc)
 
     PERFORMANCE NOTE:
-        When you can it is much more efficient to call te get_float8_layers once a
+        When you can, it is much more efficient to call get_float8_layers once at
         the beginning of the training loop and pass the result to this function.
         Because of how this interacts with torch.compile
 
@@ -249,13 +239,12 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             reduced_fp8_amax_dL_dY_tensor,
         ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
 
-        # TODO foreach is not supported with AsyncCollectiveTensor
         for idx, child in enumerate(fp8_layers):
             child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
             child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
             child.fp8_amax_dL_dY.copy_(reduced_fp8_amax_dL_dY_tensor[idx])
 
-    # We create two stacked tensors, one for the amax history and one for the current scales
+    # We create two stacked tensor groups, one for the amax history and one for the current scales
     fp8_amax_x_tensors = torch.vstack(fp8_amax_x_tensor_list)
     fp8_amax_w_tensors = torch.vstack(fp8_amax_w_tensor_list)
     fp8_amax_dL_dY_tensors = torch.vstack(fp8_amax_dL_dY_tensor_list)
@@ -264,11 +253,12 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     fp8_w_amax_history_stack = torch.vstack(fp8_w_amax_history_stack)
     fp8_dL_dY_amax_history_stack = torch.vstack(fp8_dL_dY_amax_history_stack)
 
+    # Update the history stacks with the new amax values
     _update_history_stack(fp8_amax_x_tensors, fp8_x_amax_history_stack)
     _update_history_stack(fp8_amax_w_tensors, fp8_w_amax_history_stack)
     _update_history_stack(fp8_amax_dL_dY_tensors, fp8_dL_dY_amax_history_stack)
 
-    # We are not reading the
+    # Calculate the new scales from the updated history stacks
     new_x_scales = amax_history_to_scale_stack(
         fp8_x_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
     )
