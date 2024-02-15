@@ -7,13 +7,16 @@
 A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
-from typing import Any, cast, Optional, Tuple, Union
+import functools
+from typing import Any, Callable, cast, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
 from float8_experimental.float8_utils import tensor_to_scale
+
+from torch.utils._pytree import tree_map
 
 
 @torch._dynamo.allow_in_graph
@@ -125,11 +128,13 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "bias": False,
             }
             new_mod = cls(use_activation_hooks, **super_kwargs)
-        new_mod.weight = (
-            nn.Parameter(Float8DynamicLinearWeightTensor(mod.weight))
-            if use_fp8_all_gather
-            else mod.weight
-        )
+        if use_fp8_all_gather:
+            cast_fn = new_mod.cast_to_float8_e4m3fn
+            new_mod.weight = nn.Parameter(
+                Float8DynamicLinearWeightTensor(mod.weight, cast_fn, emulate)
+            )
+        else:
+            new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
         if new_mod.use_activation_hooks:
@@ -142,12 +147,34 @@ class Float8DynamicLinear(torch.nn.Linear):
 
 
 class Float8DynamicLinearWeightTensor(torch.Tensor):
-    # TODO: Remove `module` arg, save state on subclass, and propagate it.
-    def fsdp_pre_all_gather(
-        self, module: nn.Module
-    ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
-        float8_tensor = module.cast_to_float8_e4m3fn(self, reduce_amax=True)
-        return (float8_tensor._data,), (float8_tensor._scale, module.emulate)
+    def __new__(cls, tensor: torch.Tensor, cast_fn: Callable, emulate: bool):
+        return cls._make_subclass(cls, tensor, tensor.requires_grad)
+
+    def __init__(self, tensor: torch.Tensor, cast_fn: Callable, emulate: bool):
+        super().__init__()
+        self.cast_fn = cast_fn
+        self.emulate = emulate
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        def wrap(cast_fn: Callable, emulate: bool, o: Any):
+            if isinstance(o, torch.Tensor) and not isinstance(o, cls):
+                return cls(o, cast_fn, emulate)
+            return o
+
+        with torch._C.DisableTorchFunctionSubclass():
+            if isinstance(args[0], cls):
+                out = func(*args, **kwargs)
+                return tree_map(
+                    functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
+                )
+            return func(*args, **kwargs)
+
+    def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        float8_tensor = self.cast_fn(self, reduce_amax=True)
+        return (float8_tensor._data,), (float8_tensor._scale,)
 
     def fsdp_post_all_gather(
         self,
@@ -157,8 +184,8 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         *,
         out: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
-        (data,) = all_gather_outputs
-        scale, emulate = metadata
+        data, = all_gather_outputs
+        scale, = metadata
         if out is not None:
             out = cast(Float8Tensor, out)
             assert (
@@ -167,4 +194,4 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
             )
             out._scale = scale
             return
-        return Float8Tensor(data, scale, param_dtype, emulate), (data,)
+        return Float8Tensor(data, scale, param_dtype, self.emulate), (data,)
