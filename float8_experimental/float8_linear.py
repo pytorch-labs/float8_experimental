@@ -138,23 +138,24 @@ class Float8LinearMixin(object):
         self.recipe = delayed_scaling_recipe
         history_len = self.recipe.history_len
 
-        self.register_always_float32_buffer("fp8_amax_x", torch.tensor(E4M3_MAX_POS))
+        self.register_always_float32_buffer("fp8_amax_x", torch.tensor([E4M3_MAX_POS]))
         self.register_always_float32_buffer(
             "fp8_amax_history_x", torch.zeros(history_len)
         )
-        self.register_always_float32_buffer("fp8_scale_x", torch.tensor(1.0))
-        self.register_always_float32_buffer("fp8_amax_w", torch.tensor(E4M3_MAX_POS))
+        self.register_always_float32_buffer("fp8_scale_x", torch.tensor([1.0]))
+        self.register_always_float32_buffer("fp8_amax_w", torch.tensor([E4M3_MAX_POS]))
         self.register_always_float32_buffer(
             "fp8_amax_history_w", torch.zeros(history_len)
         )
-        self.register_always_float32_buffer("fp8_scale_w", torch.tensor(1.0))
+        self.register_always_float32_buffer("fp8_scale_w", torch.tensor([1.0]))
         self.register_always_float32_buffer(
-            "fp8_amax_dL_dY", torch.tensor(E5M2_MAX_POS)
+            "fp8_amax_dL_dY", torch.tensor([E5M2_MAX_POS])
         )
         self.register_always_float32_buffer(
             "fp8_amax_history_dL_dY", torch.zeros(history_len)
         )
-        self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor(1.0))
+        self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
+
         # Whether to emulate the fp8 matmul logic in float32
         self.emulate = False
 
