@@ -184,8 +184,8 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         *,
         out: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
-        data, = all_gather_outputs
-        scale, = metadata
+        (data,) = all_gather_outputs
+        (scale,) = metadata
         if out is not None:
             out = cast(Float8Tensor, out)
             assert (

@@ -366,7 +366,9 @@ class Float8LinearWeightTensor(torch.Tensor):
         with torch._C.DisableTorchFunctionSubclass():
             if isinstance(args[0], cls):
                 out = func(*args, **kwargs)
-                return tree_map(functools.partial(wrap, args[0].cast_fn, args[0].emulate), out)
+                return tree_map(
+                    functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
+                )
             return func(*args, **kwargs)
 
     def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
@@ -381,8 +383,8 @@ class Float8LinearWeightTensor(torch.Tensor):
         *,
         out: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
-        data, = all_gather_outputs
-        scale, = metadata
+        (data,) = all_gather_outputs
+        (scale,) = metadata
         if out is not None:
             out = cast(Float8Tensor, out)
             assert (
