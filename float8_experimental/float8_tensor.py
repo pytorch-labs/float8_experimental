@@ -7,6 +7,7 @@ from typing import Dict
 
 import torch
 
+import float8_experimental.float8_aten_api  # noqa
 from float8_experimental.float8_utils import (
     tensor_to_amax,
     tensor_to_scale,
@@ -34,9 +35,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        tensor_scaled = tensor * scale
-        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-        return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
+        return torch.ops.aten.cast_to_float8_tensor(tensor, scale, float8_dtype, emulate=emulate)
 
     @staticmethod
     def backward(ctx, g):
@@ -174,22 +173,3 @@ class Float8Tensor(torch.Tensor):
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-
-def to_fp8_no_autograd(
-    x: torch.Tensor, float8_dtype: torch.dtype, emulate: bool
-) -> Float8Tensor:
-    """Convert a tensor to float8 without autograd
-    This is used in multiple places in the codebase to convert a tensor to float8
-
-    This function will calculate the scale, do the scaling, and then convert to a Float8Tensor
-    Args:
-        x: the tensor to convert
-        scale: the scale to use to convert the tensor
-        float8_dtype: the float8 dtype to use
-        emulate: whether to emulate the matmuls in fp32
-    """
-    x_scale = tensor_to_scale(x, float8_dtype)
-    x_scaled = x * x_scale
-    bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
-    return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)

@@ -8,7 +8,7 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 import torch
 
-from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
+from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
 
 
@@ -30,8 +30,9 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gradY):
-        fp8_tensor = to_fp8_no_autograd(gradY, torch.float8_e5m2, ctx.emulate)
-        return fp8_tensor, None
+        float8_dtype = torch.float8_e5m2
+        grady_scale = tensor_to_scale(gradY, float8_dtype)
+        return torch.ops.aten.cast_to_float8_tensor(gradY, grady_scale, float8_dtype, ctx.emulate), None
 
 
 def cast_x_to_float8_e4m3fn_pre_hook(module, args):
