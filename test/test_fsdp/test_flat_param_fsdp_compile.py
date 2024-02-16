@@ -1,25 +1,23 @@
-import copy
-from typing import Type
-
 import torch
 import torch._dynamo.testing
 import torch.distributed as dist
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from test_fsdp_common import (
-    check_parity_bf16_mp,
+    apply_fsdp,
     check_parity_no_mp,
     enable_amax_init,
     enable_pre_and_post_forward,
     init_transformer_with_fp8,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import TransformerBlock
 from torch.testing._internal.distributed.fake_pg import FakeStore
+
+# Increase cache size limit for running all unit tests together
+torch._dynamo.config.cache_size_limit = 16
 
 
 class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
@@ -40,22 +38,17 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_compile_submodule_dynamic(self):
-        module = init_transformer_with_fp8(Float8DynamicLinear)
+        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
 
-        # Compile each transformer block separately
+        # Compile each transformer block forward
+        module = init_transformer_with_fp8(Float8DynamicLinear)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         num_compiled_fns = 0
         for submodule in module.modules():
             if isinstance(submodule, TransformerBlock):
                 submodule.forward = torch.compile(submodule.forward, backend=cnt)
                 num_compiled_fns += 1
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
-        )
-        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
+        module = apply_fsdp(module)
         out = module(local_inp)
         out.sum().backward()
         self.assertEqual(cnt.frame_count, num_compiled_fns)
@@ -67,17 +60,25 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
         with self.assertRaises(RuntimeError):
             module(local_inp)
 
+        # Compile each transformer block module
+        module = init_transformer_with_fp8(Float8DynamicLinear)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        num_compiled_fns = 0
+        for submodule in module.modules():
+            if isinstance(submodule, TransformerBlock):
+                submodule.compile(backend=cnt)
+                num_compiled_fns += 1
+        module = apply_fsdp(module)
+        # in float8_mm
+        # assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
+        with self.assertRaises(RuntimeError):
+            module(local_inp)
+
     @skip_if_lt_x_gpu(2)
     def test_compile_root_dynamic(self):
-        module = init_transformer_with_fp8(Float8DynamicLinear)
-
         # Compile the root module
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
-        )
+        module = init_transformer_with_fp8(Float8DynamicLinear)
+        module = apply_fsdp(module)
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         module = torch.compile(module, backend=cnt)
         local_inp = torch.randint(0, 16, (1, 4), device="cuda")
@@ -90,27 +91,25 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_compile_submodule_delayed(self):
+        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
+
+        # Compile each transformer block forward
         module = init_transformer_with_fp8(Float8Linear)
 
-        # Compile each transformer block separately
-        torch._dynamo.config.cache_size_limit = 16
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         for submodule in module.modules():
             if isinstance(submodule, TransformerBlock):
                 submodule.forward = torch.compile(submodule.forward, backend=cnt)
-        module = FSDP(
-            module,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=dist.get_rank(),
+        module = apply_fsdp(module)
+        module(local_inp).sum().backward()
+        num_float8_linears = sum(
+            1 for m in module.modules() if isinstance(m, Float8Linear)
         )
-        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
-        # Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode with 'allow_non_fake_inputs'
-        # with self.assertRaises(RuntimeError):
-        with self.assertRaises(RuntimeError):
-            module(local_inp)
+        # TODO: We get one graph per `Float8Linear` in a transformer block
+        # (-1 because output projection is not compiled).
+        self.assertEqual(cnt.frame_count, num_float8_linears - 1)
 
-        # Compile each transformer block separately with amax init disabled
+        # Compile each transformer block forward with amax init disabled
         with enable_amax_init(False):
             module = init_transformer_with_fp8(Float8Linear)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -119,16 +118,16 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
                 if isinstance(submodule, TransformerBlock):
                     submodule.forward = torch.compile(submodule.forward, backend=cnt)
                     num_compiled_fns += 1
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+            module = apply_fsdp(module)
             module(local_inp).sum().backward()
-            self.assertEqual(cnt.frame_count, 18)  # TODO!
+            num_float8_linears = sum(
+                1 for m in module.modules() if isinstance(m, Float8Linear)
+            )
+            # TODO: We get one graph per `Float8Linear` in a transformer block
+            # (-1 because output projection is not compiled).
+            self.assertEqual(cnt.frame_count, num_float8_linears - 1)
 
-        # Compile each transformer block separately with amax init disabled and
+        # Compile each transformer block forward with amax init disabled and
         # pre/post-forward disabled
         with enable_amax_init(False), enable_pre_and_post_forward(False):
             module = init_transformer_with_fp8(Float8Linear)
@@ -138,46 +137,54 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
                 if isinstance(submodule, TransformerBlock):
                     submodule.forward = torch.compile(submodule.forward, backend=cnt)
                     num_compiled_fns += 1
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+            module = apply_fsdp(module)
             module(local_inp).sum().backward()
             self.assertEqual(cnt.frame_count, num_compiled_fns)
+
+        # Compile each transformer block module with amax init disabled and
+        # pre/post-forward disabled
+        with enable_amax_init(False), enable_pre_and_post_forward(False):
+            module = init_transformer_with_fp8(Float8Linear)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            for submodule in module.modules():
+                if isinstance(submodule, TransformerBlock):
+                    submodule.compile(backend=cnt)
+            module = apply_fsdp(module)
+            module(local_inp).sum().backward()
+            num_float8_linears = sum(
+                1 for m in module.modules() if isinstance(m, Float8Linear)
+            )
+            # TODO: We get one graph per `Float8Linear` in a transformer block
+            # (-1 because output projection is not compiled).
+            self.assertEqual(cnt.frame_count, num_float8_linears - 1)
 
     @skip_if_lt_x_gpu(2)
     def test_compile_root_delayed(self):
         with enable_amax_init(False):
             module = init_transformer_with_fp8(Float8Linear)
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+            module = apply_fsdp(module)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             module = torch.compile(module, backend=cnt)
             local_inp = torch.randint(0, 16, (1, 4), device="cuda")
             out = module(local_inp)
             out.sum().backward()
-        self.assertEqual(cnt.frame_count, 19)  # TODO!
+        num_float8_linears = sum(
+            1 for m in module.modules() if isinstance(m, Float8Linear)
+        )
+        self.assertEqual(cnt.frame_count, num_float8_linears)  # TODO!
 
         with enable_amax_init(False), enable_pre_and_post_forward(False):
             module = init_transformer_with_fp8(Float8Linear)
-            module = FSDP(
-                module,
-                auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-                use_orig_params=True,
-                device_id=dist.get_rank(),
-            )
+            module = apply_fsdp(module)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             module = torch.compile(module, backend=cnt)
             local_inp = torch.randint(0, 16, (1, 4), device="cuda")
             out = module(local_inp)
             out.sum().backward()
-        self.assertEqual(cnt.frame_count, 19)  # TODO!
+        num_float8_linears = sum(
+            1 for m in module.modules() if isinstance(m, Float8Linear)
+        )
+        self.assertEqual(cnt.frame_count, num_float8_linears)  # TODO!
 
 
 class TestFloat8CompileNCCLPG(FSDPTest):
@@ -186,87 +193,77 @@ class TestFloat8CompileNCCLPG(FSDPTest):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_transformer_parity_no_mp(self):
-        """
-        Test numeric parity against manual data parallelism without using
-        FSDP's mixed precision.
-        """
-        self.run_subtests(
-            {
-                "module_cls": [Float8Linear, Float8DynamicLinear],
-                "checkpoint_activations": [False, True],
-            },
-            self._test_transformer_parity_no_mp,
-        )
-
-    def _test_transformer_parity_no_mp(
-        self, module_cls: Type, checkpoint_activations: bool
-    ):
-        model = init_transformer_with_fp8(
-            module_cls, checkpoint_activations=checkpoint_activations
-        )
-        ref_model = copy.deepcopy(model).cuda()
+    def test_transformer_parity_delayed_no_mp(self):
+        module_cls, backend = Float8Linear, "inductor"
+        with enable_amax_init(False), enable_pre_and_post_forward(False):
+            model = init_transformer_with_fp8(module_cls)
+        with enable_amax_init(False):
+            ref_model = init_transformer_with_fp8(module_cls).cuda()
+        # NOTE: We compile the ref model in the same way as the FSDP model for
+        # numeric parity. Compiling the full ref model or running the full ref
+        # model in eager both show differences 5+ iterations in.
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                module.forward = torch.compile(module.forward, backend=backend)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fsdp_model = FSDP(
-            model,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=self.rank,
-        )
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        num_compiled_fns = 0
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                # TODO: For `Float8Linear`, compiling the module gives one
+                # graph per `Float8Linear` instead of per `TransformerBlock`.
+                module.forward = torch.compile(module.forward, backend=cnt)
+                num_compiled_fns += 1
+        fsdp_model = apply_fsdp(model)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
+
+        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
         check_parity_no_mp(
-            self,
-            ref_model,
-            ref_optim,
-            fsdp_model,
-            fsdp_optim,
-            torch.randint(0, 16, (1, 4), device="cuda"),
-            module_cls,
+            self, ref_model, ref_optim, fsdp_model, fsdp_optim, local_inp, module_cls
         )
+        self.assertEqual(cnt.frame_count, num_compiled_fns)
 
     @skip_if_lt_x_gpu(2)
-    def test_transformer_parity_bf16_mp(self):
-        """
-        Test numeric parity against manual data parallelism using FSDP's bf16
-        mixed precision.
-        """
+    def test_transformer_parity_dynamic_no_mp(self):
         self.run_subtests(
-            {
-                "module_cls": [Float8Linear, Float8DynamicLinear],
-                "checkpoint_activations": [False, True],
-            },
-            self._test_transformer_parity_bf16_mp,
+            {"use_activation_hooks": [False, True]},
+            self._test_transformer_parity_dynamic_no_mp,
         )
 
-    def _test_transformer_parity_bf16_mp(
-        self, module_cls: Type, checkpoint_activations: bool
-    ):
+    def _test_transformer_parity_dynamic_no_mp(self, use_activation_hooks: bool):
+        module_cls, backend = Float8DynamicLinear, "inductor"
         model = init_transformer_with_fp8(
-            module_cls, checkpoint_activations=checkpoint_activations
+            module_cls, use_activation_hooks=use_activation_hooks
         )
-        ref_model = copy.deepcopy(model).cuda()  # used for optimizer
-        ref_model_bf16 = copy.deepcopy(ref_model).to(
-            torch.bfloat16
-        )  # used for forward/backward
+        ref_model = init_transformer_with_fp8(
+            module_cls, use_activation_hooks=use_activation_hooks
+        ).cuda()
+        # NOTE: We compile the ref model in the same way as the FSDP model for
+        # numeric parity. Compiling the full ref model or running the full ref
+        # model in eager both show differences 5+ iterations in.
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                module.forward = torch.compile(module.forward, backend=backend)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        fsdp_model = FSDP(
-            model,
-            auto_wrap_policy=ModuleWrapPolicy({TransformerBlock}),
-            use_orig_params=True,
-            device_id=self.rank,
-            mixed_precision=MixedPrecision(param_dtype=torch.bfloat16),
-        )
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        num_compiled_fns = 0
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                # TODO: For `Float8DynamicLinear`, compiling the module errors
+                # for both using and not using activation hooks.
+                # in float8_mm
+                # assert isinstance(args[0], Float8Tensor) and isinstance(args[1], Float8Tensor)
+                # module.compile(backend=cnt)
+                module.forward = torch.compile(module.forward, backend=cnt)
+                num_compiled_fns += 1
+        fsdp_model = apply_fsdp(model)
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=1e-2)
-        check_parity_bf16_mp(
-            self,
-            ref_model,
-            ref_model_bf16,
-            ref_optim,
-            fsdp_model,
-            fsdp_optim,
-            torch.randint(0, 16, (1, 4), device="cuda"),
-            module_cls,
+
+        local_inp = torch.randint(0, 16, (1, 4), device="cuda")
+        check_parity_no_mp(
+            self, ref_model, ref_optim, fsdp_model, fsdp_optim, local_inp, module_cls
         )
+        self.assertEqual(cnt.frame_count, num_compiled_fns)
 
 
 if __name__ == "__main__":
