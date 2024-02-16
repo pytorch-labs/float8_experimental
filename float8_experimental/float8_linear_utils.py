@@ -281,7 +281,5 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         child.fp8_scale_w.copy_(new_w_scales[idx])
         child.fp8_scale_dL_dY.copy_(new_dL_dY_scales[idx])
 
-        # 4. set a flag to signal amaxes/scales are ready
-        # We only update the flag if we know it will be checked by the modules
-        if fp8_config.enable_amax_init:
-            child.amax_and_scale_synced = True
+        # Set a flag to signal amaxes/scales are ready
+        child.amax_and_scale_synced = True
