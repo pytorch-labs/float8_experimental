@@ -13,8 +13,9 @@ owners to implement their own UEX.
 """
 
 import dataclasses
+import functools
 
-from typing import Any, cast, Optional, Tuple, Union
+from typing import Any, Callable, cast, Optional, Tuple, Union
 
 import float8_experimental.config as config
 
@@ -29,6 +30,7 @@ from float8_experimental.float8_utils import (
     tensor_to_amax,
     to_fp8_saturated,
 )
+from torch.utils._pytree import tree_map
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -222,9 +224,7 @@ class Float8LinearMixin(object):
         )
         return x_fp8
 
-    def cast_w_to_float8(
-        self, w: torch.Tensor, is_amax_initialized: bool
-    ) -> torch.Tensor:
+    def cast_w_to_float8(self, w: torch.Tensor) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         _maybe_initialize_amaxes_scales_for_float8_cast(
             w,
@@ -233,7 +233,7 @@ class Float8LinearMixin(object):
             self.fp8_scale_w,
             scale_fn_name,
             torch.float8_e4m3fn,
-            is_amax_initialized,
+            self.is_amax_initialized,
         )
 
         w_fp8 = Float8Tensor.to_float8(
@@ -297,7 +297,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         w_fp8 = (
             self.weight
             if isinstance(self.weight, Float8Tensor)
-            else self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+            else self.cast_w_to_float8(self.weight)
         )
 
         y = torch.matmul(x_fp8, w_fp8.t())
@@ -333,7 +333,9 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         # with torch.device("meta"):
         new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = (
-            nn.Parameter(Float8LinearWeightTensor(mod.weight))
+            nn.Parameter(
+                Float8LinearWeightTensor(mod.weight, new_mod.cast_w_to_float8, emulate)
+            )
             if use_fp8_all_gather
             else mod.weight
         )
@@ -345,12 +347,34 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
 
 
 class Float8LinearWeightTensor(torch.Tensor):
-    # TODO: Remove `module` arg, save state on subclass, and propagate it.
-    def fsdp_pre_all_gather(
-        self, module: nn.Module
-    ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
-        float8_tensor = module.cast_w_to_float8(self, module.is_amax_initialized)
-        return (float8_tensor._data,), (float8_tensor._scale, module.emulate)
+    def __new__(cls, tensor: torch.Tensor, cast_fn: Callable, emulate: bool):
+        return cls._make_subclass(cls, tensor, tensor.requires_grad)
+
+    def __init__(self, tensor: torch.Tensor, cast_fn: Callable, emulate: bool):
+        super().__init__()
+        self.cast_fn = cast_fn
+        self.emulate = emulate
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        def wrap(cast_fn: Callable, emulate: bool, o: Any):
+            if isinstance(o, torch.Tensor) and not isinstance(o, cls):
+                return cls(o, cast_fn, emulate)
+            return o
+
+        with torch._C.DisableTorchFunctionSubclass():
+            if isinstance(args[0], cls):
+                out = func(*args, **kwargs)
+                return tree_map(
+                    functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
+                )
+            return func(*args, **kwargs)
+
+    def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        float8_tensor = self.cast_fn(self)
+        return (float8_tensor._data,), (float8_tensor._scale,)
 
     def fsdp_post_all_gather(
         self,
@@ -361,7 +385,7 @@ class Float8LinearWeightTensor(torch.Tensor):
         out: Optional[torch.Tensor] = None,
     ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
         (data,) = all_gather_outputs
-        scale, emulate = metadata
+        (scale,) = metadata
         if out is not None:
             out = cast(Float8Tensor, out)
             assert (
@@ -370,4 +394,4 @@ class Float8LinearWeightTensor(torch.Tensor):
             )
             out._scale = scale
             return
-        return Float8Tensor(data, scale, param_dtype, emulate), (data,)
+        return Float8Tensor(data, scale, param_dtype, self.emulate), (data,)
