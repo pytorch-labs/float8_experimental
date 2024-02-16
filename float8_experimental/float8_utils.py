@@ -77,7 +77,9 @@ def tensor_to_amax(x, distributed_reduction=False):
     if distributed_reduction and dist.is_initialized():
         # TODO: Dynamo rewriting synchronous in-place collectives does not work
         # at the moment. Use functional all-reduce to avoid graph break.
-        amax = dist._functional_collectives.all_reduce(amax, "MAX", list(range(dist.get_world_size())))
+        amax = dist._functional_collectives.all_reduce(
+            amax, "MAX", list(range(dist.get_world_size()))
+        )
         # dist.all_reduce(amax, op=dist.ReduceOp.MAX)
 
     return amax
