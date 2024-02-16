@@ -89,8 +89,10 @@ def _update_history_stack(
 def swap_linear_with_float8_linear(
     module: nn.Module,
     module_cls: Type[nn.Module],
-    emulate: bool = False,
+    *,
     skip_fqn_list: Optional[List[str]] = None,
+    emulate: bool = False,
+    use_activation_hooks: bool = False,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -99,9 +101,10 @@ def swap_linear_with_float8_linear(
     Args:
         module (torch.nn.Module): Module to modify.
         module_cls (Union[Type[Float8Linear], Type[Float8DynamicLinear]]): Float8 linear class for the swap.
-        emulate (bool, optional): Whether to emulate the fp8 matmul logic in fp32.
         skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
             Linear submodules of these skipped modules will also be skipped.
+        emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
+        use_activation_hooks (bool): Whether to cast activations to fp8 using module hooks.
     """
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear):
@@ -109,7 +112,9 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(module, emulate)
+        return module_cls.from_float(
+            module, emulate=emulate, use_activation_hooks=use_activation_hooks
+        )
 
     # Mark all modules to skip as visited
     root_module = module
@@ -131,7 +136,10 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            setattr(parent_module, module_name, module_cls.from_float(module, emulate))
+            float8linear_module = module_cls.from_float(
+                module, emulate=emulate, use_activation_hooks=use_activation_hooks
+            )
+            setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
     # Without this explicit `del`, this set only gets deleted upon an explicit
