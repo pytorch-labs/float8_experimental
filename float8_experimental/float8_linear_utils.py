@@ -291,5 +291,4 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     for child in fp8_layers:
         # 4. set a flag to signal amaxes/scales are ready
         # We only update the flag if we know it will be checked by the modules
-        if fp8_config.enable_amax_init:
-            child.amax_and_scale_synced = True
+        child.amax_and_scale_synced = True
