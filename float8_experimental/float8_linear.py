@@ -14,14 +14,14 @@ owners to implement their own UEX.
 
 import dataclasses
 
-from typing import Optional
+from typing import Any, cast, Optional, Tuple, Union
 
 import float8_experimental.config as config
 
 import torch
+import torch.nn as nn
 
 from float8_experimental.float8_tensor import Float8Tensor
-
 from float8_experimental.float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
@@ -294,7 +294,11 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         self.float8_pre_forward(x)
 
         x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        w_fp8 = (
+            self.weight
+            if isinstance(self.weight, Float8Tensor)
+            else self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        )
 
         y = torch.matmul(x_fp8, w_fp8.t())
 
@@ -308,7 +312,13 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         return y
 
     @classmethod
-    def from_float(cls, mod, emulate: bool = False, use_activation_hooks: bool = False):
+    def from_float(
+        cls,
+        mod: nn.Module,
+        emulate: bool = False,
+        use_activation_hooks: bool = False,
+        use_fp8_all_gather: bool = False,
+    ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
@@ -322,9 +332,42 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         # Tensors and the Linear base to create empty params
         # with torch.device("meta"):
         new_mod = cls(mod.in_features, mod.out_features, bias=False)
-        new_mod.weight = mod.weight
+        new_mod.weight = (
+            nn.Parameter(Float8LinearWeightTensor(mod.weight))
+            if use_fp8_all_gather
+            else mod.weight
+        )
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         return new_mod
+
+
+class Float8LinearWeightTensor(torch.Tensor):
+    # TODO: Remove `module` arg, save state on subclass, and propagate it.
+    def fsdp_pre_all_gather(
+        self, module: nn.Module
+    ) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        float8_tensor = module.cast_w_to_float8(self, module.is_amax_initialized)
+        return (float8_tensor._data,), (float8_tensor._scale, module.emulate)
+
+    def fsdp_post_all_gather(
+        self,
+        all_gather_outputs: Tuple[torch.Tensor, ...],
+        metadata: Any,
+        param_dtype: torch.dtype,
+        *,
+        out: Optional[torch.Tensor] = None,
+    ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
+        (data,) = all_gather_outputs
+        scale, emulate = metadata
+        if out is not None:
+            out = cast(Float8Tensor, out)
+            assert (
+                data.untyped_storage().data_ptr()
+                == out._data.untyped_storage().data_ptr()
+            )
+            out._scale = scale
+            return
+        return Float8Tensor(data, scale, param_dtype, emulate), (data,)

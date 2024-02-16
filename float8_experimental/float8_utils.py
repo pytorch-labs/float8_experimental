@@ -87,8 +87,8 @@ def tensor_to_amax(x, distributed_reduction=False):
 
 
 @torch.no_grad()
-def tensor_to_scale(x, float8_dtype):
-    amax = tensor_to_amax(x)
+def tensor_to_scale(x, float8_dtype: torch.dtype, distributed_reduction: bool = False):
+    amax = tensor_to_amax(x, distributed_reduction=distributed_reduction)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
