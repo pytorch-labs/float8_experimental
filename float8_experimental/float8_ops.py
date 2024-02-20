@@ -100,6 +100,8 @@ def float8_addmm(aten_op, args, kwargs=None):
         isinstance(args[0], torch.Tensor)
         and isinstance(args[1], Float8Tensor)
         and isinstance(args[2], Float8Tensor)
+    ), "Float8_addmm only supports Float8Tensor as inputs for A and B and Tensor for bias, but found: {}, {}, {}".format(
+        type(args[0]), type(args[1]), type(args[2])
     )
     bias = args[0]
     a = args[1]

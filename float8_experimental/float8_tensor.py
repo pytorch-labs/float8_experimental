@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 from typing import Dict
 
-import torch
-
 import float8_experimental.float8_aten_api  # noqa
+
+import torch
 from float8_experimental.float8_utils import (
     tensor_to_amax,
     tensor_to_scale,
@@ -35,7 +35,9 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        return torch.ops.aten.cast_to_float8_tensor(tensor, scale, float8_dtype, emulate=emulate)
+        return torch.ops.aten.cast_to_float8_tensor(
+            tensor, scale, float8_dtype, emulate=emulate
+        )
 
     @staticmethod
     def backward(ctx, g):

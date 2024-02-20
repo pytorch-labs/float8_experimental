@@ -44,6 +44,7 @@ def cast_to_float8_tensor(
     """
     # lazy import to avoid circular dependency
     from float8_experimental.float8_tensor import Float8Tensor
+
     x_scaled = x * x_scale
     bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
     return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
@@ -64,7 +65,8 @@ lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
 
 lib.define(
-    "cast_to_float8_tensor(Tensor x, Tensor x_scale, ScalarType float8_dtype, bool emulate) -> Tensor"
+    "cast_to_float8_tensor(Tensor x, Tensor x_scale, ScalarType float8_dtype, bool emulate) -> Tensor",
+    tags=(torch.Tag.pt2_compliant_tag,),
 )
 lib.impl("cast_to_float8_tensor", cast_to_float8_tensor, "CPU")
 lib.impl("cast_to_float8_tensor", cast_to_float8_tensor, "CUDA")
@@ -74,6 +76,7 @@ lib.impl("cast_to_float8_tensor", cast_to_float8_tensor, "CUDA")
 def _mm_float8_emulated_meta(m1, s1, m2, s2, dtype3):
     out = torch.mm(m1.float(), m2.float()).to(dtype3)
     return out, torch.empty(1, device="meta")
+
 
 @torch.library.impl(lib, "cast_to_float8_tensor", "Meta")
 def _cast_to_float8_tensor_meta(x, x_scale, float8_dtype, emulate):

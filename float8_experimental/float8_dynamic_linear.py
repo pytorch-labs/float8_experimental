@@ -32,7 +32,12 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     def backward(ctx, gradY):
         float8_dtype = torch.float8_e5m2
         grady_scale = tensor_to_scale(gradY, float8_dtype)
-        return torch.ops.aten.cast_to_float8_tensor(gradY, grady_scale, float8_dtype, ctx.emulate), None
+        return (
+            torch.ops.aten.cast_to_float8_tensor(
+                gradY, grady_scale, float8_dtype, ctx.emulate
+            ),
+            None,
+        )
 
 
 def cast_x_to_float8_e4m3fn_pre_hook(module, args):
