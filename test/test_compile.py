@@ -141,7 +141,6 @@ class TestGraphBreaks(DynamoTestCase):
                 return x_hp
             return x_fp8
 
-    @pytest.mark.xfail(reason="TODO: Fix this test, see TODO in MockLinear")
     def test_float8_with_graph_break_in_the_middle(self):
         """Test that having Float8Tensor object at the boundary of a subgraph"""
         cnts = CompileCounterWithBackend("inductor")
@@ -174,7 +173,6 @@ class TestGraphBreaks(DynamoTestCase):
         )
         torch.testing.assert_close(y2_eager, y2_compiled)
 
-    @pytest.mark.xfail(reason="TODO: Fix this test, see TODO in MockLinear")
     def test_float8_graph_output(self):
         """Test that having Float8Tensor object as a graph output works"""
         cnts = CompileCounterWithBackend("inductor")
