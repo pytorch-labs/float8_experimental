@@ -102,7 +102,7 @@ def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
     dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
     assert isinstance(dist_x_scale, DTensor)
 
-    dist_x_fp8 = Float8Tensor.to_float8(x_fp32, dist_x_scale, fp8_dtype)
+    dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
     assert isinstance(dist_x_fp8, DTensor)
 
 

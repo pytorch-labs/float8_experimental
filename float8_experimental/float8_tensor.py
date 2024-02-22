@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 
@@ -12,6 +12,8 @@ from float8_experimental.float8_utils import (
     tensor_to_scale,
     to_fp8_saturated,
 )
+
+from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
 
@@ -25,17 +27,39 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        tensor,
-        scale: float,
+        tensor: torch.Tensor,
+        scale: torch.Tensor,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer=None,
         emulate: bool = False,
     ):
+        """Converts a higher precision tensor to float8 in a differentiable way.
+
+        Note:
+            We will call this function with a DTensor subclass. Ideally this would be an aten OP
+            that DTensor could overload to ensure proper semantics. There are some techincal issues
+            with that composing with FakeTensor, so we special case here.
+
+            DTensor Invariant: DTensor must always be the outer most tensor subclass
+        """
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
         tensor_scaled = tensor * scale
         bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+
+        if isinstance(bits_fp8, DTensor):
+            assert isinstance(
+                tensor_scaled, DTensor
+            ), "Expected Float8 scale to be a DTensor if bits_fp8 is a DTensor"
+            bits_mesh = bits_fp8.device_mesh
+            bits_placements = bits_fp8.placements
+            local_bits = bits_fp8.to_local()
+            local_scale = tensor_scaled.to_local()
+            inner_float8_tensor = Float8Tensor(
+                local_bits, local_scale, tensor.dtype, emulate=emulate
+            )
+            return DTensor.from_local(inner_float8_tensor, bits_mesh, bits_placements)
         return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
@@ -95,7 +119,11 @@ class Float8Tensor(torch.Tensor):
         orig_dtype: torch.dtype,
         emulate=False,
     ):
-        assert scale.numel() == 1
+        assert (
+            scale.numel() == 1
+        ), "Scale should contain a single value, but got: {} elements".format(
+            scale.numel()
+        )
 
         self = torch.Tensor._make_wrapper_subclass(
             cls,
@@ -138,7 +166,13 @@ class Float8Tensor(torch.Tensor):
 
     @staticmethod
     @torch._dynamo.allow_in_graph
-    def to_float8(tensor, scale, float8_dtype, amax_buffer=None, emulate: bool = False):
+    def to_float8(
+        tensor: torch.Tensor,
+        scale: torch.Tensor,
+        float8_dtype: torch.dtype,
+        amax_buffer: Optional[torch.Tensor] = None,
+        emulate: bool = False,
+    ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
         Args:
