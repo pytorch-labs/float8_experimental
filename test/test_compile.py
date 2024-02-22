@@ -11,7 +11,7 @@ import pytest
 
 import torch
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     get_float8_linear,
     LinearType,
@@ -207,14 +207,15 @@ class TestGraphBreaks(DynamoTestCase):
 
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 def test_sync_amax_func():
+    torch._dynamo.reset()
     cnts = CompileCounterWithBackend("inductor")
     module = torch.nn.Sequential(
         nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
     )
-    float8_mod = swap_linear_with_float8_linear(module, Float8DynamicLinear)
+    float8_mod = swap_linear_with_float8_linear(module, Float8Linear)
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
-    assert cnts.frame_count == 0, "Compiled graph should have 1 frame!"
+    assert cnts.frame_count == 1, "Compiled graph should have 1 frame!"
 
 
 if __name__ == "__main__":

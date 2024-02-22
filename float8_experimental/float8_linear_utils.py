@@ -284,9 +284,9 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             child.fp8_scale_w.copy_(new_w_scales[idx])
             child.fp8_scale_dL_dY.copy_(new_dL_dY_scales[idx])
 
-    # When cuda-graphs work we should compile with "reduce-overhead"
-    compiled_inner_func = torch.compile(inner_func)
-    compiled_inner_func()
+    # This allows for the compile to succede on the inner func and fail on the graph breaks
+    # at the beginning and and of syncing
+    inner_func()
 
     for child in fp8_layers:
         # 4. set a flag to signal amaxes/scales are ready
