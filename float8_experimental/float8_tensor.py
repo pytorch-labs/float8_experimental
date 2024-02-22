@@ -55,7 +55,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             bits_mesh = bits_fp8.device_mesh
             bits_placements = bits_fp8.placements
             local_bits = bits_fp8.to_local()
-            local_scale = tensor_scaled.to_local()
+            local_scale = scale.to_local()
             inner_float8_tensor = Float8Tensor(
                 local_bits, local_scale, tensor.dtype, emulate=emulate
             )
@@ -66,6 +66,21 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
     def backward(ctx, g):
         if isinstance(g, Float8Tensor):
             return g.to_original_precision(), None, None, None, None
+        elif isinstance(g, DTensor):
+            local_grad = g.to_local()
+            assert isinstance(
+                local_grad, Float8Tensor
+            ), "Expected local_grad to be a Float8Tensor"
+            original_precision_grad = local_grad.to_original_precision()
+            return (
+                DTensor.from_local(
+                    original_precision_grad, g.device_mesh, g.placements
+                ),
+                None,
+                None,
+                None,
+                None,
+            )
         else:
             return g, None, None, None, None
 
