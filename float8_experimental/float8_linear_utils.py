@@ -186,6 +186,18 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         return
 
     def inner_func():
+        """Why do we have this inner_function?
+
+        There are two portions of the outer sync_function that cause graph_breaks:
+            1. The `get_float8_layers` call can cause graph breaks if the user did not pass
+                in the fp8_layers.
+            2. At the end of syncing all the amaxes and scales we set the attr on the module
+                signaling that we have synced the amaxes and scales and the next forward can be run.
+                # TODO Maybe we should remove this safety check to remove the graph break?
+
+        By having this inner function, we can ensure that although the outer function may cause graph breaks
+        the inner function will not.
+        """
         # Loop over all fp8 layers and grab the needed tensors
         fp8_amax_x_tensor_list = [None] * len(fp8_layers)
         fp8_amax_w_tensor_list = [None] * len(fp8_layers)
