@@ -14,7 +14,7 @@ import torch.nn as nn
 
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
-from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 
@@ -92,6 +92,20 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     assert out_local._data.dtype == fp8_dtype
 
 
+def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
+    device = mesh.device_type
+    fp8_dtype = torch.float8_e4m3fn
+
+    x_fp32 = torch.rand(size, size, device=device)
+    dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
+
+    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
+    assert isinstance(dist_x_scale, DTensor)
+
+    dist_x_fp8 = Float8Tensor.to_float8(x_fp32, dist_x_scale, fp8_dtype)
+    assert isinstance(dist_x_fp8, DTensor)
+
+
 if __name__ == "__main__":
     # float8 only works on CUDA H100 so we only test cuda and we follow
     # other test files to not use TestCase but instead just add the test
@@ -99,3 +113,4 @@ if __name__ == "__main__":
     device_mesh = setup_distributed()
     test_scaled_mm(device_mesh)
     test_fp8_redistribute(device_mesh)
+    test_dtensor_cast_to_fp8(device_mesh)
