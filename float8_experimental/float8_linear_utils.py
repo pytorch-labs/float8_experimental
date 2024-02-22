@@ -148,7 +148,9 @@ def get_float8_layers(model: torch.nn.Module):
 
     # Get all fp8 layers and tensors
     fp8_layers = [child for child in model.modules() if isinstance(child, Float8Linear)]
-
+    for layer in fp8_layers:
+        for buf in layer.buffers():
+            torch._dynamo.mark_static_address(buf, guard=True)
     return fp8_layers
 
 
