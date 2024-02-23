@@ -15,9 +15,24 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import NoopFwToFloat8E5M2Bw
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
+from torch.distributed import init_process_group
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from tqdm import tqdm
+
+
+# def setup_distributed_fake():
+#     world_size = int(os.environ.get("WORLD_SIZE", -1))
+#     print(world_size)
+#     RANK = int(os.environ.get("RANK", -1))
+#     init_process_group("fake", store=FakeStore(), rank=RANK, world_size=world_size)
+#     # device_mesh = init_device_mesh("cuda", (world_size,))
+#     device_mesh = DeviceMesh("cuda", (world_size,))
+
+#     # seed must be the same in all processes
+#     torch.manual_seed(1)
+#     return device_mesh
 
 
 def setup_distributed():
@@ -130,6 +145,7 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
     out = NoopFwToFloat8E5M2Bw.apply(out, False)
+    assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
     loss = torch.sum(torch.abs(out - dist_target))
     loss.backward()
 
@@ -139,6 +155,7 @@ if __name__ == "__main__":
     # other test files to not use TestCase but instead just add the test
     # cases in the main func.
     device_mesh = setup_distributed()
+    # device_mesh = setup_distributed_fake()
     tests = [
         test_scaled_mm,
         test_fp8_redistribute,

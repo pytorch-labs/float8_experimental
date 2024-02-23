@@ -30,7 +30,10 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gradY):
-        fp8_tensor = to_fp8_no_autograd(gradY, torch.float8_e5m2, ctx.emulate)
+        gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
+        fp8_tensor = to_fp8_no_autograd(
+            gradY, gradY_scale, torch.float8_e5m2, ctx.emulate
+        )
         return fp8_tensor, None
 
 

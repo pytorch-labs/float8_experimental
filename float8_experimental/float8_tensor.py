@@ -18,6 +18,38 @@ from torch.distributed._tensor import DTensor
 aten = torch.ops.aten
 
 
+def to_fp8_no_autograd(
+    x: torch.Tensor, x_scale: torch.Tensor, float8_dtype: torch.dtype, emulate: bool
+) -> "Float8Tensor":
+    """Convert a tensor to float8 without autograd
+    This is used in multiple places in the codebase to convert a tensor to float8
+
+    This function will calculate the scale, do the scaling, and then convert to a Float8Tensor
+    Args:
+        x: the tensor to convert
+        scale: the scale to use to convert the tensor
+        float8_dtype: the float8 dtype to use
+        emulate: whether to emulate the matmuls in fp32
+    """
+    x_scaled = x * x_scale
+    bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
+
+    if isinstance(bits_fp8, DTensor):
+        assert isinstance(
+            x, DTensor
+        ), "Expected Float8 scale to be a DTensor if bits_fp8 is a DTensor"
+        bits_mesh = bits_fp8.device_mesh
+        bits_placements = bits_fp8.placements
+        local_bits = bits_fp8.to_local()
+        local_scale = x_scale.to_local()
+        inner_float8_tensor = Float8Tensor(
+            local_bits, local_scale, x.dtype, emulate=emulate
+        )
+        return DTensor.from_local(inner_float8_tensor, bits_mesh, bits_placements)
+
+    return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
+
+
 @torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
@@ -45,33 +77,19 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        tensor_scaled = tensor * scale
-        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
-
-        if isinstance(bits_fp8, DTensor):
-            assert isinstance(
-                tensor_scaled, DTensor
-            ), "Expected Float8 scale to be a DTensor if bits_fp8 is a DTensor"
-            bits_mesh = bits_fp8.device_mesh
-            bits_placements = bits_fp8.placements
-            local_bits = bits_fp8.to_local()
-            local_scale = scale.to_local()
-            inner_float8_tensor = Float8Tensor(
-                local_bits, local_scale, tensor.dtype, emulate=emulate
-            )
-            return DTensor.from_local(inner_float8_tensor, bits_mesh, bits_placements)
-        return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
+        return to_fp8_no_autograd(tensor, scale, float8_dtype, emulate)
 
     @staticmethod
     def backward(ctx, g):
-        if isinstance(g, Float8Tensor):
-            return g.to_original_precision(), None, None, None, None
-        elif isinstance(g, DTensor):
+        def to_original_precision(grad):
+            if isinstance(grad, Float8Tensor):
+                return grad.to_original_precision()
+            else:
+                return grad
+
+        if isinstance(g, DTensor):
             local_grad = g.to_local()
-            assert isinstance(
-                local_grad, Float8Tensor
-            ), "Expected local_grad to be a Float8Tensor"
-            original_precision_grad = local_grad.to_original_precision()
+            original_precision_grad = to_original_precision(local_grad)
             return (
                 DTensor.from_local(
                     original_precision_grad, g.device_mesh, g.placements
@@ -82,7 +100,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
                 None,
             )
         else:
-            return g, None, None, None, None
+            return to_original_precision(g), None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
@@ -223,22 +241,3 @@ class Float8Tensor(torch.Tensor):
 
     # Do not force the Float8Tensor type on the returned tensor
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-
-def to_fp8_no_autograd(
-    x: torch.Tensor, float8_dtype: torch.dtype, emulate: bool
-) -> Float8Tensor:
-    """Convert a tensor to float8 without autograd
-    This is used in multiple places in the codebase to convert a tensor to float8
-
-    This function will calculate the scale, do the scaling, and then convert to a Float8Tensor
-    Args:
-        x: the tensor to convert
-        scale: the scale to use to convert the tensor
-        float8_dtype: the float8 dtype to use
-        emulate: whether to emulate the matmuls in fp32
-    """
-    x_scale = tensor_to_scale(x, float8_dtype)
-    x_scaled = x * x_scale
-    bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
-    return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
