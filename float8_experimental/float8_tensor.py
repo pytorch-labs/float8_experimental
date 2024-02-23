@@ -24,7 +24,15 @@ def to_fp8_no_autograd(
     """Convert a tensor to float8 without autograd
     This is used in multiple places in the codebase to convert a tensor to float8
 
-    This function will calculate the scale, do the scaling, and then convert to a Float8Tensor
+    This function will apply the scaling, and then convert to a Float8Tensor
+
+    Note:
+    We will call this function with a DTensor subclass. Ideally this would be an aten OP
+    that DTensor could overload to ensure proper semantics. There are some techincal issues
+    with that composing with FakeTensor, so we special case here.
+
+    DTensor Invariant: DTensor must always be the outer most tensor subclass
+
     Args:
         x: the tensor to convert
         scale: the scale to use to convert the tensor
@@ -50,6 +58,32 @@ def to_fp8_no_autograd(
     return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
 
 
+def from_fp8_no_autograd(x: torch.Tensor) -> torch.Tensor:
+    """Convert a tensor from float8 without autograd
+
+    This function will handle 3 cases:
+        1. If the tensor is a DTensor, it will convert the inner tensor to the original precision
+        2. If the tensor is a Float8Tensor, it will convert the tensor to the original precision
+        3. If the tensor is a regular tensor, it will pass through this tensor
+
+    Args:
+        x: the tensor to convert
+    """
+
+    def to_original_precision(grad):
+        if isinstance(grad, Float8Tensor):
+            return grad.to_original_precision()
+        else:
+            return grad
+
+    if isinstance(x, DTensor):
+        local_grad = x.to_local()
+        original_precision_grad = to_original_precision(local_grad)
+        return DTensor.from_local(original_precision_grad, x.device_mesh, x.placements)
+    else:
+        return to_original_precision(x)
+
+
 @torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
@@ -62,17 +96,16 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         tensor: torch.Tensor,
         scale: torch.Tensor,
         float8_dtype=torch.float8_e4m3fn,
-        amax_buffer=None,
+        amax_buffer: Optional[torch.Tensor] = None,
         emulate: bool = False,
     ):
-        """Converts a higher precision tensor to float8 in a differentiable way.
-
-        Note:
-            We will call this function with a DTensor subclass. Ideally this would be an aten OP
-            that DTensor could overload to ensure proper semantics. There are some techincal issues
-            with that composing with FakeTensor, so we special case here.
-
-            DTensor Invariant: DTensor must always be the outer most tensor subclass
+        """Autograd enabled wrapper around to_fp8_no_autograd that will also populate the amax buffer.
+        Args
+            tensor: the tensor to convert
+            scale: the scale to use to convert the tensor
+            float8_dtype: the float8 dtype either, torch.float8_e4m3fn or torch.float8_e5m2fn
+            amax_buffer: an Optional buffer buffer to store the amax value in prior to conversion
+            emulate: whether to emulate the matmuls in fp32
         """
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
@@ -81,26 +114,8 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        def to_original_precision(grad):
-            if isinstance(grad, Float8Tensor):
-                return grad.to_original_precision()
-            else:
-                return grad
-
-        if isinstance(g, DTensor):
-            local_grad = g.to_local()
-            original_precision_grad = to_original_precision(local_grad)
-            return (
-                DTensor.from_local(
-                    original_precision_grad, g.device_mesh, g.placements
-                ),
-                None,
-                None,
-                None,
-                None,
-            )
-        else:
-            return to_original_precision(g), None, None, None, None
+        grad = from_fp8_no_autograd(g)
+        return grad, None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
