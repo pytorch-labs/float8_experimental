@@ -53,7 +53,14 @@ def to_fp8_no_autograd(
         inner_float8_tensor = Float8Tensor(
             local_bits, local_scale, x.dtype, emulate=emulate
         )
-        return DTensor.from_local(inner_float8_tensor, bits_mesh, bits_placements)
+        return DTensor.from_local(
+            inner_float8_tensor,
+            bits_mesh,
+            bits_placements,
+            run_check=False,
+            shape=bits_fp8.size(),
+            stride=bits_fp8.stride(),
+        )
 
     return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
 
@@ -79,7 +86,14 @@ def from_fp8_no_autograd(x: torch.Tensor) -> torch.Tensor:
     if isinstance(x, DTensor):
         local_grad = x.to_local()
         original_precision_grad = to_original_precision(local_grad)
-        return DTensor.from_local(original_precision_grad, x.device_mesh, x.placements)
+        return DTensor.from_local(
+            original_precision_grad,
+            x.device_mesh,
+            x.placements,
+            run_check=False,
+            shape=x.size(),
+            stride=x.stride(),
+        )
     else:
         return to_original_precision(x)
 
