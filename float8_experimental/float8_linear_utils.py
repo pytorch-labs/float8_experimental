@@ -148,7 +148,10 @@ def get_float8_layers(model: torch.nn.Module):
 
     # Get all fp8 layers and tensors
     fp8_layers = [child for child in model.modules() if isinstance(child, Float8Linear)]
-
+    if not torch._dynamo.is_compiling():
+        for layer in fp8_layers:
+            for buf in layer.buffers():
+                torch._dynamo.mark_static_address(buf, guard=True)
     return fp8_layers
 
 
@@ -290,7 +293,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             fp8_dL_dY_amax_history_stack, torch.float8_e5m2, x_dtype, scale_fn_recipe
         )
 
-        # Iterate through the layers and update the scales, and set the flag to signal that the amaxes/scales are ready
+        # Iterate through the layers and update the scales
         for idx, child in enumerate(fp8_layers):
             child.fp8_scale_x.copy_(new_x_scales[idx])
             child.fp8_scale_w.copy_(new_w_scales[idx])
@@ -301,6 +304,5 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     inner_func()
 
     for child in fp8_layers:
-        # 4. set a flag to signal amaxes/scales are ready
-        # We only update the flag if we know it will be checked by the modules
+        # Set a flag to signal amaxes/scales are ready
         child.amax_and_scale_synced = True

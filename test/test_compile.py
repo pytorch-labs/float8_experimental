@@ -5,7 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 import copy
 import random
+import sys
 import unittest
+from io import StringIO
 
 import pytest
 
@@ -13,6 +15,7 @@ import torch
 import torch.nn as nn
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    get_float8_layers,
     get_float8_linear,
     LinearType,
     swap_linear_with_float8_linear,
@@ -216,6 +219,44 @@ def test_sync_amax_func():
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
     assert cnts.frame_count == 1, "Compiled graph should have 1 frame!"
+
+
+class capture_stderr(list):
+    """
+    Replace sys.stderr with a temporary StringIO
+    """
+
+    def __enter__(self):
+        self.sys_stderr = sys.stderr
+        self.stringio = StringIO()
+        sys.stderr = self.stringio
+        return self
+
+    def __exit__(self, *args):
+        self.append(str(self.stringio.getvalue()))
+        del self.stringio
+        sys.stderr = self.sys_stderr
+
+
+@unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
+def test_sync_amax_func_cuda_graph_success():
+    torch._dynamo.reset()
+    with capture_stderr() as stderr:
+        my_module = nn.Sequential(
+            nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
+        ).to("cuda")
+        swap_linear_with_float8_linear(my_module, Float8Linear)
+        inpt = torch.randn(
+            16, 16, device="cuda", dtype=torch.float32, requires_grad=True
+        )
+        sync_func = torch.compile(
+            sync_float8_amax_and_scale_history, mode="reduce-overhead", fullgraph=True
+        )
+        fp8_layers = get_float8_layers(my_module)
+        my_module(inpt)
+        sync_func(my_module, fp8_layers)
+
+    assert "skipping cudagraphs due to mutaton on input" not in stderr[0]
 
 
 if __name__ == "__main__":
