@@ -264,6 +264,15 @@ class Float8Tensor(torch.Tensor):
         # Lazy import to avoid circular dependency
         from float8_experimental.float8_ops import FLOAT8_OPS_TABLE
 
+        # All ops in the FLOAT8_OPS_TABLE expect Float8Tensor as inputs
+        # And don't support mixed tensor subclasses. This will trigger the handler for
+        # the next type in the dispatch list. torch._C._TensorMeta is for FakeTensor
+        def allowed_subclasses(type):
+            return issubclass(cls, type) or isinstance(type, torch._C._TensorMeta)
+
+        if not all(allowed_subclasses(t) for t in types):
+            return NotImplemented
+
         if func in FLOAT8_OPS_TABLE:
             return FLOAT8_OPS_TABLE[func](func, args, kwargs)
         raise NotImplementedError(f"attempting to run {func}, this is not supported")

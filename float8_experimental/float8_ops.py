@@ -10,7 +10,6 @@ import torch
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import is_row_major
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -81,8 +80,6 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
 def float8_mm(aten_op, args, kwargs=None):
     a = args[0]
     b = args[1]
-    if isinstance(b, AsyncCollectiveTensor):
-        b = b.trigger_wait()
 
     assert isinstance(a, Float8Tensor) and isinstance(
         b, Float8Tensor
