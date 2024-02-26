@@ -19,3 +19,5 @@ enable_pre_and_post_forward = True
 # TODO(before land): add test coverage for both cases
 # dynamic_use_activation_hooks = True
 # dynamic_use_activation_hooks = False
+
+use_fused_cast = True
