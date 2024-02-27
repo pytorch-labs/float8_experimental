@@ -68,21 +68,21 @@ def amax_history_to_scale_stack(
 
 
 @torch.no_grad()
-def tensor_to_amax(x, distributed_reduction=False):
+def tensor_to_amax(x: torch.Tensor, reduce_amax: bool = False):
     amax = torch.max(torch.abs(x))
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
     # happen elsewhere.
-    if distributed_reduction and dist.is_initialized():
+    if reduce_amax and dist.is_initialized():
         dist.all_reduce(amax, op=dist.ReduceOp.MAX)
 
     return amax
 
 
 @torch.no_grad()
-def tensor_to_scale(x, float8_dtype):
-    amax = tensor_to_amax(x)
+def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype, reduce_amax: bool = False):
+    amax = tensor_to_amax(x, reduce_amax=reduce_amax)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
