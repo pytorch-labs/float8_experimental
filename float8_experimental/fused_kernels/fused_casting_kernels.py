@@ -28,7 +28,6 @@ def maximum(a, b):
         mask |= a != a
     return tl.where(mask, a, b)
 
-
 @triton.jit
 def abs_max_kernel(
     x_ptr,
@@ -64,9 +63,9 @@ def abs_max(x: torch.Tensor) -> torch.Tensor:
     "Calculates the global max of the absolute values of a tensor"
     output = torch.empty((512, 1), device=x.device, dtype=torch.float32)
     n_elements = x.numel()
-    grid = lambda meta: (512,)
+    grid = lambda meta: (meta["X_BLOCK_SIZE"],)
     X_BLOCK_SIZE = 1
-    R_BLOCK_SIZE = 64
+    R_BLOCK_SIZE = 1024
     r_numel = n_elements // 512
     abs_max_kernel[grid](
         x,
