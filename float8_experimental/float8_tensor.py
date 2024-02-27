@@ -266,9 +266,15 @@ class Float8Tensor(torch.Tensor):
 
         # All ops in the FLOAT8_OPS_TABLE expect Float8Tensor as inputs
         # And don't support mixed tensor subclasses. This will trigger the handler for
-        # the next type in the dispatch list. torch._C._TensorMeta is for FakeTensor
+        # the next type in the dispatch list
         def allowed_subclasses(type):
-            return issubclass(cls, type) or isinstance(type, torch._C._TensorMeta)
+            return (
+                issubclass(cls, type)
+                or issubclass(torch._subclasses.fake_tensor.FakeTensor, type)
+                or issubclass(
+                    torch._subclasses.functional_tensor.FunctionalTensor, type
+                )
+            )
 
         if not all(allowed_subclasses(t) for t in types):
             return NotImplemented
