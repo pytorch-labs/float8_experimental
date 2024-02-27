@@ -11,28 +11,72 @@ EPS = 1e-12
 
 
 @triton.jit
-def abs_max_kernel(x_ptr, out_ptr, n_elements: int, BLOCK_SIZE: tl.constexpr):
-    offset_base = tl.arange(0, BLOCK_SIZE)[None, :]
-    acc = tl.full([1, BLOCK_SIZE], -float("inf"), tl.float32)
-    for offset in range(0, n_elements, BLOCK_SIZE):
-        index = offset + offset_base
-        mask = index < n_elements
-        x = tl.load(x_ptr + index, mask, eviction_policy="evict_first", other=0.0)
-        x_broadcast = tl.broadcast_to(x, [1, BLOCK_SIZE])
-        x_abs = tl.abs(x_broadcast)
-        acc = tl.maximum(acc, x_abs)
+def promote_to_tensor(x):
+    # Addition promotes to tensor for us
+    return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
+def is_floating(x):
+    return promote_to_tensor(x).dtype.is_floating()
+
+
+@triton.jit
+def maximum(a, b):
+    mask = a > b
+    if is_floating(a):
+        mask |= a != a
+    return tl.where(mask, a, b)
+
+
+@triton.jit
+def abs_max_kernel(
+    x_ptr,
+    out_ptr,
+    x_numel: int,
+    r_numel: int,
+    X_BLOCK_SIZE: tl.constexpr,
+    R_BLOCK_SIZE: tl.constexpr,
+):
+    x_offset = tl.program_id(0) * X_BLOCK_SIZE
+    x_index = x_offset + tl.arange(0, X_BLOCK_SIZE)[:, None]
+    x_mask = x_index < x_numel
+    reduction_base = tl.arange(0, R_BLOCK_SIZE)[None, :]
+    acc = tl.full([X_BLOCK_SIZE, R_BLOCK_SIZE], -float("inf"), tl.float32)
+    for r_offset in range(0, r_numel, R_BLOCK_SIZE):
+        r_index = r_offset + reduction_base
+        r_mask = r_index < r_numel
+        values = tl.load(
+            x_ptr + (r_index + (r_numel * x_index)),
+            x_mask & r_mask,
+            eviction_policy="evict_last",
+            other=0.0,
+        ).to(tl.float32)
+        x_abs = tl.abs(values)
+        x_abs_broadcasted = tl.broadcast_to(x_abs, [X_BLOCK_SIZE, R_BLOCK_SIZE])
+        acc_mask = maximum(acc, x_abs_broadcasted)
+        acc = tl.where(x_mask, acc_mask, acc)
     out = tl.max(acc, 1)[:, None]
-    tl.store(out_ptr + (tl.full([1, 1], 0, tl.int32)), out.to(tl.float32))
+    tl.store(out_ptr + x_index, out.to(tl.float32), x_mask)
 
 
 def abs_max(x: torch.Tensor) -> torch.Tensor:
     "Calculates the global max of the absolute values of a tensor"
-    output = torch.empty((), device=x.device, dtype=torch.float32)
+    output = torch.empty((512, 1), device=x.device, dtype=torch.float32)
     n_elements = x.numel()
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-    BLOCK_SIZE = 1024
-    abs_max_kernel[grid](x, output, n_elements=n_elements, BLOCK_SIZE=BLOCK_SIZE)
-    return output
+    grid = lambda meta: (512,)
+    X_BLOCK_SIZE = 1
+    R_BLOCK_SIZE = 64
+    r_numel = n_elements // 512
+    abs_max_kernel[grid](
+        x,
+        output,
+        x_numel=512,
+        r_numel=r_numel,
+        X_BLOCK_SIZE=X_BLOCK_SIZE,
+        R_BLOCK_SIZE=R_BLOCK_SIZE,
+    )
+    return output.max()
 
 
 @triton.jit
