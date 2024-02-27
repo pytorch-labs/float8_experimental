@@ -75,13 +75,7 @@ def tensor_to_amax(x, distributed_reduction=False):
     # If the user did not ask for it, assume that it will
     # happen elsewhere.
     if distributed_reduction and dist.is_initialized():
-        # TODO: Dynamo rewriting synchronous in-place collectives fails:
-        # https://github.com/pytorch/pytorch/issues/120082
-        # Use functional all-reduce to avoid graph breaking.
-        amax = dist._functional_collectives.all_reduce(
-            amax, "MAX", list(range(dist.get_world_size()))
-        )
-        # dist.all_reduce(amax, op=dist.ReduceOp.MAX)
+        dist.all_reduce(amax, op=dist.ReduceOp.MAX)
 
     return amax
 
@@ -92,7 +86,7 @@ def tensor_to_scale(x, float8_dtype):
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
-def to_fp8_saturated(x, float8_dtype):
+def to_fp8_saturated(x, float8_dtype: torch.dtype):
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
     # and `e5m2` is to not saturate. In this context, we should saturate.
     # A common case where we want to saturate is when the history of a

@@ -12,10 +12,14 @@ import os
 import torch
 import torch.nn as nn
 
+from float8_experimental.float8_dynamic_linear import NoopFwToFloat8E5M2Bw
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
-from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed import init_process_group
+from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from tqdm import tqdm
 
 
 def setup_distributed():
@@ -92,10 +96,62 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     assert out_local._data.dtype == fp8_dtype
 
 
+def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
+    device = mesh.device_type
+    fp8_dtype = torch.float8_e4m3fn
+
+    x_fp32 = torch.rand(size, size, device=device)
+    dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
+
+    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
+    assert isinstance(dist_x_scale, DTensor)
+
+    dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
+    assert isinstance(dist_x_fp8, DTensor)
+
+
+def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
+    device = mesh.device_type
+    fp8_dtype = torch.float8_e4m3fn
+
+    x_fp32 = torch.rand(size, size, device=device, requires_grad=True)
+    local_weight = torch.rand(2 * size, size, device=device, requires_grad=True)
+    target = torch.rand(size, 2 * size, device=device)
+
+    dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
+    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
+
+    dist_wight_fp32 = distribute_tensor(local_weight, mesh, [Shard(0)])
+    dist_weight_scale = tensor_to_scale(dist_wight_fp32, fp8_dtype).float()
+    dist_target = distribute_tensor(target, mesh, [Shard(0)])
+
+    dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
+    dist_weight_fp8 = Float8Tensor.to_float8(
+        dist_wight_fp32, dist_weight_scale, fp8_dtype
+    )
+
+    out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
+    out = NoopFwToFloat8E5M2Bw.apply(out, False)
+    assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
+    loss = torch.sum(torch.abs(out - dist_target))
+    loss.backward()
+
+
 if __name__ == "__main__":
     # float8 only works on CUDA H100 so we only test cuda and we follow
     # other test files to not use TestCase but instead just add the test
     # cases in the main func.
     device_mesh = setup_distributed()
-    test_scaled_mm(device_mesh)
-    test_fp8_redistribute(device_mesh)
+    tests = [
+        test_scaled_mm,
+        test_fp8_redistribute,
+        test_dtensor_cast_to_fp8,
+        test_dtensor_fp8_autograd,
+    ]
+
+    for test in tqdm(tests, desc="Running tests"):
+        try:
+            test(device_mesh)
+        except Exception as e:
+            print(f"Test {test.__name__} failed with error: {e}")
+            raise e
