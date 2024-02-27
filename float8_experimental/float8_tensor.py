@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 from typing import Dict, Optional
 
-import float8_experimental.config as fp8_config
+import float8_experimental
 
 import torch
 
@@ -40,9 +40,8 @@ def to_fp8_no_autograd(
         float8_dtype: the float8 dtype to use
         emulate: whether to emulate the matmuls in fp32
     """
-    if fp8_config.use_fused_cast and x.device == "cuda":
+    if float8_experimental.config.use_fused_cast and x.is_cuda and x.dtype in {torch.float32, torch.bfloat16}:
         from driss_torch import saturated_cast
-
         bits_fp8 = saturated_cast(x, float8_dtype, x_scale)
     else:
         x_scaled = x * x_scale
