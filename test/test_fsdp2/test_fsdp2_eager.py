@@ -369,7 +369,13 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
             local_inp = self._get_local_inp()
             check_parity_no_mp(
-                self, ref_module, ref_optim, module, optim, local_inp, Float8DynamicLinear
+                self,
+                ref_module,
+                ref_optim,
+                module,
+                optim,
+                local_inp,
+                Float8DynamicLinear,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -392,7 +398,13 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
             local_inp = self._get_local_inp()
             check_parity_no_mp(
-                self, ref_module, ref_optim, module, optim, local_inp, Float8DynamicLinear
+                self,
+                ref_module,
+                ref_optim,
+                module,
+                optim,
+                local_inp,
+                Float8DynamicLinear,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
