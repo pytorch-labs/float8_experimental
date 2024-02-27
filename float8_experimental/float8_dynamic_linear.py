@@ -160,6 +160,7 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        # Define a standard `__torch_function__` that propagates state
         kwargs = kwargs or {}
 
         def wrap(cast_fn: Callable, emulate: bool, o: Any):
