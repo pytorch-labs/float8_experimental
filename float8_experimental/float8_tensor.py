@@ -40,9 +40,14 @@ def to_fp8_no_autograd(
         float8_dtype: the float8 dtype to use
         emulate: whether to emulate the matmuls in fp32
     """
-    if float8_experimental.config.use_fused_cast and x.is_cuda and x.dtype in {torch.float32, torch.bfloat16}:
+    if (
+        float8_experimental.config.use_fused_cast
+        and x.is_cuda
+        and x.dtype in {torch.float32, torch.bfloat16}
+    ):
         from driss_torch import saturated_cast
-        bits_fp8 = saturated_cast(x, float8_dtype, x_scale)
+
+        bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
     else:
         x_scaled = x * x_scale
         bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)

@@ -10,12 +10,13 @@ from itertools import product
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+import float8_experimental.config as fp8_config
+
 import pandas as pd
 
 import torch
 import torch.utils.benchmark as benchmark
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-import float8_experimental.config as fp8_config
 from tqdm import tqdm
 
 # estimating TOPs for matmuls in fp32, fp16, fp8
@@ -144,12 +145,7 @@ def main(
             / REPEAT_N
         )
         experiment = Experiment(
-            name,
-            (M, K, N),
-            ref_time,
-            float8_time,
-            dtype,
-            fuse_cast
+            name, (M, K, N), ref_time, float8_time, dtype, fuse_cast
         )
         print(experiment)
         print("float8 speedup", experiment.ref_time_sec / experiment.float8_time_sec)

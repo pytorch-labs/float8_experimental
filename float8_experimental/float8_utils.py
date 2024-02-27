@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
+import float8_experimental
 import torch
 import torch.distributed as dist
 
@@ -69,7 +70,12 @@ def amax_history_to_scale_stack(
 
 @torch.no_grad()
 def tensor_to_amax(x, distributed_reduction=False):
-    amax = torch.max(torch.abs(x))
+    if float8_experimental.config.use_fused_cast and x.is_cuda:
+        from float8_experimental.fused_kernels.fused_casting_kernels import abs_max
+
+        amax = abs_max(x)
+    else:
+        amax = x.abs().max()
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
@@ -83,6 +89,12 @@ def tensor_to_amax(x, distributed_reduction=False):
 @torch.no_grad()
 def tensor_to_scale(x, float8_dtype):
     amax = tensor_to_amax(x)
+    if float8_experimental.config.use_fused_cast and x.is_cuda:
+        from float8_experimental.fused_kernels.fused_casting_kernels import (
+            abs_max_to_scale,
+        )
+
+        return abs_max_to_scale(amax, float8_dtype, x.dtype == torch.float16)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
