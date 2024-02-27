@@ -86,7 +86,7 @@ def tensor_to_scale(x, float8_dtype):
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
-def to_fp8_saturated(x, float8_dtype):
+def to_fp8_saturated(x, float8_dtype: torch.dtype):
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
     # and `e5m2` is to not saturate. In this context, we should saturate.
     # A common case where we want to saturate is when the history of a

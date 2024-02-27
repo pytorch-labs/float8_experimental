@@ -20,14 +20,13 @@ import float8_experimental.config as config
 
 import torch
 
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     tensor_to_amax,
-    to_fp8_saturated,
 )
 
 
@@ -99,10 +98,9 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         )
 
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
-        go_scaled = go * fp8_scale_dL_dY
-        bits_fp8 = to_fp8_saturated(go_scaled, torch.float8_e5m2)
+
+        res = to_fp8_no_autograd(go, fp8_scale_dL_dY, torch.float8_e5m2, ctx.emulate)
         empty_grads = None, None, None, None, None, None
-        res = Float8Tensor(bits_fp8, fp8_scale_dL_dY, go.dtype, emulate=ctx.emulate)
         return res, *empty_grads
 
 
