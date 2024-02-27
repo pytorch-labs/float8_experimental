@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import pytest
 import torch
 from float8_experimental.float8_utils import amax_to_scale, tensor_to_amax
@@ -7,10 +9,21 @@ from float8_experimental.fused_kernels.fused_casting_kernels import (
 )
 
 
-@pytest.mark.parametrize("numel", [2**i for i in range(10, 20)])
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (16384, 1024),
+        (16384, 8192),
+        (16384, 3584),
+        (8192, 1280),
+        (1024, 8192),
+        (8192, 7168),
+        (3584, 8192),
+    ],
+)
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
-def test_abs_max(numel: int, dtype: torch.dtype):
-    x = torch.randn(numel, dtype=dtype, device="cuda")
+def test_abs_max(shape: Tuple[int], dtype: torch.dtype):
+    x = torch.randn(shape, dtype=dtype, device="cuda")
     max_abs = abs_max(x)
     assert torch.allclose(max_abs, tensor_to_amax(x))
 
