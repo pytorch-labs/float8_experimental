@@ -351,7 +351,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
             [Float8Linear, Float8DynamicLinear], [True, False]
         ):
             module = nn.Linear(3, 3)
-            module = swap_linear_with_float8_linear(module, module_cls, emulate)
+            module = swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
             self.assertIsInstance(module, module_cls)
             self.assertEqual(module.emulate, emulate)
 
@@ -365,7 +365,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 AssertionError,
                 "Does not support a root nn.Linear with children",
             ):
-                swap_linear_with_float8_linear(module, module_cls, emulate)
+                swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
 
     def test_swap_submodule_linears(self):
         class MLP(nn.Module):
@@ -378,7 +378,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
             [Float8Linear, Float8DynamicLinear], [True, False]
         ):
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-            model = swap_linear_with_float8_linear(model, module_cls, emulate)
+            model = swap_linear_with_float8_linear(model, module_cls, emulate=emulate)
             self.assertIsInstance(model[0].lin1, module_cls)
             self.assertIsInstance(model[0].lin2, module_cls)
             self.assertIsInstance(model[1], module_cls)
@@ -398,7 +398,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
             skip_fqn_list = ["2", "0.lin2"]
             model = swap_linear_with_float8_linear(
-                model, module_cls, emulate, skip_fqn_list
+                model, module_cls, emulate=emulate, skip_fqn_list=skip_fqn_list
             )
             self.assertIsInstance(model[0].lin1, module_cls)
             self.assertNotIsInstance(model[0].lin2, module_cls)
