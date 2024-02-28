@@ -61,13 +61,21 @@ def abs_max_kernel(
 
 
 def abs_max(x: torch.Tensor) -> torch.Tensor:
-    "Calculates the global max of the absolute values of a tensor"
+    """Calculates the global max of the absolute values of a tensor
+
+    This kernel launches a grid of 512 threads, each thread calculates the
+    maximum of x.numel // 512 elements. The results are then reduced to a single
+    value in a follow up kernel.
+
+    Args:
+        x: Input tensor to calculate the abs_max for
+    """
     x = x.contiguous()
     if x.numel() % 512 == 0:
         output = torch.full(
             (512, 1), -float("inf"), device=x.device, dtype=torch.float32
         )
-        grid = lambda meta: (meta["X_BLOCK_SIZE"],)
+        grid = lambda meta: (512,)
         X_BLOCK_SIZE = 1
         R_BLOCK_SIZE = 1024
         r_numel = x.numel() // 512

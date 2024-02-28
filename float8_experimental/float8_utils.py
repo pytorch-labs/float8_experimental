@@ -70,14 +70,10 @@ def amax_history_to_scale_stack(
 
 @torch.no_grad()
 def tensor_to_amax(x, distributed_reduction=False):
-    if False and float8_experimental.config.use_fused_cast and x.is_cuda:
+    if float8_experimental.config.use_fused_cast and x.is_cuda:
         from float8_experimental.fused_kernels.fused_casting_kernels import abs_max
 
         amax = abs_max(x)
-        diff = abs_max(x) - x.abs().max().to(torch.float32)
-        assert (
-            diff.item() == 0
-        ), f"Expected {amax} to be equal to {x.abs().max().to(torch.float32)} but got {diff}"
     else:
         amax = x.abs().max().to(torch.float32)
 

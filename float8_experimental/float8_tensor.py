@@ -49,9 +49,9 @@ def to_fp8_no_autograd(
 
         if x.dim() in {3, 4}:
             prev_x_shape = x.shape
-            x = x.view(-1, x.size(-1))
+            x = x.reshape(-1, x.size(-1))
             bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
-            bits_fp8 = bits_fp8.view(prev_x_shape)
+            bits_fp8 = bits_fp8.reshape(prev_x_shape)
         else:
             bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
     else:
