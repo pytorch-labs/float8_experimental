@@ -72,7 +72,6 @@ def amax_history_to_scale_stack(
 def tensor_to_amax(x, distributed_reduction=False):
     if float8_experimental.config.use_fused_cast and x.is_cuda:
         from float8_experimental.fused_kernels.fused_casting_kernels import abs_max
-
         amax = abs_max(x)
     else:
         amax = x.abs().max()
