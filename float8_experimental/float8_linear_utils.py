@@ -388,6 +388,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
             weight._local_tensor._scale = scale
     else:
         import warnings
+
         warnings.warn(
             "Calling precompute_float8_weights without any weights using fp8 all-gather!"
         )
