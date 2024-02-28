@@ -1,11 +1,8 @@
-import contextlib
-
 from typing import List, Optional, Type
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental import config
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
@@ -43,26 +40,6 @@ def init_transformer_with_fp8(
         use_activation_hooks=use_activation_hooks,
         use_fp8_all_gather=use_fp8_all_gather,
     )
-
-
-@contextlib.contextmanager
-def enable_amax_init(enable: bool):
-    prev_value = config.enable_amax_init
-    config.enable_amax_init = enable
-    try:
-        yield
-    finally:
-        config.enable_amax_init = prev_value
-
-
-@contextlib.contextmanager
-def enable_pre_and_post_forward(enable: bool):
-    prev_value = config.enable_pre_and_post_forward
-    config.enable_pre_and_post_forward = enable
-    try:
-        yield
-    finally:
-        config.enable_pre_and_post_forward = prev_value
 
 
 def check_parity_no_mp(
