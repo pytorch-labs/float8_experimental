@@ -159,6 +159,9 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         super().__init__()
         self.cast_fn = cast_fn
         self.emulate = emulate
+        # Allow fp8 data and scale to be precomputed
+        self._data: Optional[torch.Tensor] = None
+        self._scale: Optional[torch.Tensor] = None
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -187,6 +190,8 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         return super().__torch_dispatch__(func, types, args, kwargs)
 
     def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+        if self._data is not None and self._scale is not None:
+            return (self._data,), (self._scale,)
         float8_tensor = self.cast_fn(self, reduce_amax=True)
         return (float8_tensor._data,), (float8_tensor._scale,)
 

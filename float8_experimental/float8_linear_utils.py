@@ -8,15 +8,21 @@ import logging
 from enum import auto, Enum
 from typing import List, Optional, Type
 
-import float8_experimental.config as fp8_config
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+from float8_experimental.float8_dynamic_linear import (
+    Float8DynamicLinear,
+    Float8DynamicLinearWeightTensor,
+)
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import amax_history_to_scale_stack
+from float8_experimental.float8_utils import (
+    amax_history_to_scale_stack,
+    E4M3_MAX_POS,
+    EPS,
+    to_fp8_saturated,
+)
 from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
@@ -320,3 +326,68 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     for child in fp8_layers:
         # Set a flag to signal amaxes/scales are ready
         child.amax_and_scale_synced = True
+
+
+def precompute_float8_weights(module: nn.Module) -> None:
+    """
+    Precomputes casts to fp8, including amax reduction if needed, for
+    ``Float8DynamicLinear`` modules that are using fp8 all-gather. This should
+    be run after the optimizer step and before the next forward.
+
+    This function is only used for performance since we can perform a single
+    all-reduce and fuse ops.
+    """
+    from torch.distributed._tensor import DTensor
+
+    if any(isinstance(m, Float8Linear) for m in module.modules()):
+        raise NotImplementedError(
+            f"Only supports Float8DynamicLinear, not Float8Linear"
+        )
+    float8_linears: List[Float8DynamicLinear] = [
+        m for m in module.modules() if isinstance(m, Float8DynamicLinear)
+    ]
+    weights: List[Float8DynamicLinearWeightTensor] = [
+        float8_linear.weight
+        for float8_linear in float8_linears
+        if isinstance(float8_linear.weight, DTensor)
+        and isinstance(
+            float8_linear.weight._local_tensor, Float8DynamicLinearWeightTensor
+        )
+    ]
+
+    def inner_fn(weights: List[Float8DynamicLinearWeightTensor]):
+        # All-reduce partial amaxes computed from sharded weights
+        abs_weights = torch._foreach_abs(weights)
+        partial_amax_tensor = abs_weights[0].new_empty(len(abs_weights))
+        for i, abs_weight in enumerate(abs_weights):
+            torch.max(abs_weight, out=partial_amax_tensor[i])
+        replicated_amax_tensor = all_reduce(
+            partial_amax_tensor, "MAX", list(range(dist.get_world_size()))
+        )
+
+        # Compute scales from replicated amaxes and the fp8 bit datas
+        clamped_tensor = torch.clamp(replicated_amax_tensor, EPS)
+        scales_tensor = E4M3_MAX_POS / clamped_tensor
+        datas = []
+        scales = []
+        for i, weight in enumerate(weights):
+            scale = scales_tensor[i]
+            weight_scaled = weight * scale
+            datas.append(to_fp8_saturated(weight_scaled, torch.float8_e4m3fn))
+            scales.append(scale)
+        return datas, scales
+
+    if weights:
+        # TODO: We cannot convert the subclass to `torch.Tensor`, and compile
+        # currently errors on the subclass's `__torch_dispatch__`.
+        weight_datas = [w._local_tensor for w in weights]
+        # datas, scales = torch.compile(inner_fn)(weight_datas)
+        datas, scales = inner_fn(weight_datas)
+        for data, scale, weight in zip(datas, scales, weights):
+            weight._local_tensor._data = data
+            weight._local_tensor._scale = scale
+    else:
+        import warnings
+        warnings.warn(
+            "Calling precompute_float8_weights without any weights using fp8 all-gather!"
+        )
