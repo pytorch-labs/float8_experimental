@@ -116,7 +116,8 @@ def main(
         ref_forw_backward = lambda: linear_ref(input_tensor).sum().backward()
 
         def float8_forw_backward():
-            linear_float8(input_tensor).sum().backward()
+            out = linear_float8(input_tensor)
+            out.sum().backward()
 
         def n_times(n, fn, *args, **kwargs):
             def wrapper(*args, **kwargs):

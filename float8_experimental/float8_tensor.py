@@ -48,6 +48,7 @@ def to_fp8_no_autograd(
         from driss_torch import saturated_cast
 
         bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
+
     else:
         x_scaled = x * x_scale
         bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)

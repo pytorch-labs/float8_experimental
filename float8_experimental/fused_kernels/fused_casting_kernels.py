@@ -28,6 +28,7 @@ def maximum(a, b):
         mask |= a != a
     return tl.where(mask, a, b)
 
+
 @triton.jit
 def abs_max_kernel(
     x_ptr,
