@@ -17,6 +17,8 @@ from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
 from float8_experimental.float8_utils import tensor_to_scale
 from torch.utils._pytree import tree_map
 
+aten = torch.ops.aten
+
 
 @torch._dynamo.allow_in_graph
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
@@ -158,9 +160,12 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         self.cast_fn = cast_fn
         self.emulate = emulate
 
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    # Override `__torch_dispatch__`, not `__torch_function__`, to propagate
+    # state since we only need to interpose on ops that return tensors
     @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        # Define a standard `__torch_function__` that propagates state
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
         def wrap(cast_fn: Callable, emulate: bool, o: Any):
@@ -168,13 +173,18 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
                 return cls(o, cast_fn, emulate)
             return o
 
-        with torch._C.DisableTorchFunctionSubclass():
-            if isinstance(args[0], cls):
-                out = func(*args, **kwargs)
-                return tree_map(
-                    functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
-                )
-            return func(*args, **kwargs)
+        if func == aten.detach.default:
+            (self,) = args
+            return self
+        elif func in (aten.view.default, aten.slice.Tensor):
+            out = super().__torch_dispatch__(func, types, args, kwargs)
+            return cls(out, args[0].cast_fn, args[0].emulate)
+        elif isinstance(args[0], cls):
+            out = super().__torch_dispatch__(func, types, args, kwargs)
+            return tree_map(
+                functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
+            )
+        return super().__torch_dispatch__(func, types, args, kwargs)
 
     def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
         float8_tensor = self.cast_fn(self, reduce_amax=True)
