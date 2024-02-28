@@ -347,7 +347,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
         m for m in module.modules() if isinstance(m, Float8DynamicLinear)
     ]
     weights: List[Float8DynamicLinearWeightTensor] = [
-        float8_linear.weight
+        float8_linear.weight._local_tensor
         for float8_linear in float8_linears
         if isinstance(float8_linear.weight, DTensor)
         and isinstance(
@@ -380,9 +380,8 @@ def precompute_float8_weights(module: nn.Module) -> None:
     if weights:
         # TODO: We cannot convert the subclass to `torch.Tensor`, and compile
         # currently errors on the subclass's `__torch_dispatch__`.
-        weight_datas = [w._local_tensor for w in weights]
-        # datas, scales = torch.compile(inner_fn)(weight_datas)
-        datas, scales = inner_fn(weight_datas)
+        # datas, scales = torch.compile(inner_fn)(weights)
+        datas, scales = inner_fn(weights)
         for data, scale, weight in zip(datas, scales, weights):
             weight._local_tensor._data = data
             weight._local_tensor._scale = scale
