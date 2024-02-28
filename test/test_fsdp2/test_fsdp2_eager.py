@@ -12,7 +12,7 @@ from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinearWeightTensor,
 )
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
-from test_fsdp2_common import check_parity_bf16_mp, check_parity_no_mp
+from test_fsdp2_common import check_parity_bf16_mp, check_parity_no_mp, TestFloat8Common
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -20,7 +20,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     FSDPTestMultiThread,
-    MLP,
     patch_all_gather,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -29,51 +28,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
-
-
-class TestFloat8Common:
-    def _broadcast_module(self, module: nn.Module) -> None:
-        # Broadcast for multi-threaded process group tests since seed is per
-        # process, not per thread
-        for param in module.parameters():
-            dist.broadcast(param, src=0)
-
-    def _init_single_module(self) -> nn.Module:
-        torch.manual_seed(42)
-        module = nn.Linear(16, 16, device="cuda")
-        self._broadcast_module(module)
-        return module
-
-    def _init_multi_module(self) -> nn.Module:
-        torch.manual_seed(42)
-        module = nn.Sequential(*[MLP(16, device="cuda") for _ in range(3)])
-        self._broadcast_module(module)
-        return module
-
-    def _init_transformer(self, weight_tying: bool) -> nn.Module:
-        torch.manual_seed(42)
-        args = ModelArgs(
-            n_layers=3, dim=768, n_heads=12, dropout_p=0.0, weight_tying=weight_tying
-        )
-        module = Transformer(args).cuda()
-        self._broadcast_module(module)
-        return module
-
-    def _get_local_inp(self, dtype: torch.dtype = torch.float32):
-        torch.manual_seed(42)
-        global_inp = torch.randn((16 * self.world_size, 16), device="cuda", dtype=dtype)
-        dist.broadcast(global_inp, src=0)
-        return global_inp.view(self.world_size, -1)[self.rank].view(16, 16)
-
-    def swap_linear_with_dynamic(self, module: nn.Module, **kwargs: Any) -> nn.Module:
-        if "use_activation_hooks" in kwargs:
-            assert kwargs["use_activation_hooks"] is True
-            del kwargs["use_activation_hooks"]
-        # Always use activation hooks since we need it to compose with DTensor
-        # tensor parallelism
-        return swap_linear_with_float8_linear(
-            module, Float8DynamicLinear, use_activation_hooks=True, **kwargs
-        )
 
 
 class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
@@ -92,7 +46,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
         # fp8 for that tied weight, incorrectly using fp8 for the embedding.
         weight_tying = not use_fp8_all_gather
-        module = self._init_transformer(weight_tying=weight_tying)
+        module = self.init_transformer(weight_tying=weight_tying)
         ref_module = copy.deepcopy(module)
         ref_module = self.swap_linear_with_dynamic(ref_module).cuda()
         module = self.swap_linear_with_dynamic(
@@ -251,7 +205,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         tensor_cls = Float8DynamicLinearWeightTensor
 
         # Check for a single FSDP paramter group
-        module_fp32 = self._init_single_module()
+        module_fp32 = self.init_single_module()
         module = self.swap_linear_with_dynamic(module_fp32, use_fp8_all_gather=True)
         self.assertIsInstance(module.weight, tensor_cls)
         fully_shard(module)
@@ -261,7 +215,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 self.assertIsInstance(param.to_local(), tensor_cls)
 
         # Check for multiple FSDP paramter groups
-        module = self._init_multi_module()
+        module = self.init_multi_module()
         module = self.swap_linear_with_dynamic(module, use_fp8_all_gather=True)
         for param_name, param in module.named_parameters():
             if "weight" in param_name:
@@ -306,11 +260,11 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             return size
 
         # - Check for a single FSDP parameter group
-        module_fp32 = self._init_single_module()
+        module_fp32 = self.init_single_module()
         ref_module = copy.deepcopy(module_fp32)
         module = self.swap_linear_with_dynamic(module_fp32, use_fp8_all_gather=True)
         fully_shard(module)
-        local_inp = self._get_local_inp()
+        local_inp = self.get_local_inp()
         expected_all_gather_size = get_expected_all_gather_size(ref_module)
         with patch_all_gather(all_gather):
             out = module(local_inp)
@@ -333,7 +287,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         all_gather_sizes.clear()
 
         # - Check for multiple FSDP parameter groups
-        module = self._init_multi_module()
+        module = self.init_multi_module()
         ref_module = copy.deepcopy(module)
         module = self.swap_linear_with_dynamic(module, use_fp8_all_gather=True)
         for submodule in module:
@@ -358,7 +312,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         single module/FSDP communication group.
         """
         for use_fp8_all_gather in [False, True]:
-            module_fp32 = self._init_single_module()
+            module_fp32 = self.init_single_module()
             ref_module = self.swap_linear_with_dynamic(copy.deepcopy(module_fp32))
             ref_module = ref_module.cuda()
             module = self.swap_linear_with_dynamic(
@@ -367,7 +321,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             fully_shard(module)
             ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
-            local_inp = self._get_local_inp()
+            local_inp = self.get_local_inp()
             check_parity_no_mp(
                 self,
                 ref_module,
@@ -385,7 +339,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         multiple modules/FSDP communication groups.
         """
         for use_fp8_all_gather in [False, True]:
-            module = self._init_multi_module()
+            module = self.init_multi_module()
             ref_module = copy.deepcopy(module)
             ref_module = self.swap_linear_with_dynamic(ref_module).cuda()
             module = self.swap_linear_with_dynamic(
@@ -396,7 +350,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             fully_shard(module)
             ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
-            local_inp = self._get_local_inp()
+            local_inp = self.get_local_inp()
             check_parity_no_mp(
                 self,
                 ref_module,
@@ -417,7 +371,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # NOTE: We cannot test easily with fp8 all-gather because then the scale
         # is computed using the fp32 sharded parameters, not the bf16 unsharded
         # parameters, changing the numerics.
-        module = self._init_multi_module()
+        module = self.init_multi_module()
         ref_module_bf16 = copy.deepcopy(module).to(torch.bfloat16)
         ref_module_bf16 = swap_linear_with_float8_linear(
             ref_module_bf16,
@@ -440,7 +394,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             torch.optim.Adam(ref_module_fp32.parameters(), lr=1e-2),
             module,
             torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True),
-            self._get_local_inp(torch.bfloat16),
+            self.get_local_inp(torch.bfloat16),
             Float8DynamicLinear,
         )
 

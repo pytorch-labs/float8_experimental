@@ -1,8 +1,7 @@
 import torch
 import torch._dynamo.testing
 import torch.distributed as dist
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-from test_fsdp2_common import init_transformer_with_fp8
+from test_fsdp2_common import TestFloat8Common
 from torch.distributed._composable.fsdp import fully_shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -10,7 +9,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import Transform
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
+class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase, TestFloat8Common):
     def setUp(self):
         super().setUp()
         fake_store = FakeStore()
@@ -29,8 +28,8 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_submodule_dynamic(self):
         for use_fp8_all_gather in [False, True]:
-            module = init_transformer_with_fp8(
-                Float8DynamicLinear, use_fp8_all_gather=use_fp8_all_gather
+            module = self.swap_linear_with_dynamic(
+                self.init_transformer(), use_fp8_all_gather=use_fp8_all_gather
             )
 
             # Compile each transformer block forward separately
@@ -55,8 +54,8 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
                 module(local_inp)
 
             # Compile each transformer block module separately
-            module = init_transformer_with_fp8(
-                Float8DynamicLinear, use_fp8_all_gather=use_fp8_all_gather
+            module = self.swap_linear_with_dynamic(
+                self.init_transformer(), use_fp8_all_gather=use_fp8_all_gather
             )
             cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             for submodule in module.modules():
@@ -75,8 +74,8 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_root_dynamic(self):
         for use_fp8_all_gather in [False, True]:
-            module = init_transformer_with_fp8(
-                Float8DynamicLinear, use_fp8_all_gather=use_fp8_all_gather
+            module = self.swap_linear_with_dynamic(
+                self.init_transformer(), use_fp8_all_gather=use_fp8_all_gather
             )
 
             # Compile the root module
