@@ -48,7 +48,7 @@ def abs_max_kernel(
         r_mask = r_index < r_numel
         values = tl.load(
             x_ptr + (r_index + (r_numel * x_index)),
-            x_mask & r_mask,
+            r_mask,
             eviction_policy="evict_last",
             other=0.0,
         ).to(tl.float32)
@@ -62,21 +62,26 @@ def abs_max_kernel(
 
 def abs_max(x: torch.Tensor) -> torch.Tensor:
     "Calculates the global max of the absolute values of a tensor"
-    output = torch.empty((512, 1), device=x.device, dtype=torch.float32)
-    n_elements = x.numel()
-    grid = lambda meta: (meta["X_BLOCK_SIZE"],)
-    X_BLOCK_SIZE = 1
-    R_BLOCK_SIZE = 1024
-    r_numel = n_elements // 512
-    abs_max_kernel[grid](
-        x,
-        output,
-        x_numel=512,
-        r_numel=r_numel,
-        X_BLOCK_SIZE=X_BLOCK_SIZE,
-        R_BLOCK_SIZE=R_BLOCK_SIZE,
-    )
-    return output.max()
+    x = x.contiguous()
+    if x.numel() % 512 == 0:
+        output = torch.full(
+            (512, 1), -float("inf"), device=x.device, dtype=torch.float32
+        )
+        grid = lambda meta: (meta["X_BLOCK_SIZE"],)
+        X_BLOCK_SIZE = 1
+        R_BLOCK_SIZE = 1024
+        r_numel = x.numel() // 512
+        abs_max_kernel[grid](
+            x,
+            output,
+            x_numel=512,
+            r_numel=r_numel,
+            X_BLOCK_SIZE=X_BLOCK_SIZE,
+            R_BLOCK_SIZE=R_BLOCK_SIZE,
+        )
+        return output.max()
+    else:
+        return x.abs().max().to(torch.float32)
 
 
 @triton.jit
