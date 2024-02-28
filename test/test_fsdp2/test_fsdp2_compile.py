@@ -63,11 +63,11 @@ class TestFloat8CompileFakePG(torch._dynamo.test_case.TestCase, TestFloat8Common
                     submodule.compile(backend=cnt)
                     fully_shard(submodule)
             fully_shard(module)
-
             # in backward
             # Expecting  both Float8Tensor for mm inputs but found
             # <class 'torch._subclasses.functional_tensor.FunctionalTensor'> and
             # <class 'float8_experimental.float8_tensor.Float8Tensor'>
+            # https://github.com/pytorch-labs/float8_experimental/issues/223
             with self.assertRaises(RuntimeError):
                 module(local_inp)
 
