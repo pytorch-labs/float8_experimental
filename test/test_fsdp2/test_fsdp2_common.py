@@ -1,10 +1,68 @@
-from typing import List, Type
+import contextlib
+
+from typing import List, Optional, Type
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from float8_experimental import config
+from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_utils import (
+    swap_linear_with_float8_linear,
+    sync_float8_amax_and_scale_history,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    ModelArgs,
+    Transformer,
+)
+
+
+def init_transformer_with_fp8(
+    module_cls: Type,
+    *,
+    checkpoint_activations: bool = False,
+    use_activation_hooks: Optional[bool] = None,
+    use_fp8_all_gather: bool = False,
+):
+    torch.manual_seed(42)
+    args = ModelArgs(
+        n_layers=3,
+        dim=768,
+        n_heads=12,
+        dropout_p=0.0,
+        weight_tying=False,
+        checkpoint_activations=checkpoint_activations,
+    )
+    module = Transformer(args)
+    # Only dynamic linear supports activation hooks
+    use_activation_hooks = use_activation_hooks or (module_cls is Float8DynamicLinear)
+    return swap_linear_with_float8_linear(
+        module,
+        module_cls,
+        use_activation_hooks=use_activation_hooks,
+        use_fp8_all_gather=use_fp8_all_gather,
+    )
+
+
+@contextlib.contextmanager
+def enable_amax_init(enable: bool):
+    prev_value = config.enable_amax_init
+    config.enable_amax_init = enable
+    try:
+        yield
+    finally:
+        config.enable_amax_init = prev_value
+
+
+@contextlib.contextmanager
+def enable_pre_and_post_forward(enable: bool):
+    prev_value = config.enable_pre_and_post_forward
+    config.enable_pre_and_post_forward = enable
+    try:
+        yield
+    finally:
+        config.enable_pre_and_post_forward = prev_value
 
 
 def check_parity_no_mp(
