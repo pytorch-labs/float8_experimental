@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 from typing import Dict
+from driss_torch import saturated_cast
 
 import torch
 
@@ -34,8 +35,10 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        tensor_scaled = tensor * scale
-        bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+        # tensor_scaled = tensor * scale
+        # bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
+        bits_fp8 = saturated_cast(tensor, float8_dtype, scale.to(tensor.dtype))
+
         return Float8Tensor(bits_fp8, scale, tensor.dtype, emulate=emulate)
 
     @staticmethod
@@ -59,7 +62,6 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, g):
         return Float8Tensor.to_float8(g), None, None
-
 
 class Float8Tensor(torch.Tensor):
     """
@@ -86,7 +88,8 @@ class Float8Tensor(torch.Tensor):
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
     _emulate: bool
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate"]
+    _initialized: bool
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate", "_initialized"]
 
     def __new__(
         cls,
@@ -96,7 +99,6 @@ class Float8Tensor(torch.Tensor):
         emulate=False,
     ):
         assert scale.numel() == 1
-
         self = torch.Tensor._make_wrapper_subclass(
             cls,
             data.size(),
@@ -111,15 +113,24 @@ class Float8Tensor(torch.Tensor):
         self._scale = scale
         self._orig_dtype = orig_dtype
         self._emulate = emulate
+        self._initialized = True
         return self
 
     def __repr__(self):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
+        initialized = self._initialized if hasattr(self, "_initialized") else False
+        if not initialized:
+            self._data = torch.ones(2560, 2560)
+            self._scale = torch.ones(1)
+            self._orig_dtype = torch.bfloat16
+            self._emulate = False
+            self._initialized = True
         ctx = {
             "_orig_dtype": self._orig_dtype,
             "_emulate": self._emulate,
+            "_initialized": initialized
         }
         return ["_data", "_scale"], ctx
 
@@ -127,11 +138,11 @@ class Float8Tensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors: Dict, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
         return Float8Tensor(
-            inner_tensors["_data"],
-            inner_tensors["_scale"],
-            metadata["_orig_dtype"],
-            metadata["_emulate"],
-        )
+                inner_tensors["_data"],
+                inner_tensors["_scale"],
+                metadata["_orig_dtype"],
+                metadata["_emulate"],
+            )
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)

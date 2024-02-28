@@ -91,9 +91,9 @@ def main(profile_path: Path, compile: bool, linear_type: str):
     profile_path = Path(profile_path)
     assert profile_path.is_dir(), f"Path {profile_path} must be a directory"
     params = LinearParams(
-        M=4 * 4096,
-        K=8192,
-        N=7168,
+        M=2560,
+        K=2560,
+        N=2560,
         input_bias=False,
         ref_dtype=torch.bfloat16,
         layer_norm=True,
@@ -156,7 +156,7 @@ def main(profile_path: Path, compile: bool, linear_type: str):
 
     if params.torch_compile:
         ref_forw_backward = torch.compile(ref_forw_backward)
-        float8_forw_backward = torch.compile(float8_forw_backward, fullgraph=True)
+        float8_forw_backward = torch.compile(float8_forw_backward)
 
     for _ in range(5):
         ref_forw_backward(input_tensor)
