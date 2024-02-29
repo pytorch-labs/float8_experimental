@@ -14,8 +14,6 @@ import torch
 from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
 from float8_experimental.float8_utils import tensor_to_scale
 
-aten = torch.ops.aten
-
 
 @torch._dynamo.allow_in_graph
 class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
