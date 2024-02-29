@@ -7,14 +7,10 @@ import torch
 import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import (
-    Float8DynamicLinear,
-    Float8DynamicLinearWeightTensor,
-)
+from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from test_fsdp2_common import check_parity_bf16_mp, check_parity_no_mp
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -243,36 +239,42 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    def test_weight_subclass_dynamic(self):
-        """
-        Tests that the dynamic linear weight is of the subclass type when
-        enabling fp8 all-gather.
-        """
-        tensor_cls = Float8DynamicLinearWeightTensor
+    def test_fsdp_extensions(self):
+        from torch.distributed._composable.fsdp import FSDPTensorExtensions
 
         # Check for a single FSDP paramter group
         module_fp32 = self.init_single_module()
         module = self.swap_linear_with_dynamic(module_fp32, use_fp8_all_gather=True)
-        self.assertIsInstance(module.weight, tensor_cls)
+        self.assertTrue(hasattr(module, "fsdp_extensions"))
+        self.assertTrue(callable(module.fsdp_extensions))
+        fsdp_extensions = module.fsdp_extensions()
+        self.assertIsInstance(fsdp_extensions.get("weight"), FSDPTensorExtensions)
         fully_shard(module)
-        for param_name, param in module.named_parameters():
-            self.assertIsInstance(param, DTensor)
-            if "weight" in param_name:
-                self.assertIsInstance(param.to_local(), tensor_cls)
+        self.assertTrue(hasattr(module, "fsdp_extensions"))
+        self.assertTrue(callable(module.fsdp_extensions))
+        fsdp_extensions = module.fsdp_extensions()
+        self.assertIsInstance(fsdp_extensions.get("weight"), FSDPTensorExtensions)
 
         # Check for multiple FSDP paramter groups
         module = self.init_multi_module()
         module = self.swap_linear_with_dynamic(module, use_fp8_all_gather=True)
-        for param_name, param in module.named_parameters():
-            if "weight" in param_name:
-                self.assertIsInstance(param, tensor_cls)
+        for submodule in module.modules():
+            if not isinstance(submodule, Float8DynamicLinear):
+                continue
+            self.assertTrue(hasattr(submodule, "fsdp_extensions"))
+            self.assertTrue(callable(submodule.fsdp_extensions))
+            fsdp_extensions = submodule.fsdp_extensions()
+            self.assertIsInstance(fsdp_extensions.get("weight"), FSDPTensorExtensions)
         for mlp in module:
             fully_shard(mlp)
         fully_shard(module)
-        for param_name, param in module.named_parameters():
-            self.assertIsInstance(param, DTensor)
-            if "weight" in param_name:
-                self.assertIsInstance(param.to_local(), tensor_cls)
+        for submodule in module.modules():
+            if not isinstance(submodule, Float8DynamicLinear):
+                continue
+            self.assertTrue(hasattr(submodule, "fsdp_extensions"))
+            self.assertTrue(callable(submodule.fsdp_extensions))
+            fsdp_extensions = submodule.fsdp_extensions()
+            self.assertIsInstance(fsdp_extensions.get("weight"), FSDPTensorExtensions)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_fp8_fp32_all_gather_dynamic_comm_size(self):
