@@ -138,6 +138,9 @@ class Float8DynamicLinear(torch.nn.Linear):
                 cast_grad_to_float8_e5m2_backward_forward_hook
             )
         new_mod.use_fp8_all_gather = use_fp8_all_gather
+        if use_fp8_all_gather:
+            new_mod._weight_data: Optional[torch.Tensor] = None
+            new_mod._weight_scale: Optional[torch.Tensor] = None
         return new_mod
 
     def fsdp_extensions(self) -> Dict[str, Any]:
@@ -152,6 +155,9 @@ class Float8DynamicLinear(torch.nn.Linear):
         return {"weight": weight_extensions}
 
     def _fsdp_pre_all_gather(self, sharded_param: torch.Tensor):
+        if self._weight_data is not None and self._weight_scale is not None:
+            # Pre-computed externally
+            return (self._weight_data,), (self._weight_scale,)
         float8_tensor = self.cast_to_float8_e4m3fn(sharded_param, reduce_amax=True)
         return (float8_tensor._data,), (float8_tensor._scale,)
 
