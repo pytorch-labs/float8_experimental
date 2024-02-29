@@ -6,6 +6,9 @@
 """
 A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
+
+from typing import Any, Dict, Optional, Tuple, Union
+
 import torch
 
 from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
@@ -76,7 +79,11 @@ class Float8DynamicLinear(torch.nn.Linear):
         x_fp8 = x if self.use_activation_hooks else self.cast_to_float8_e4m3fn(x)
 
         # cast w to float8_e4m3fn
-        w_fp8 = self.cast_to_float8_e4m3fn(self.weight)
+        w_fp8 = (
+            self.weight
+            if isinstance(self.weight, Float8Tensor)  # cast by FSDP
+            else self.cast_to_float8_e4m3fn(self.weight)
+        )
 
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
 
@@ -86,8 +93,10 @@ class Float8DynamicLinear(torch.nn.Linear):
 
         return y
 
-    def cast_to_float8_e4m3fn(self, inpt_tensor: torch.Tensor) -> Float8Tensor:
-        scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
+    def cast_to_float8_e4m3fn(
+        self, inpt_tensor: torch.Tensor, reduce_amax: bool = False
+    ) -> Float8Tensor:
+        scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn, reduce_amax)
         return Float8Tensor.to_float8(
             inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate
         )
@@ -97,7 +106,11 @@ class Float8DynamicLinear(torch.nn.Linear):
 
     @classmethod
     def from_float(
-        cls, mod, emulate: bool = False, use_activation_hooks: bool = False
+        cls,
+        mod,
+        emulate: bool = False,
+        use_activation_hooks: bool = False,
+        use_fp8_all_gather: bool = False,
     ) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -106,6 +119,7 @@ class Float8DynamicLinear(torch.nn.Linear):
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
             use_activation_hooks (bool): whether to use activation hooks for casting to and from float8
+            use_fp8_all_gather (bool): whether to use fp8 all-gather for FSDP
         """
         with torch.device("meta"):
             super_kwargs = {
@@ -123,4 +137,40 @@ class Float8DynamicLinear(torch.nn.Linear):
             new_mod.register_forward_hook(
                 cast_grad_to_float8_e5m2_backward_forward_hook
             )
+        new_mod.use_fp8_all_gather = use_fp8_all_gather
         return new_mod
+
+    def fsdp_extensions(self) -> Dict[str, Any]:
+        if not self.use_fp8_all_gather:
+            return {}
+
+        from torch.distributed._composable.fsdp import FSDPTensorExtensions
+
+        weight_extensions = FSDPTensorExtensions(
+            self._fsdp_pre_all_gather, self._fsdp_post_all_gather
+        )
+        return {"weight": weight_extensions}
+
+    def _fsdp_pre_all_gather(self, sharded_param: torch.Tensor):
+        float8_tensor = self.cast_to_float8_e4m3fn(sharded_param, reduce_amax=True)
+        return (float8_tensor._data,), (float8_tensor._scale,)
+
+    def _fsdp_post_all_gather(
+        self,
+        all_gather_outputs: Tuple[torch.Tensor, ...],
+        metadata: Any,
+        param_dtype: torch.dtype,
+        *,
+        out: Optional[torch.Tensor] = None,
+    ) -> Union[Tuple[Float8Tensor, Tuple[torch.Tensor, ...]], None]:
+        (data,) = all_gather_outputs
+        (scale,) = metadata
+        if out is not None:
+            assert isinstance(out, Float8Tensor), f"{type(out)}"
+            assert (
+                data.untyped_storage().data_ptr()
+                == out._data.untyped_storage().data_ptr()
+            ), f"Expects out's data to be the all-gather output"
+            out._scale = scale
+            return
+        return Float8Tensor(data, scale, param_dtype, self.emulate), (data,)

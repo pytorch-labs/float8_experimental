@@ -93,6 +93,7 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     use_activation_hooks: bool = False,
+    use_fp8_all_gather: bool = False,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -105,16 +106,23 @@ def swap_linear_with_float8_linear(
             Linear submodules of these skipped modules will also be skipped.
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
         use_activation_hooks (bool): Whether to cast activations to fp8 using module hooks.
+        use_fp8_all_gather (bool): Whether to use fp8 all-gather for FSDP.
     """
+    if use_fp8_all_gather and module_cls is not Float8DynamicLinear:
+        raise NotImplementedError(
+            f"use_fp8_all_gather=True can only be used with Float8DynamicLinear, not {module_cls}"
+        )
+    float8_kwargs = {"emulate": emulate, "use_activation_hooks": use_activation_hooks}
+    if use_fp8_all_gather:
+        # Only a kwarg for dynamic linear
+        float8_kwargs["use_fp8_all_gather"] = True
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear):
         if len(list(module.children())) > 0:
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(
-            module, emulate=emulate, use_activation_hooks=use_activation_hooks
-        )
+        return module_cls.from_float(module, **float8_kwargs)
 
     # Mark all modules to skip as visited
     root_module = module
@@ -136,9 +144,7 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            float8linear_module = module_cls.from_float(
-                module, emulate=emulate, use_activation_hooks=use_activation_hooks
-            )
+            float8linear_module = module_cls.from_float(module, **float8_kwargs)
             setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
