@@ -13,7 +13,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
-    Float8DynamicLinearWeightTensor,
 )
 from float8_experimental.float8_linear import Float8Linear
 
@@ -344,15 +343,14 @@ def precompute_float8_weights(module: nn.Module) -> None:
             f"Only supports Float8DynamicLinear, not Float8Linear"
         )
     float8_linears: List[Float8DynamicLinear] = [
-        m for m in module.modules() if isinstance(m, Float8DynamicLinear)
+        m
+        for m in module.modules()
+        if isinstance(m, Float8DynamicLinear)
+        and getattr(m, "fp8_all_gather", False)
+        and isinstance(m.weight, DTensor)
     ]
-    weights: List[Float8DynamicLinearWeightTensor] = [
-        float8_linear.weight._local_tensor
-        for float8_linear in float8_linears
-        if isinstance(float8_linear.weight, DTensor)
-        and isinstance(
-            float8_linear.weight._local_tensor, Float8DynamicLinearWeightTensor
-        )
+    weights: List[torch.Tensor] = [
+        float8_linear.weight._local_tensor for float8_linear in float8_linears
     ]
 
     def inner_fn(weights: List[torch.Tensor]):
@@ -370,8 +368,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
         # Compute scales from replicated amaxes and the fp8 bit datas
         clamped_tensor = torch.clamp(replicated_amax_tensor, EPS)
         scales_tensor = E4M3_MAX_POS / clamped_tensor
-        datas = []
-        scales = []
+        datas, scales = [], []
         for i, weight in enumerate(weights):
             scale = scales_tensor[i]
             weight_scaled = weight * scale
@@ -384,9 +381,9 @@ def precompute_float8_weights(module: nn.Module) -> None:
         weight_datas = [torch.Tensor(w) for w in weights]
         # datas, scales = torch.compile(inner_fn)(weight_datas)
         datas, scales = inner_fn(weight_datas)
-        for data, scale, weight in zip(datas, scales, weights):
-            weight._data = data
-            weight._scale = scale
+        for data, scale, float8_linear in zip(datas, scales, float8_linears):
+            float8_linear._weight_data = data
+            float8_linear._weight_scale = scale
     else:
         import warnings
 
