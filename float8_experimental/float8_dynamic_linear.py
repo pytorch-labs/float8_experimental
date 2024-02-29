@@ -160,12 +160,9 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         self.cast_fn = cast_fn
         self.emulate = emulate
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    # Override `__torch_dispatch__`, not `__torch_function__`, to propagate
-    # state since we only need to interpose on ops that return tensors
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        # Define a standard `__torch_function__` that propagates state
         kwargs = kwargs or {}
 
         def wrap(cast_fn: Callable, emulate: bool, o: Any):
@@ -173,18 +170,13 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
                 return cls(o, cast_fn, emulate)
             return o
 
-        if func == aten.detach.default:
-            (self,) = args
-            return self
-        elif func in (aten.view.default, aten.slice.Tensor):
-            out = super().__torch_dispatch__(func, types, args, kwargs)
-            return cls(out, args[0].cast_fn, args[0].emulate)
-        elif isinstance(args[0], cls):
-            out = super().__torch_dispatch__(func, types, args, kwargs)
-            return tree_map(
-                functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
-            )
-        return super().__torch_dispatch__(func, types, args, kwargs)
+        with torch._C.DisableTorchFunctionSubclass():
+            if isinstance(args[0], cls):
+                out = func(*args, **kwargs)
+                return tree_map(
+                    functools.partial(wrap, args[0].cast_fn, args[0].emulate), out
+                )
+            return func(*args, **kwargs)
 
     def fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
         float8_tensor = self.cast_fn(self, reduce_amax=True)
