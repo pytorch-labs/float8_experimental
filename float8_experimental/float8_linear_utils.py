@@ -355,7 +355,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
         )
     ]
 
-    def inner_fn(weights: List[Float8DynamicLinearWeightTensor]):
+    def inner_fn(weights: List[torch.Tensor]):
         # All-reduce partial amaxes computed from sharded weights
         abs_weights = torch._foreach_abs(weights)
         partial_amax_tensor = abs_weights[0].new_empty(len(abs_weights))
@@ -364,6 +364,8 @@ def precompute_float8_weights(module: nn.Module) -> None:
         replicated_amax_tensor = all_reduce(
             partial_amax_tensor, "MAX", list(range(dist.get_world_size()))
         )
+        if isinstance(replicated_amax_tensor, AsyncCollectiveTensor):
+            replicated_amax_tensor = replicated_amax_tensor.wait()
 
         # Compute scales from replicated amaxes and the fp8 bit datas
         clamped_tensor = torch.clamp(replicated_amax_tensor, EPS)
@@ -378,13 +380,13 @@ def precompute_float8_weights(module: nn.Module) -> None:
         return datas, scales
 
     if weights:
-        # TODO: We cannot convert the subclass to `torch.Tensor`, and compile
-        # currently errors on the subclass's `__torch_dispatch__`.
-        # datas, scales = torch.compile(inner_fn)(weights)
-        datas, scales = inner_fn(weights)
+        # Convert to `torch.Tensor`, which compile can handle
+        weight_datas = [torch.Tensor(w) for w in weights]
+        # datas, scales = torch.compile(inner_fn)(weight_datas)
+        datas, scales = inner_fn(weight_datas)
         for data, scale, weight in zip(datas, scales, weights):
-            weight._local_tensor._data = data
-            weight._local_tensor._scale = scale
+            weight._data = data
+            weight._scale = scale
     else:
         import warnings
 
