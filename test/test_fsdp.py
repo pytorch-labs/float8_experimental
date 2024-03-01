@@ -212,7 +212,6 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         torch.testing.assert_close(y_single_gpu, y_fsdp, atol=atol, rtol=rtol)
         print("output testing single_gpu vs FSDP success")
 
-        sd_in = torch.load(sd_in_fname)
         sd_out_single_gpu = torch.load(sd_out_single_gpu_fname)
         sd_out_fsdp = torch.load(sd_out_fsdp_fname)
         for k, v1 in sd_out_single_gpu.items():
@@ -248,10 +247,10 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
                 pass
             else:
                 try:
-                    if v1.dtype == torch.bfloat16 and emulate == False:
+                    if v1.dtype == torch.bfloat16 and not emulate:
                         atol, rtol = 2e-2, 2e-2
                     else:
-                        if k == "1.fp8_amax_history_x" and emulate == False:
+                        if k == "1.fp8_amax_history_x" and not emulate:
                             atol, rtol = 2e-2, 6e-3
                         else:
                             atol, rtol = None, None

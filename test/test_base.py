@@ -114,7 +114,7 @@ class TestFloat8Linear:
                 ), f"{buffer_name} not filled, current value {buffer_value}"
 
             # verify initialization flags got updated
-            assert m_fp8.is_amax_initialized == True
+            assert m_fp8.is_amax_initialized, "Amax was not properly initialized"
 
     @pytest.mark.parametrize("emulate", [True, False])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])

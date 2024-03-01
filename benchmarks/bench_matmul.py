@@ -66,7 +66,6 @@ def run(n_limit: Optional[int] = None):
     results = []
 
     name_to_shapes = name_to_shapes_70b
-    bsz_and_seq_len = ((4, 4096),)
     dtypes = torch.bfloat16, torch.float16
 
     for idx, (dtype, (name, (K, N))) in enumerate(

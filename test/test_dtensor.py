@@ -10,15 +10,12 @@ Test numerics of manually defined float16 TP vs float8 TP of toy models
 import os
 
 import torch
-import torch.nn as nn
 
 from float8_experimental.float8_dynamic_linear import NoopFwToFloat8E5M2Bw
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import tensor_to_scale
-from torch.distributed import init_process_group
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from tqdm import tqdm
 
 

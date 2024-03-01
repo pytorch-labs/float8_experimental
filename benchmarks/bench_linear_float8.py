@@ -222,8 +222,7 @@ def main(
     print(data_pd_simple)
 
     sweep_path = sweep_path.with_suffix(".csv")
-    with open(sweep_path, mode="w") as file:
-        data_pd.to_csv(sweep_path)
+    data_pd.to_csv(sweep_path)
 
 
 def invoke_main() -> None:

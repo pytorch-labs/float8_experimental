@@ -58,7 +58,6 @@ def _gather_along_first_dim(input_: torch.Tensor):
 
 def _reduce_scatter(ctx: Any, input_: torch.Tensor):
     group = get_model_parallel_group()
-    rank = torch.distributed.get_rank(group)
     world_size = torch.distributed.get_world_size(group)
 
     assert input_.shape[0] % world_size == 0
