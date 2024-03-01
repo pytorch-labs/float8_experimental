@@ -22,7 +22,7 @@ dependencies = [
 test = [
     "transformers==4.32.0",
     "pandas >= 2.0",
-    "tqdm==4.66.1",
+    "tqdm==4.66.2",
     "fire==0.5.0"
 ]
 dev = [
@@ -32,13 +32,17 @@ dev = [
     "libcst==1.0.1",
     "pytest==7.4.0",
     "bumpver",
-    "pip-tools"
+    "pip-tools",
+    "flake8-pyproject"
 ]
 
-# Since we have multiple top level folders we specify what we want to be included
-# in the package
-[tool.setuptools]
-packages = ["float8_experimental"]
+
+# ---------- TOOL CONFIGURATIONS ------------
+[tool.flake8]
+ignore = ['E231', 'E241', 'E501', 'C408', 'E261', 'E731', 'G004', 'W503', 'E203']
+per-file-ignores = [
+    '__init__.py:F401',
+]
 
 [tool.usort]
 first_party_detection = false
