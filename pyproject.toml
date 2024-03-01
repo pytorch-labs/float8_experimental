@@ -23,7 +23,8 @@ test = [
     "transformers==4.32.0",
     "pandas >= 2.0",
     "tqdm==4.66.2",
-    "fire==0.5.0"
+    "fire==0.5.0",
+    "expecttest",
 ]
 dev = [
     "black==23.3.0",
