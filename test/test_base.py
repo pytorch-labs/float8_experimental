@@ -35,6 +35,8 @@ from float8_experimental.float8_utils import (
 random.seed(0)
 torch.manual_seed(0)
 
+is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
+
 
 class TestFloat8Tensor(unittest.TestCase):
     def test_preserves_dtype(self) -> None:
@@ -116,11 +118,12 @@ class TestFloat8Linear:
             # verify initialization flags got updated
             assert m_fp8.is_amax_initialized, "Amax was not properly initialized"
 
-    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize("use_activation_hooks", [True, False])
     @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_linear_nobias(
         self,
         x_shape,
@@ -142,7 +145,7 @@ class TestFloat8Linear:
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
 
-    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
@@ -150,6 +153,7 @@ class TestFloat8Linear:
     )
     @pytest.mark.parametrize("use_activation_hooks", [True, False])
     @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_linear_bias(
         self,
         x_shape,
@@ -172,13 +176,14 @@ class TestFloat8Linear:
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
         self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
 
-    @pytest.mark.parametrize("emulate", [True, False])
+    @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     @pytest.mark.parametrize("use_activation_hooks", [True, False])
     @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_autocast_outputs(
         self,
         linear_type: LinearType,
@@ -225,31 +230,36 @@ class TestFloat8Linear:
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
-    def test_type_cast(self, linear_type: LinearType, linear_dtype: torch.dtype):
+    @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_type_cast(
+        self, linear_type: LinearType, linear_dtype: torch.dtype, emulate: bool
+    ):
         emulate = (
             not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
         )
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = Float8Linear.from_float(m, emulate)
+        m = get_float8_linear(linear_type, m, emulate, False)
 
         # Cast the module to dtype
         m = m.to(dtype=linear_dtype)
-        # Check amax buffer types
-        for key in [
-            "fp8_amax_x",
-            "fp8_amax_history_x",
-            "fp8_scale_x",
-            "fp8_amax_w",
-            "fp8_amax_history_w",
-            "fp8_scale_w",
-            "fp8_amax_dL_dY",
-            "fp8_amax_history_dL_dY",
-            "fp8_scale_dL_dY",
-        ]:
-            assert (
-                m._buffers[key].dtype == torch.float32
-            ), f"{key}.dtype is {m._buffers[key].dtype}, expected torch.float32"
+        if linear_requires_sync(linear_type):
+            # Check amax buffer types
+            for key in [
+                "fp8_amax_x",
+                "fp8_amax_history_x",
+                "fp8_scale_x",
+                "fp8_amax_w",
+                "fp8_amax_history_w",
+                "fp8_scale_w",
+                "fp8_amax_dL_dY",
+                "fp8_amax_history_dL_dY",
+                "fp8_scale_dL_dY",
+            ]:
+                assert (
+                    m._buffers[key].dtype == torch.float32
+                ), f"{key}.dtype is {m._buffers[key].dtype}, expected torch.float32"
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
@@ -273,7 +283,7 @@ class TestFloat8Linear:
 
 class TestScaledMM:
     @unittest.skipIf(
-        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        not is_H100,
         "CUDA not available",
     )
     @pytest.mark.parametrize(
@@ -321,6 +331,7 @@ class TestScaledMM:
 
 class TestNumerics:
     @pytest.mark.parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_small_amax_float16(self, float8_dtype):
         # If we calculate scale naively with FP8_MAX_POS / amax,
         # the result may not be representable in fp16. Verify that

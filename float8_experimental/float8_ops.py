@@ -14,6 +14,7 @@ from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 c10d_functional = torch.ops.c10d_functional
+_c10d_functional = torch.ops._c10d_functional
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
 
 
@@ -148,7 +149,12 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     )
 
 
-@implements([c10d_functional.all_gather_into_tensor.default])
+@implements(
+    [
+        c10d_functional.all_gather_into_tensor.default,
+        _c10d_functional.all_gather_into_tensor.default,
+    ]
+)
 def allgather_fp8(aten_op, args, kwargs=None):
     """
     override funcol with FP8 handling
@@ -166,7 +172,7 @@ def allgather_fp8(aten_op, args, kwargs=None):
     return Float8Tensor(fp8_out, fp8_input._scale, fp8_input._orig_dtype)
 
 
-@implements([c10d_functional.wait_tensor.default])
+@implements([c10d_functional.wait_tensor.default, _c10d_functional.wait_tensor.default])
 def wait_tensor_fp8(aten_op, args, kwargs=None):
     fp8_input = args[0]
     assert isinstance(fp8_input, Float8Tensor)
