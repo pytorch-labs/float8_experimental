@@ -4,7 +4,7 @@
 set -e
 if python -c 'import torch;print(torch.cuda.is_available())' | grep -q "False"; then
     echo "Skipping test_fsdp_compile.sh because no CUDA devices are available."
-    return
+    exit
 fi
 
 # Code to be executed if CUDA devices are available

@@ -31,7 +31,7 @@ launch() {
 
 if python -c 'import torch;print(torch.cuda.is_available())' | grep -q "False"; then
     echo "Skipping test_fsdp.sh because no CUDA devices are available."
-    return
+    exit
 fi
 
 # IS_FP8, COMPILE, FULLGRAPH
