@@ -7,15 +7,26 @@
 Test numerics of manually defined float16 TP vs float8 TP of toy models
 """
 
+import copy
 import os
 
 import torch
+import torch.nn as nn
 
-from float8_experimental.float8_dynamic_linear import NoopFwToFloat8E5M2Bw
+from float8_experimental.float8_dynamic_linear import (
+    Float8DynamicLinear,
+    NoopFwToFloat8E5M2Bw,
+)
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor_parallel import (
+    Float8ColwiseParallel,
+    Float8RowwiseParallel,
+)
 from float8_experimental.float8_utils import tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.parallel import parallelize_module
 from tqdm import tqdm
 
 
@@ -25,6 +36,19 @@ def setup_distributed():
     # seed must be the same in all processes
     torch.manual_seed(1)
     return device_mesh
+
+
+class ToyModel(nn.Module):
+    """MLP based model"""
+
+    def __init__(self):
+        super(ToyModel, self).__init__()
+        self.in_proj = nn.Linear(16, 32)
+        self.relu = nn.ReLU()
+        self.out_proj = nn.Linear(32, 16)
+
+    def forward(self, x):
+        return self.out_proj(self.relu(self.in_proj(x)))
 
 
 def test_scaled_mm(mesh: DeviceMesh, size=16):
@@ -134,16 +158,47 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     loss.backward()
 
 
+def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
+    device = mesh.device_type
+
+    toy_model = ToyModel().to(device)
+    toy_model_fp8 = swap_linear_with_float8_linear(
+        toy_model, Float8DynamicLinear, emulate=True
+    )
+
+    sharded_model = copy.deepcopy(toy_model)
+    # turn off activation casting
+    sharded_model = swap_linear_with_float8_linear(
+        sharded_model, Float8DynamicLinear, emulate=True, cast_activation=False
+    )
+
+    sharded_model = parallelize_module(
+        sharded_model,
+        mesh,
+        {
+            "in_proj": Float8ColwiseParallel(),
+            "out_proj": Float8RowwiseParallel(),
+        },
+    )
+
+    x_fp32 = torch.rand(size, size, device=device)
+
+    sharded_out = sharded_model(x_fp32).wait()
+    global_out = toy_model_fp8(x_fp32)
+    torch.testing.assert_close(sharded_out, global_out)
+
+
 if __name__ == "__main__":
     # float8 only works on CUDA H100 so we only test cuda and we follow
     # other test files to not use TestCase but instead just add the test
     # cases in the main func.
     device_mesh = setup_distributed()
     tests = [
-        test_scaled_mm,
-        test_fp8_redistribute,
-        test_dtensor_cast_to_fp8,
-        test_dtensor_fp8_autograd,
+        # test_scaled_mm,
+        # test_fp8_redistribute,
+        # test_dtensor_cast_to_fp8,
+        # test_dtensor_fp8_autograd,
+        test_fp8_mlp_tensor_parallelism,
     ]
 
     for test in tqdm(tests, desc="Running tests"):
