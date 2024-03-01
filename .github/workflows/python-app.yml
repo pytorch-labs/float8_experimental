@@ -27,9 +27,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e .
         pip install -e .'[dev]'
-    - name: Lint with flake8
+    - name: Lint with ruff
       run: |
-        flake8
+        ruff check .
     - name: Test with pytest
       run: |
         pytest

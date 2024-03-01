@@ -33,17 +33,9 @@ dev = [
     "pytest==7.4.0",
     "bumpver",
     "pip-tools",
-    "flake8-pyproject"
+    "ruff==0.3.0"
 ]
-
-
 # ---------- TOOL CONFIGURATIONS ------------
-[tool.flake8]
-ignore = ['E231', 'E241', 'E501', 'C408', 'E261', 'E731', 'G004', 'W503', 'E203']
-per-file-ignores = [
-    '__init__.py:F401',
-]
-
 [tool.usort]
 first_party_detection = false
 
