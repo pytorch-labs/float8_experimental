@@ -33,4 +33,4 @@ jobs:
         ruff check .
     - name: Test with pytest
       run: |
-        pytest
+        ./test/test_everything.sh
