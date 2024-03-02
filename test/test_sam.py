@@ -25,6 +25,7 @@ torch.manual_seed(0)
 
 class TestFloat8SAMIntegrationTest:
     @pytest.mark.parametrize("data_dtype", [torch.float16, torch.bfloat16])
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
     def test_encoder_fw_bw(self, data_dtype):
         model = SamModel.from_pretrained("facebook/sam-vit-base").to(data_dtype).cuda()
         # print(model)

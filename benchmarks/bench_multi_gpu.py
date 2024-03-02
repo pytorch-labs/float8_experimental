@@ -76,7 +76,6 @@ def fsdp_main(rank, world_size, args):
     base_dtype, input_global, compile = args
 
     # basic distributed data sampling
-    bsz_global = input_global.shape[0]
     assert B % world_size == 0
     bsz_local_start = int(rank / world_size * B)
     bsz_local_end = int((rank + 1) / world_size * B)

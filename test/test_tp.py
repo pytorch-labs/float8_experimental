@@ -149,6 +149,9 @@ def test_ffn_sp(local_rank, world_size):
 
 
 if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        print("CUDA not available, skipping tests")
+        exit(0)
     local_rank, world_size = setup_model_parallel()
     test_column_parallel_linear()
     test_row_parallel_linear()

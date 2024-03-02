@@ -8,8 +8,6 @@ import logging
 from enum import auto, Enum
 from typing import List, Optional, Type
 
-import float8_experimental.config as fp8_config
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn

@@ -26,7 +26,6 @@ from float8_experimental.float8_tensor import Float8Tensor
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
 
-# Setting to unblock for calling contiguous in backwards
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
 
 
@@ -150,6 +149,7 @@ class TestGraphBreaks(DynamoTestCase):
                 return x_hp
             return x_fp8
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_float8_with_graph_break_in_the_middle(self):
         """Test that having Float8Tensor object at the boundary of a subgraph"""
         cnts = CompileCounterWithBackend("inductor")
@@ -162,6 +162,7 @@ class TestGraphBreaks(DynamoTestCase):
         self.assertEqual(cnts.frame_count, 2, "Compiled graph should have 2 frames!")
         torch.testing.assert_close(y_eager, y_compiled)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_float8_graph_input(self):
         """Test that having Float8Tensor object as a graph input"""
 
@@ -182,6 +183,7 @@ class TestGraphBreaks(DynamoTestCase):
         )
         torch.testing.assert_close(y2_eager, y2_compiled)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_float8_graph_output(self):
         """Test that having Float8Tensor object as a graph output works"""
         cnts = CompileCounterWithBackend("inductor")
