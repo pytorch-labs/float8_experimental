@@ -71,9 +71,7 @@ def test_eager_only(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base(
-        "eager", fullgraph, emulate, linear_type, dtype
-    )
+    _test_compile_base("eager", fullgraph, emulate, linear_type, dtype)
 
 
 @pytest.mark.parametrize("fullgraph", [True])
@@ -88,9 +86,7 @@ def test_aot_eager(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base(
-        "aot_eager", fullgraph, emulate, linear_type, dtype
-    )
+    _test_compile_base("aot_eager", fullgraph, emulate, linear_type, dtype)
 
 
 @pytest.mark.parametrize("fullgraph", [True])
@@ -105,9 +101,7 @@ def test_inductor(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base(
-        "inductor", fullgraph, emulate, linear_type, dtype
-    )
+    _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
 
 
 class TestGraphBreaks(DynamoTestCase):
