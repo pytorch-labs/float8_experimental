@@ -304,16 +304,16 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         return y
 
     @classmethod
-    def from_float(cls, mod, emulate: bool = False, use_activation_hooks: bool = False):
+    def from_float(cls, mod, emulate: bool = False, cast_activation: bool = True):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            use_activation_hooks (bool): whether to use activation hooks instead of inlining the casting logic
+            cast_activation (bool): whether to use activation hooks instead of inlining the casting logic
         """
-        assert not use_activation_hooks, "use_activation_hooks is not supported yet!"
+        assert cast_activation is True, "cast activation option is not supported yet, we always cast activations!"
         # TODO Follow up! This is a great idea but we need the mixin base to create real
         # Tensors and the Linear base to create empty params
         # with torch.device("meta"):

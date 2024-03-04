@@ -62,18 +62,18 @@ class Float8DynamicLinear(torch.nn.Linear):
     conversion to fp8 of the input and weight tensors.
     """
 
-    def __init__(self, use_activation_hooks: bool, **super_kwargs):
+    def __init__(self, cast_activation: bool, **super_kwargs):
         """
         Args:
-            use_activation_hooks (bool): whether to use activation hooks for casting to and from float8
+            cast_activation (bool): whether to do activation casting to and from float8
         """
         super().__init__(**super_kwargs)
 
-        self.use_activation_hooks = use_activation_hooks
+        self.cast_activation = cast_activation
 
     def forward(self, x):
         # cast x to float8_e4m3fn if not using activation hooks
-        x_fp8 = x if self.use_activation_hooks else self.cast_to_float8_e4m3fn(x)
+        x_fp8 = self.cast_to_float8_e4m3fn(x) if self.cast_activation else x
 
         # cast w to float8_e4m3fn
         w_fp8 = self.cast_to_float8_e4m3fn(self.weight)
@@ -81,7 +81,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
 
         # Cast gradY to float8_e5m2 during backward if not using activation hooks
-        if not self.use_activation_hooks:
+        if self.cast_activation:
             y = self.cast_to_float8_e5m2_bw(y)
 
         return y
@@ -97,7 +97,7 @@ class Float8DynamicLinear(torch.nn.Linear):
 
     @classmethod
     def from_float(
-        cls, mod, emulate: bool = False, use_activation_hooks: bool = False
+        cls, mod, emulate: bool = False, cast_activation: bool = True
     ) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -105,7 +105,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            use_activation_hooks (bool): whether to use activation hooks for casting to and from float8
+            cast_activation (bool): whether to do activation casting to and from float8
         """
         with torch.device("meta"):
             super_kwargs = {
@@ -113,14 +113,8 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "out_features": mod.out_features,
                 "bias": False,
             }
-            new_mod = cls(use_activation_hooks, **super_kwargs)
+            new_mod = cls(cast_activation, **super_kwargs)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
-        if new_mod.use_activation_hooks:
-            # install the hooks
-            new_mod.register_forward_pre_hook(cast_x_to_float8_e4m3fn_pre_hook)
-            new_mod.register_forward_hook(
-                cast_grad_to_float8_e5m2_backward_forward_hook
-            )
         return new_mod

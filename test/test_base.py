@@ -58,9 +58,8 @@ class TestFloat8Linear:
         m_ref,
         linear_type: LinearType,
         emulate: bool,
-        use_activation_hooks: bool = False,
     ):
-        m_fp8 = get_float8_linear(linear_type, m_ref, emulate, use_activation_hooks)
+        m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
         for _ in range(2):
             if linear_requires_sync(linear_type):
                 sync_float8_amax_and_scale_history(m_fp8)
@@ -121,15 +120,12 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
-    @pytest.mark.parametrize("use_activation_hooks", [True, False])
-    @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_linear_nobias(
         self,
         x_shape,
         linear_type: LinearType,
         emulate: bool,
-        use_activation_hooks: bool,
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -143,7 +139,7 @@ class TestFloat8Linear:
 
         x = torch.randn(*x_shape, device="cuda")
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
-        self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
+        self._test_linear_impl(x, m_ref, linear_type, emulate)
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
@@ -151,8 +147,6 @@ class TestFloat8Linear:
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
-    @pytest.mark.parametrize("use_activation_hooks", [True, False])
-    @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_linear_bias(
         self,
@@ -160,7 +154,6 @@ class TestFloat8Linear:
         linear_type: LinearType,
         emulate: bool,
         linear_dtype: torch.dtype,
-        use_activation_hooks: bool,
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -174,22 +167,19 @@ class TestFloat8Linear:
 
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
-        self._test_linear_impl(x, m_ref, linear_type, emulate, use_activation_hooks)
+        self._test_linear_impl(x, m_ref, linear_type, emulate)
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
-    @pytest.mark.parametrize("use_activation_hooks", [True, False])
-    @pytest.mark.usefixtures("x_fail_activation_hooks_with_delayed")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_autocast_outputs(
         self,
         linear_type: LinearType,
         emulate: bool,
         linear_dtype: torch.dtype,
-        use_activation_hooks: bool,
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -202,7 +192,7 @@ class TestFloat8Linear:
                 pytest.skip()
 
         m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = get_float8_linear(linear_type, m_ref, emulate, use_activation_hooks)
+        m = get_float8_linear(linear_type, m_ref, emulate)
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
@@ -240,7 +230,7 @@ class TestFloat8Linear:
         )
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = get_float8_linear(linear_type, m, emulate, False)
+        m = get_float8_linear(linear_type, m, emulate)
 
         # Cast the module to dtype
         m = m.to(dtype=linear_dtype)

@@ -33,14 +33,14 @@ def get_float8_linear(
     linear_type: LinearType,
     linear_ref: torch.nn.Linear,
     emulate: bool = False,
-    use_activation_hooks: bool = False,
+    cast_activation: bool = True,
 ):
     """Returns a Float8Linear module of the given type, initialized from linear_ref.
     Args:
         linear_type: The type of Float8Linear to return.
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
-        use_activation_hooks: Whether to use activation hooks for dynamic linear.
+        cast_activation: Whether to use activation hooks for dynamic linear.
     """
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
@@ -48,12 +48,12 @@ def get_float8_linear(
     }
     if linear_type not in LINEAR_TYPE_MAP:
         raise ValueError(f"linear_type must be one of {LINEAR_TYPE_MAP.keys()}")
-    if use_activation_hooks and linear_type != LinearType.DYNAMIC:
-        raise ValueError("use_activation_hooks is only supported for dynamic linear")
+    if not cast_activation and linear_type != LinearType.DYNAMIC:
+        raise ValueError("cast_activation option is only supported for dynamic linear")
     return LINEAR_TYPE_MAP[linear_type].from_float(
         copy.deepcopy(linear_ref),
         emulate=emulate,
-        use_activation_hooks=use_activation_hooks,
+        cast_activation=cast_activation,
     )
 
 
@@ -90,7 +90,7 @@ def swap_linear_with_float8_linear(
     *,
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
-    use_activation_hooks: bool = False,
+    cast_activation: bool = True,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -102,7 +102,7 @@ def swap_linear_with_float8_linear(
         skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
             Linear submodules of these skipped modules will also be skipped.
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
-        use_activation_hooks (bool): Whether to cast activations to fp8 using module hooks.
+        cast_activation (bool): Whether to cast activations to fp8 using module hooks.
     """
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear):
@@ -111,7 +111,7 @@ def swap_linear_with_float8_linear(
                 f"Does not support a root nn.Linear with children: {module}"
             )
         return module_cls.from_float(
-            module, emulate=emulate, use_activation_hooks=use_activation_hooks
+            module, emulate=emulate, cast_activation=cast_activation
         )
 
     # Mark all modules to skip as visited
@@ -135,7 +135,7 @@ def swap_linear_with_float8_linear(
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
             float8linear_module = module_cls.from_float(
-                module, emulate=emulate, use_activation_hooks=use_activation_hooks
+                module, emulate=emulate, cast_activation=cast_activation
             )
             setattr(parent_module, module_name, float8linear_module)
 
