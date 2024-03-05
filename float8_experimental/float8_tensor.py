@@ -5,10 +5,15 @@
 # LICENSE file in the root directory of this source tree.
 from typing import Dict, Optional
 
+import float8_experimental
+
 import torch
 
-from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
-
+from float8_experimental.float8_utils import (
+    tensor_to_amax,
+    tensor_to_scale,
+    to_fp8_saturated,
+)
 from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
@@ -35,8 +40,23 @@ def to_fp8_no_autograd(
         float8_dtype: the float8 dtype to use
         emulate: whether to emulate the matmuls in fp32
     """
-    x_scaled = x * x_scale
-    bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
+    if (
+        float8_experimental.config.use_fused_cast
+        and x.is_cuda
+        and x.dtype in {torch.float32, torch.bfloat16}
+    ):
+        from driss_torch import saturated_cast
+
+        if x.dim() in {3, 4}:
+            prev_x_shape = x.shape
+            x = x.reshape(-1, x.size(-1))
+            bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
+            bits_fp8 = bits_fp8.reshape(prev_x_shape)
+        else:
+            bits_fp8 = saturated_cast(x, x_scale, float8_dtype)
+    else:
+        x_scaled = x * x_scale
+        bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
 
     if isinstance(bits_fp8, DTensor):
         assert isinstance(

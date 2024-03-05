@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
+import float8_experimental
 import torch
 import torch.distributed as dist
 
@@ -22,8 +23,10 @@ EPS = 1e-12
 
 
 @torch.no_grad()
-def amax_to_scale(amax, float8_dtype, orig_dtype):
-    scale = torch.empty_like(amax, dtype=torch.float32)
+def amax_to_scale(
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
+):
+    assert amax.dtype == torch.float32, "amax must be a float32 tensor"
     if float8_dtype == torch.float8_e4m3fn:
         res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
     else:  # e5m2
@@ -34,16 +37,15 @@ def amax_to_scale(amax, float8_dtype, orig_dtype):
     # to care about this for float32/bfloat16.
     if orig_dtype is torch.float16:
         res = torch.clamp(res, max=FP16_MAX_POS)
-    scale.copy_(res)
-    return scale
+    return res
 
 
 @torch.no_grad()
 def amax_history_to_scale(
-    amax_history,
-    float8_dtype,
-    orig_dtype,
-    history_to_scale_fn_type,
+    amax_history: torch.Tensor,
+    float8_dtype: torch.dtype,
+    orig_dtype: torch.dtype,
+    history_to_scale_fn_type: str,
 ):
     if history_to_scale_fn_type == "max":
         amax = torch.max(amax_history)
@@ -69,7 +71,12 @@ def amax_history_to_scale_stack(
 
 @torch.no_grad()
 def tensor_to_amax(x, distributed_reduction=False):
-    amax = torch.max(torch.abs(x))
+    if float8_experimental.config.use_fused_cast and x.is_cuda:
+        from float8_experimental.fused_kernels.fused_casting_kernels import abs_max
+
+        amax = abs_max(x)
+    else:
+        amax = x.abs().max().to(torch.float32)
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
@@ -81,8 +88,14 @@ def tensor_to_amax(x, distributed_reduction=False):
 
 
 @torch.no_grad()
-def tensor_to_scale(x, float8_dtype):
+def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype):
     amax = tensor_to_amax(x)
+    if float8_experimental.config.use_fused_cast and x.is_cuda:
+        from float8_experimental.fused_kernels.fused_casting_kernels import (
+            abs_max_to_scale,
+        )
+
+        return abs_max_to_scale(amax, float8_dtype, x.dtype == torch.float16)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 

@@ -19,3 +19,8 @@ enable_pre_and_post_forward = True
 # TODO(before land): add test coverage for both cases
 # dynamic_use_activation_hooks = True
 # dynamic_use_activation_hooks = False
+
+# This is a global flag that controls whether the fused_cast kernels,
+# This can offer greater performance in eager but it is still recommended
+# That if you are using torch.compile to set this to False.
+use_fused_cast = True
