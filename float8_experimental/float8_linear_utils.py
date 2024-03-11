@@ -14,7 +14,7 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import amax_history_to_scale_stack
+from float8_experimental.float8_utils import amax_history_to_scale_stack, FP8Dtypes
 from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ def get_float8_linear(
     linear_ref: torch.nn.Linear,
     emulate: bool = False,
     use_activation_hooks: bool = False,
+    fp8_dtypes: Optional[FP8Dtypes] = None,
 ):
     """Returns a Float8Linear module of the given type, initialized from linear_ref.
     Args:
@@ -41,6 +42,7 @@ def get_float8_linear(
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
         use_activation_hooks: Whether to use activation hooks for dynamic linear.
+        fp8_dtypes: The FP8 dtypes to use.
     """
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
@@ -54,6 +56,7 @@ def get_float8_linear(
         copy.deepcopy(linear_ref),
         emulate=emulate,
         use_activation_hooks=use_activation_hooks,
+        fp8_dtypes=fp8_dtypes,
     )
 
 
@@ -161,6 +164,24 @@ def get_float8_layers(model: torch.nn.Module):
     return fp8_layers
 
 
+def get_float8_layers_dtype(model: torch.nn.Module):
+    """Iterates through the model and returns all the Float8Linear layers.
+    Args:
+        model (torch.nn.Module): The model to look for Float8Linear layers in.
+    """
+    fp8_dtype_fw = set()
+    fp8_dtype_bw = set()
+    # Get all fp8 layers and tensors
+    for child in model.modules():
+        if isinstance(child, Float8Linear):
+            fp8_dtype_fw.add(child.fp8_dtype_fw)
+            fp8_dtype_bw.add(child.fp8_dtype_bw)
+
+    assert len(fp8_dtype_fw) == 1, "All fp8 layers must have the same fp8_dtype_fw"
+    assert len(fp8_dtype_bw) == 1, "All fp8 layers must have the same fp8_dtype_bw"
+    return fp8_dtype_fw.pop(), fp8_dtype_bw.pop()
+
+
 @torch.no_grad()
 def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) -> None:
     """
@@ -193,6 +214,8 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             "Calling sync_float8_amax_and_scale_history on a module with no Float8Linear layers"
         )
         return
+
+    fp8_dtype_fw, fp8_dtype_bw = get_float8_layers_dtype(model)
 
     def inner_func():
         """Why do we have this inner_function?
@@ -290,13 +313,13 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
 
         # Calculate the new scales from the updated history stacks
         new_x_scales = amax_history_to_scale_stack(
-            fp8_x_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+            fp8_x_amax_history_stack, fp8_dtype_fw, x_dtype, scale_fn_recipe
         )
         new_w_scales = amax_history_to_scale_stack(
-            fp8_w_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+            fp8_w_amax_history_stack, fp8_dtype_fw, x_dtype, scale_fn_recipe
         )
         new_dL_dY_scales = amax_history_to_scale_stack(
-            fp8_dL_dY_amax_history_stack, torch.float8_e5m2, x_dtype, scale_fn_recipe
+            fp8_dL_dY_amax_history_stack, fp8_dtype_bw, x_dtype, scale_fn_recipe
         )
 
         # Iterate through the layers and update the scales

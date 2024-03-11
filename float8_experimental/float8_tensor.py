@@ -230,7 +230,7 @@ class Float8Tensor(torch.Tensor):
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
         emulate: bool = False,
-    ):
+    ) -> "Float8Tensor":
         """Converts a higher precision tensor to float8 in a differentiable way.
 
         Args:

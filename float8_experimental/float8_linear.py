@@ -14,7 +14,7 @@ owners to implement their own UEX.
 
 import dataclasses
 
-from typing import Optional
+from typing import Literal, Optional
 
 import float8_experimental.config as config
 
@@ -26,18 +26,19 @@ from float8_experimental.float8_utils import (
     amax_history_to_scale,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    FP8Dtypes,
     tensor_to_amax,
 )
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
-    x,
-    cur_amax,
-    amax_history,
-    scale,
-    scale_fn_name,
-    float8_dtype,
-    is_initialized,
+    x: torch.Tensor,
+    cur_amax: torch.Tensor,
+    amax_history: torch.Tensor,
+    scale: torch.Tensor,
+    scale_fn_name: Literal["max"],
+    float8_dtype: torch.dtype,
+    is_initialized: bool,
 ):
     """
     If x is about to be cast to `float8` and the amax buffers are not initialized,
@@ -74,11 +75,13 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         scale_fn_name,
         is_amax_initialized,
         emulate: bool,
+        fp8_dtype: torch.dtype,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
         ctx.emulate = emulate
+        ctx.fp8_dtype = fp8_dtype
         return tensor
 
     @staticmethod
@@ -93,14 +96,14 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             fp8_amax_history_dL_dY,
             fp8_scale_dL_dY,
             scale_fn_name,
-            torch.float8_e5m2,
+            ctx.fp8_dtype,
             is_amax_initialized,
         )
 
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
 
-        res = to_fp8_no_autograd(go, fp8_scale_dL_dY, torch.float8_e5m2, ctx.emulate)
-        empty_grads = None, None, None, None, None, None
+        res = to_fp8_no_autograd(go, fp8_scale_dL_dY, ctx.fp8_dtype, ctx.emulate)
+        empty_grads = None, None, None, None, None, None, None
         return res, *empty_grads
 
 
@@ -178,6 +181,14 @@ class Float8LinearMixin(object):
         # and torch.compile, this option can disable them
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
+        # In the forward we will cast both the activation and weight to float8
+        # There currenlty 4 different variants in pytorch, see
+        # https://github.com/openxla/stablehlo/blob/main/rfcs/20230321-fp8_fnuz.md
+        # fp8_dtype_fw will be the tyep used for casting the activation and weight
+        # fp8_dtype_bw will be the typeused for casting the gradient
+        self.fp8_dtype_fw = torch.float8_e4m3fn
+        self.fp8_dtype_bw = torch.float8_e5m2
+
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
     ) -> None:
@@ -212,11 +223,11 @@ class Float8LinearMixin(object):
             self.fp8_amax_history_x,
             self.fp8_scale_x,
             scale_fn_name,
-            torch.float8_e4m3fn,
+            self.fp8_dtype_fw,
             is_amax_initialized,
         )
         x_fp8 = Float8Tensor.to_float8(
-            x, self.fp8_scale_x, torch.float8_e4m3fn, self.fp8_amax_x, self.emulate
+            x, self.fp8_scale_x, self.fp8_dtype_fw, self.fp8_amax_x, self.emulate
         )
         return x_fp8
 
@@ -230,14 +241,14 @@ class Float8LinearMixin(object):
             self.fp8_amax_history_w,
             self.fp8_scale_w,
             scale_fn_name,
-            torch.float8_e4m3fn,
+            self.fp8_dtype_fw,
             is_amax_initialized,
         )
 
         w_fp8 = Float8Tensor.to_float8(
             w,
             self.fp8_scale_w,
-            torch.float8_e4m3fn,
+            self.fp8_dtype_fw,
             self.fp8_amax_w,
             self.emulate,
         )
@@ -255,6 +266,7 @@ class Float8LinearMixin(object):
             scale_fn_name,
             self.is_amax_initialized,
             emulate,
+            self.fp8_dtype_bw,
         )
         return y
 
@@ -286,10 +298,10 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
     scales in way friendly to delayed scaling.
     """
 
-    def forward(self, x):
-        self.float8_pre_forward(x)
+    def forward(self, input):
+        self.float8_pre_forward(input)
 
-        x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
+        x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         y = torch.matmul(x_fp8, w_fp8.t())
@@ -304,7 +316,13 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         return y
 
     @classmethod
-    def from_float(cls, mod, emulate: bool = False, use_activation_hooks: bool = False):
+    def from_float(
+        cls,
+        mod,
+        emulate: bool = False,
+        use_activation_hooks: bool = False,
+        fp8_dtypes: Optional[FP8Dtypes] = None,
+    ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
@@ -314,6 +332,8 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
             use_activation_hooks (bool): whether to use activation hooks instead of inlining the casting logic
         """
         assert not use_activation_hooks, "use_activation_hooks is not supported yet!"
+        if fp8_dtypes is None:
+            fp8_dtypes = FP8Dtypes()
         # TODO Follow up! This is a great idea but we need the mixin base to create real
         # Tensors and the Linear base to create empty params
         # with torch.device("meta"):
@@ -321,6 +341,8 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
+        new_mod.fp8_dtype_fw = fp8_dtypes.fp8_dtype_fw
+        new_mod.fp8_dtype_bw = fp8_dtypes.fp8_dtype_bw
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)
         return new_mod
