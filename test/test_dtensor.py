@@ -169,7 +169,7 @@ def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
     sharded_model = copy.deepcopy(toy_model)
     # turn off activation casting
     sharded_model = swap_linear_with_float8_linear(
-        sharded_model, Float8DynamicLinear, emulate=True, cast_activation=False
+        sharded_model, Float8DynamicLinear, emulate=True
     )
 
     sharded_model = parallelize_module(

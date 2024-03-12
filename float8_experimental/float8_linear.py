@@ -311,7 +311,6 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            cast_activation (bool): whether to use activation hooks instead of inlining the casting logic
         """
         # TODO Follow up! This is a great idea but we need the mixin base to create real
         # Tensors and the Linear base to create empty params

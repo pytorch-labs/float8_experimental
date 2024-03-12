@@ -30,14 +30,16 @@ class Float8ColwiseParallel(ColwiseParallel):
 
         # transform the input layouts to the desired layouts of ColwiseParallel
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(
+                placements=desired_input_layouts, async_op=True
+            )
         return input_tensor
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
         outputs = outputs.redistribute(
-            placements=output_layouts
+            placements=output_layouts, async_op=True
         )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
@@ -71,7 +73,9 @@ class Float8RowwiseParallel(RowwiseParallel):
         input_tensor = mod.cast_to_float8_e4m3fn(input_tensor)  # DTensor(Float8Tensor)
 
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(
+                placements=desired_input_layouts, async_op=True
+            )
         return input_tensor
 
     @staticmethod
@@ -79,7 +83,7 @@ class Float8RowwiseParallel(RowwiseParallel):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
-        outputs = outputs.redistribute(placements=output_layouts)
+        outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
         outputs = mod.cast_to_float8_e5m2_bw(outputs)
