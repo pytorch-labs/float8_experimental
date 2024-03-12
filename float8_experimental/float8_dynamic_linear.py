@@ -8,7 +8,11 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 import torch
 
-from float8_experimental.float8_tensor import Float8Tensor, to_fp8_no_autograd
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    tensor_already_casted_to_fp8,
+    to_fp8_no_autograd,
+)
 from float8_experimental.float8_utils import tensor_to_scale
 
 
@@ -30,30 +34,14 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gradY):
+        if tensor_already_casted_to_fp8(gradY):
+            # check to early return if already casted to float8
+            return gradY, None
         gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
         fp8_tensor = to_fp8_no_autograd(
             gradY, gradY_scale, torch.float8_e5m2, ctx.emulate
         )
         return fp8_tensor, None
-
-
-def cast_x_to_float8_e4m3fn_pre_hook(module, args):
-    """
-    Hook to cast the incoming activation to `torch.float8_e4m3fn`
-    """
-    return module.cast_to_float8_e4m3fn(args[0])
-
-
-def cast_grad_to_float8_e5m2_backward_forward_hook(module, input, output):
-    """This is a forward hook that sends the output of the model through
-    a no-op in the forward but a cast to float8_e5m2 in the backward.
-
-    Args:
-        module (nn.Module): the module to cast the output of
-        input (Tensor): the input to the module forward call
-        output (Tensor): the output of the module forward
-    """
-    return module.cast_to_float8_e5m2_bw(output)
 
 
 class Float8DynamicLinear(torch.nn.Linear):
@@ -62,18 +50,12 @@ class Float8DynamicLinear(torch.nn.Linear):
     conversion to fp8 of the input and weight tensors.
     """
 
-    def __init__(self, cast_activation: bool, **super_kwargs):
-        """
-        Args:
-            cast_activation (bool): whether to do activation casting to and from float8
-        """
+    def __init__(self, **super_kwargs):
         super().__init__(**super_kwargs)
-
-        self.cast_activation = cast_activation
 
     def forward(self, x):
         # cast x to float8_e4m3fn if not using activation hooks
-        x_fp8 = self.cast_to_float8_e4m3fn(x) if self.cast_activation else x
+        x_fp8 = self.cast_to_float8_e4m3fn(x)
 
         # cast w to float8_e4m3fn
         w_fp8 = self.cast_to_float8_e4m3fn(self.weight)
@@ -81,12 +63,14 @@ class Float8DynamicLinear(torch.nn.Linear):
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
 
         # Cast gradY to float8_e5m2 during backward if not using activation hooks
-        if self.cast_activation:
-            y = self.cast_to_float8_e5m2_bw(y)
+        y = self.cast_to_float8_e5m2_bw(y)
 
         return y
 
     def cast_to_float8_e4m3fn(self, inpt_tensor: torch.Tensor) -> Float8Tensor:
+        if tensor_already_casted_to_fp8(inpt_tensor):
+            # check to early return if already casted to float8
+            return inpt_tensor
         scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
         return Float8Tensor.to_float8(
             inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate
@@ -96,16 +80,13 @@ class Float8DynamicLinear(torch.nn.Linear):
         return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
 
     @classmethod
-    def from_float(
-        cls, mod, emulate: bool = False, cast_activation: bool = True
-    ) -> "Float8DynamicLinear":
+    def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            cast_activation (bool): whether to do activation casting to and from float8
         """
         with torch.device("meta"):
             super_kwargs = {
@@ -113,7 +94,7 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "out_features": mod.out_features,
                 "bias": False,
             }
-            new_mod = cls(cast_activation, **super_kwargs)
+            new_mod = cls(**super_kwargs)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
