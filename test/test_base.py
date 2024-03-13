@@ -15,6 +15,7 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    filter_out_small_unaligned_layers,
     get_float8_linear,
     linear_requires_sync,
     LinearType,
@@ -29,6 +30,7 @@ from float8_experimental.float8_utils import (
     E4M3_MAX_POS,
     E5M2_MAX_POS,
     FP16_MAX_POS,
+    fp8_tensor_statistics,
     tensor_to_scale,
 )
 
@@ -386,6 +388,35 @@ class TestFloat8LinearUtils(unittest.TestCase):
             self.assertIsInstance(model[2].lin1, module_cls)
             self.assertIsInstance(model[2].lin2, module_cls)
 
+    def test_swap_linears_with_filters(self):
+        class MLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.lin1 = nn.Linear(dim, 4 * dim)
+                self.lin2 = nn.Linear(4 * dim, 4 * dim)
+
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            model = nn.Sequential(MLP(8), nn.Linear(32, 32), MLP(40))
+            # filter out the linear layers whose shape is smaller than 32 or non-divisible by 16.
+            model = swap_linear_with_float8_linear(
+                model,
+                module_cls,
+                emulate=emulate,
+                linear_layer_filter=filter_out_small_unaligned_layers(32),
+            )
+            # in_features=8, out_features=32, 8 is less than 32.
+            self.assertNotIsInstance(model[0].lin1, module_cls)
+            # in_features=32, out_features=32,
+            self.assertIsInstance(model[0].lin2, module_cls)
+            # in_features=32, out_features=32,
+            self.assertIsInstance(model[1], module_cls)
+            # in_features=40, out_features=160, 40 is not divisible by 16.
+            self.assertNotIsInstance(model[2].lin1, module_cls)
+            # in_features=160, out_features=160,
+            self.assertIsInstance(model[2].lin2, module_cls)
+
     def test_swap_submodule_linears_with_skip(self):
         class MLP(nn.Module):
             def __init__(self, dim: int):
@@ -409,6 +440,41 @@ class TestFloat8LinearUtils(unittest.TestCase):
             self.assertNotIsInstance(model[2].lin2, module_cls)
             self.assertIsInstance(model[2].lin1, nn.Linear)
             self.assertIsInstance(model[2].lin2, nn.Linear)
+
+    def test_fp8_tensor_statistics(self):
+        hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
+        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        for hp_dtype, lp_dtype in itertools.product(hp_dtypes, lp_dtypes):
+            x1_hp = torch.ones(4, 4, dtype=hp_dtype)
+            tensor_len = x1_hp.numel()
+
+            # Overflow caused by a too large scaling factor
+            s_overflow = torch.tensor(1e9)
+            fp8_overflow = Float8Tensor.to_float8(x1_hp, s_overflow, lp_dtype)
+            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
+                fp8_overflow, lp_dtype
+            )
+            self.assertEqual((underflow_cnt, fp8_overflow_cnt), (0, tensor_len))
+
+            # Underflow caused by a too small scaling factor
+            s_underflow = torch.tensor(1e-9)
+            fp8_underflow = Float8Tensor.to_float8(x1_hp, s_underflow, lp_dtype)
+            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
+                fp8_underflow, lp_dtype
+            )
+            self.assertEqual((underflow_cnt, fp8_overflow_cnt), (tensor_len, 0))
+
+            # Both overflow and underflow
+            x2_hp = torch.cat((x1_hp * 1e9, x1_hp * 1.0, x1_hp * 1e-9), 0)
+            fp8_over_underflow = Float8Tensor.to_float8(
+                x2_hp, torch.tensor(1.0), lp_dtype
+            )
+            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
+                fp8_over_underflow, lp_dtype
+            )
+            self.assertEqual(
+                (underflow_cnt, fp8_overflow_cnt), (tensor_len, tensor_len)
+            )
 
 
 if __name__ == "__main__":
