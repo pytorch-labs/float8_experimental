@@ -6,7 +6,7 @@
 import copy
 import logging
 from enum import auto, Enum
-from typing import List, Optional, Type
+from typing import Callable, List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -79,12 +79,27 @@ def _update_history_stack(
     amax_history_stack.copy_(new_amax_history_stack)
 
 
+def filter_out_small_unaligned_layers(size_limit: int) -> Callable[[nn.Linear], bool]:
+    """
+    Returns a callable that filters out small (dimensions less than the given `size_limit`)
+        and unaligned (dimenstions not divisible by 16) layers.
+    It can be passed as the `linear_layer_filter` argument to `swap_linear_with_float8_linear`.
+    """
+    return (
+        lambda linear_layer: linear_layer.in_features >= size_limit
+        and linear_layer.out_features >= size_limit
+        and linear_layer.in_features % 16 == 0
+        and linear_layer.out_features % 16 == 0
+    )
+
+
 def swap_linear_with_float8_linear(
     module: nn.Module,
     module_cls: Type[nn.Module],
     *,
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
+    linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -96,9 +111,13 @@ def swap_linear_with_float8_linear(
         skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
             Linear submodules of these skipped modules will also be skipped.
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
+        linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
+            that pass the filter function will be swapped.
     """
     module_names_to_skip = set(skip_fqn_list or [])
-    if isinstance(module, nn.Linear):
+    if isinstance(module, nn.Linear) and (
+        linear_layer_filter is None or linear_layer_filter(module)
+    ):
         if len(list(module.children())) > 0:
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
@@ -121,7 +140,9 @@ def swap_linear_with_float8_linear(
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
                 post_order_traversal(child_module, child_module_name, module)
-        if isinstance(module, nn.Linear):
+        if isinstance(module, nn.Linear) and (
+            linear_layer_filter is None or linear_layer_filter(module)
+        ):
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"

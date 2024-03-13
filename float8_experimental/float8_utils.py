@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Tuple
+
 import torch
 import torch.distributed as dist
 
@@ -104,6 +106,20 @@ def compute_error(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+
+def fp8_tensor_statistics(
+    tensor: torch.Tensor, float8_dtype=torch.float8_e4m3fn
+) -> Tuple[int, ...]:
+    """Calculate FP8 tensor stats"""
+    if float8_dtype == torch.float8_e4m3fn:
+        FP8_MAX = E4M3_MAX_POS
+    else:  # e5m2
+        FP8_MAX = E5M2_MAX_POS
+    tensor_orig_type = tensor._data.to(dtype=tensor._orig_dtype)
+    num_overflows = (tensor_orig_type == FP8_MAX).sum().item()
+    num_underflows = (tensor_orig_type == 0).sum().item()
+    return (num_underflows, num_overflows)
 
 
 def is_row_major(stride):
