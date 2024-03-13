@@ -9,6 +9,7 @@ import torch
 
 from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 
+import torch.distributed._functional_collectives as funcol
 from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
@@ -18,13 +19,13 @@ def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
     """
     Check if the tensor is already casted to fp8
     """
-    print(f">>>> check tensor_already_casted_to_fp8??? {tensor}")
     if isinstance(tensor, Float8Tensor):
         return True
-    elif isinstance(tensor, DTensor) and isinstance(tensor._local_tensor, Float8Tensor):
+    elif isinstance(tensor, DTensor):
         # TODO: shall we stick to public API and directly use tensor.to_local() here?
-        print(f">>>> hgere???")
-        return True
+        return tensor_already_casted_to_fp8(tensor._local_tensor)
+    elif isinstance(tensor, funcol.AsyncCollectiveTensor):
+        return tensor_already_casted_to_fp8(tensor.elem)
 
     return False
 
