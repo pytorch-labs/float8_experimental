@@ -37,9 +37,10 @@ class Float8ColwiseParallel(ColwiseParallel):
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        outputs = outputs.redistribute(
-            placements=output_layouts, async_op=True
-        )  # DTensor(torch.Tensor)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(
+                placements=output_layouts, async_op=True
+            )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
         outputs = mod.cast_to_float8_e5m2_bw(outputs)
@@ -82,7 +83,8 @@ class Float8RowwiseParallel(RowwiseParallel):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
-        outputs = outputs.redistribute(placements=output_layouts, async_op=True)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
         outputs = mod.cast_to_float8_e5m2_bw(outputs)

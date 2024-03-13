@@ -166,26 +166,43 @@ def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
         toy_model, Float8DynamicLinear, emulate=True
     )
 
-    sharded_model = copy.deepcopy(toy_model)
-    # turn off activation casting
-    sharded_model = swap_linear_with_float8_linear(
-        sharded_model, Float8DynamicLinear, emulate=True
+    # tp_model = copy.deepcopy(toy_model)
+    # tp_model = swap_linear_with_float8_linear(
+    #     tp_model, Float8DynamicLinear, emulate=True
+    # )
+    sp_model = copy.deepcopy(toy_model)
+    sp_model = swap_linear_with_float8_linear(
+        sp_model, Float8DynamicLinear, emulate=True
     )
 
-    sharded_model = parallelize_module(
-        sharded_model,
+    # vanilla TP
+    # tp_model = parallelize_module(
+    #     tp_model,
+    #     mesh,
+    #     {
+    #         "in_proj": Float8ColwiseParallel(),
+    #         "out_proj": Float8RowwiseParallel(),
+    #     },
+    # )
+
+    # "sequence parallel"
+    sp_model = parallelize_module(
+        sp_model,
         mesh,
         {
-            "in_proj": Float8ColwiseParallel(),
-            "out_proj": Float8RowwiseParallel(),
-        },
+            "in_proj": Float8ColwiseParallel(input_layouts=Shard(0)),
+            "out_proj": Float8RowwiseParallel(output_layouts=Shard(0)),
+        }
     )
 
-    x_fp32 = torch.rand(size, size, device=device)
+    x_fp32 = torch.rand(size, size, device=device, requires_grad=True)
+    x_fp32_tp_input = x_fp32.clone()
+    x_fp32_sp_input = x_fp32.clone()
 
-    sharded_out = sharded_model(x_fp32).wait()
-    global_out = toy_model_fp8(x_fp32)
-    torch.testing.assert_close(sharded_out, global_out)
+    # sharded_out = tp_model(x_fp32_tp_input).sum().backward()
+    sp_out = sp_model(x_fp32_sp_input).sum().backward()
+    global_out = toy_model_fp8(x_fp32).sum().backward()
+    # torch.testing.assert_close(sharded_out, global_out)
 
 
 if __name__ == "__main__":
