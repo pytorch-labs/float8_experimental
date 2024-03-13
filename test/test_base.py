@@ -15,6 +15,7 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    filter_out_small_unaligned_layers,
     get_float8_linear,
     linear_requires_sync,
     LinearType,
@@ -395,6 +396,35 @@ class TestFloat8LinearUtils(unittest.TestCase):
             self.assertIsInstance(model[0].lin2, module_cls)
             self.assertIsInstance(model[1], module_cls)
             self.assertIsInstance(model[2].lin1, module_cls)
+            self.assertIsInstance(model[2].lin2, module_cls)
+
+    def test_swap_linears_with_filters(self):
+        class MLP(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.lin1 = nn.Linear(dim, 4 * dim)
+                self.lin2 = nn.Linear(4 * dim, 4 * dim)
+
+        for module_cls, emulate in itertools.product(
+            [Float8Linear, Float8DynamicLinear], [True, False]
+        ):
+            model = nn.Sequential(MLP(8), nn.Linear(32, 32), MLP(40))
+            # filter out the linear layers whose shape is smaller than 32 or non-divisible by 16.
+            model = swap_linear_with_float8_linear(
+                model,
+                module_cls,
+                emulate=emulate,
+                linear_layer_filter=filter_out_small_unaligned_layers(32),
+            )
+            # in_features=8, out_features=32, 8 is less than 32.
+            self.assertNotIsInstance(model[0].lin1, module_cls)
+            # in_features=32, out_features=32,
+            self.assertIsInstance(model[0].lin2, module_cls)
+            # in_features=32, out_features=32,
+            self.assertIsInstance(model[1], module_cls)
+            # in_features=40, out_features=160, 40 is not divisible by 16.
+            self.assertNotIsInstance(model[2].lin1, module_cls)
+            # in_features=160, out_features=160,
             self.assertIsInstance(model[2].lin2, module_cls)
 
     def test_swap_submodule_linears_with_skip(self):
