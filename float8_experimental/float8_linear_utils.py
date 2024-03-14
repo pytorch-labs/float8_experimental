@@ -33,14 +33,12 @@ def get_float8_linear(
     linear_type: LinearType,
     linear_ref: torch.nn.Linear,
     emulate: bool = False,
-    use_activation_hooks: bool = False,
 ):
     """Returns a Float8Linear module of the given type, initialized from linear_ref.
     Args:
         linear_type: The type of Float8Linear to return.
         linear_ref: The linear module to initialize from.
         emulate: Whether to emulate the fp8 matmul logic in float32.
-        use_activation_hooks: Whether to use activation hooks for dynamic linear.
     """
     LINEAR_TYPE_MAP = {
         LinearType.DELAYED: Float8Linear,
@@ -48,12 +46,9 @@ def get_float8_linear(
     }
     if linear_type not in LINEAR_TYPE_MAP:
         raise ValueError(f"linear_type must be one of {LINEAR_TYPE_MAP.keys()}")
-    if use_activation_hooks and linear_type != LinearType.DYNAMIC:
-        raise ValueError("use_activation_hooks is only supported for dynamic linear")
     return LINEAR_TYPE_MAP[linear_type].from_float(
         copy.deepcopy(linear_ref),
         emulate=emulate,
-        use_activation_hooks=use_activation_hooks,
     )
 
 
@@ -104,7 +99,6 @@ def swap_linear_with_float8_linear(
     *,
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
-    use_activation_hooks: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
 ) -> nn.Module:
     """
@@ -117,7 +111,6 @@ def swap_linear_with_float8_linear(
         skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
             Linear submodules of these skipped modules will also be skipped.
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
-        use_activation_hooks (bool): Whether to cast activations to fp8 using module hooks.
         linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
             that pass the filter function will be swapped.
     """
@@ -129,9 +122,7 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(
-            module, emulate=emulate, use_activation_hooks=use_activation_hooks
-        )
+        return module_cls.from_float(module, emulate=emulate)
 
     # Mark all modules to skip as visited
     root_module = module
@@ -155,9 +146,7 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            float8linear_module = module_cls.from_float(
-                module, emulate=emulate, use_activation_hooks=use_activation_hooks
-            )
+            float8linear_module = module_cls.from_float(module, emulate=emulate)
             setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
