@@ -77,7 +77,7 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     return a_data, a_scale, b_data, b_scale
 
 
-@implements([aten.mm.default])
+@implements([aten.mm.default, aten.matmul.default])
 def float8_mm(aten_op, args, kwargs=None):
     a = args[0]
     b = args[1]
