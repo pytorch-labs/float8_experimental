@@ -7,15 +7,26 @@
 Test numerics of manually defined float16 TP vs float8 TP of toy models
 """
 
+import copy
 import os
 
 import torch
+import torch.nn as nn
 
-from float8_experimental.float8_dynamic_linear import NoopFwToFloat8E5M2Bw
+from float8_experimental.float8_dynamic_linear import (
+    Float8DynamicLinear,
+    NoopFwToFloat8E5M2Bw,
+)
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor_parallel import (
+    Float8ColwiseParallel,
+    Float8RowwiseParallel,
+)
 from float8_experimental.float8_utils import tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.tensor.parallel import parallelize_module
 from tqdm import tqdm
 
 
@@ -25,6 +36,19 @@ def setup_distributed():
     # seed must be the same in all processes
     torch.manual_seed(1)
     return device_mesh
+
+
+class ToyModel(nn.Module):
+    """MLP based model"""
+
+    def __init__(self):
+        super(ToyModel, self).__init__()
+        self.in_proj = nn.Linear(16, 32)
+        self.relu = nn.ReLU()
+        self.out_proj = nn.Linear(32, 16)
+
+    def forward(self, x):
+        return self.out_proj(self.relu(self.in_proj(x)))
 
 
 def test_scaled_mm(mesh: DeviceMesh, size=16):
@@ -134,6 +158,65 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     loss.backward()
 
 
+def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
+    device = mesh.device_type
+
+    toy_model = ToyModel().to(device)
+    toy_model_fp8 = swap_linear_with_float8_linear(
+        toy_model, Float8DynamicLinear, emulate=True
+    )
+
+    tp_model = copy.deepcopy(toy_model)
+    tp_model = swap_linear_with_float8_linear(
+        tp_model, Float8DynamicLinear, emulate=True
+    )
+    sp_model = copy.deepcopy(toy_model)
+    sp_model = swap_linear_with_float8_linear(
+        sp_model, Float8DynamicLinear, emulate=True
+    )
+
+    # vanilla TP
+    tp_model = parallelize_module(
+        tp_model,
+        mesh,
+        {
+            "in_proj": Float8ColwiseParallel(),
+            "out_proj": Float8RowwiseParallel(),
+        },
+    )
+
+    # "sequence parallel" mlp computation
+    sp_model = parallelize_module(
+        sp_model,
+        mesh,
+        {
+            "in_proj": Float8ColwiseParallel(input_layouts=Shard(0)),
+            "out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(0), use_local_output=False
+            ),
+        },
+    )
+
+    x_fp32 = torch.rand(size * 2, size, device=device, requires_grad=False)
+    x_fp32_tp_input = x_fp32.clone()
+    x_fp32_sp_input = distribute_tensor(x_fp32.clone(), mesh, [Shard(0)])
+
+    tp_out = tp_model(x_fp32_tp_input)
+    tp_out.sum().backward()
+    sp_out = sp_model(x_fp32_sp_input)
+    sp_out.sum().backward()
+    global_out = toy_model_fp8(x_fp32)
+    global_out.sum().backward()
+    torch.testing.assert_close(tp_out, global_out)
+    torch.testing.assert_close(sp_out.full_tensor(), global_out)
+    torch.testing.assert_close(
+        tp_model.in_proj.weight.grad, sp_model.in_proj.weight.grad
+    )
+    torch.testing.assert_close(
+        tp_model.out_proj.weight.grad, sp_model.out_proj.weight.grad
+    )
+
+
 if __name__ == "__main__":
     # float8 only works on CUDA H100 so we only test cuda and we follow
     # other test files to not use TestCase but instead just add the test
@@ -144,6 +227,7 @@ if __name__ == "__main__":
         test_fp8_redistribute,
         test_dtensor_cast_to_fp8,
         test_dtensor_fp8_autograd,
+        test_fp8_mlp_tensor_parallelism,
     ]
 
     for test in tqdm(tests, desc="Running tests"):
