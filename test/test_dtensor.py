@@ -223,10 +223,10 @@ if __name__ == "__main__":
     # cases in the main func.
     device_mesh = setup_distributed()
     tests = [
-        # test_scaled_mm,
-        # test_fp8_redistribute,
-        # test_dtensor_cast_to_fp8,
-        # test_dtensor_fp8_autograd,
+        test_scaled_mm,
+        test_fp8_redistribute,
+        test_dtensor_cast_to_fp8,
+        test_dtensor_fp8_autograd,
         test_fp8_mlp_tensor_parallelism,
     ]
 
