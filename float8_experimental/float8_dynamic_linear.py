@@ -70,7 +70,6 @@ class Float8DynamicLinear(torch.nn.Linear):
     def cast_to_float8_e4m3fn(self, inpt_tensor: torch.Tensor) -> Float8Tensor:
         if tensor_already_casted_to_fp8(inpt_tensor):
             # check to early return if already casted to float8
-            print("!!!already casted to float8")
             return inpt_tensor
         scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
         return Float8Tensor.to_float8(
