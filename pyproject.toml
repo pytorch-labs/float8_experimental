@@ -14,8 +14,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch >= 2.1",
-    "fairscale==0.4.13"
+    "torch >= 2.2",
 ]
 
 [project.optional-dependencies]
