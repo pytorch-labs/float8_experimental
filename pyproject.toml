@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "transformers==4.32.0",
+    "transformers==4.38.2",
     "pandas >= 2.0",
     "tqdm==4.66.2",
     "fire==0.5.0",
