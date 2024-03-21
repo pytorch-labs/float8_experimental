@@ -36,7 +36,7 @@ from torch.distributed.fsdp import (
 torch.manual_seed(0)
 
 # assumes user is running the script from /data/users/{user}/float8_experimental
-data_dir = os.path.join(os.getcwd(), "tmp")
+data_dir = os.path.join(os.path.dirname(__file__), "tmp")
 input_fname = os.path.join(data_dir, "input.pt")
 sd_in_fname = os.path.join(data_dir, "sd_in.pt")
 sd_out_single_gpu_fname = os.path.join(data_dir, "sd_out_single_gpu.pt")
