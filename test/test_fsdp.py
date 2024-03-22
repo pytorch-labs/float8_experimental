@@ -104,10 +104,13 @@ def fsdp_main(rank, world_size, args):
     ref_input_local = ref_input_global[bsz_local_start:bsz_local_end].to(rank)
 
     sync_float8_func = sync_float8_amax_and_scale_history
-    if compile:
+    if compile and False:
         sync_float8_func = torch.compile(
             sync_float8_amax_and_scale_history, fullgraph=fullgraph
         )
+        model = torch.compile(model)
+
+    print(model)
 
     def forward_backward(model):
         optimizer.zero_grad()
@@ -118,13 +121,18 @@ def fsdp_main(rank, world_size, args):
         return y_local
 
     for iter in range(N_ITER):
-        # We first run one iteration without compile, as a workaround to compile float8 layer.
-        # In the first iter, float8 layers go to the branches of "self.is_amax_initialized == False"
-        # After that, float8 layers go the the branches of "self.is_amax_initialized == True"
-        # TODO: Need to fix compile to run wihtout this workaround.
-        if iter == 1 and compile:
-            model = torch.compile(model, fullgraph=fullgraph)
         y_local = forward_backward(model)
+
+    if compile and False:
+        base = model._orig_mod._fsdp_wrapped_module
+    else:
+        base = model._fsdp_wrapped_module
+    print('0_x', base[0].fp8_amax_history_x)
+    print('2_x', base[2].fp8_amax_history_x)
+    print('0_w', base[0].fp8_amax_history_w)
+    print('2_w', base[2].fp8_amax_history_w)
+    print('0_g', base[0].fp8_amax_history_dL_dY)
+    print('2_g', base[2].fp8_amax_history_dL_dY)
 
     # get global y
     y_global = [
