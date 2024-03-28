@@ -176,11 +176,12 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         )
 
     def __tensor_flatten__(self):
-        return ["_tensor"], None
+        return ["_tensor"], self._emulate
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        return Float8DynamicLinearWeightTensor(inner_tensors["_tensor"])
+        emulate = flatten_spec
+        return Float8DynamicLinearWeightTensor(inner_tensors["_tensor"], emulate)
 
     def __repr__(self):
         return f"Float8DynamicLinearWeightTensor(tensor={self._tensor}, emulate={self._emulate})"
