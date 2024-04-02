@@ -78,20 +78,20 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity_dynamic(self):
-        for use_fp8_all_gather in [False, True]:
-            self._test_transformer_parity_dynamic(use_fp8_all_gather)
+        for use_fsdp_fp8_all_gather in [False, True]:
+            self._test_transformer_parity_dynamic(use_fsdp_fp8_all_gather)
 
-    def _test_transformer_parity_dynamic(self, use_fp8_all_gather: bool):
+    def _test_transformer_parity_dynamic(self, use_fsdp_fp8_all_gather: bool):
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
         # fp8 for that tied weight, incorrectly using fp8 for the embedding.
-        weight_tying = not use_fp8_all_gather
+        weight_tying = not use_fsdp_fp8_all_gather
         module = self.init_transformer(weight_tying=weight_tying)
         ref_module = copy.deepcopy(module)
         ref_module = self.swap_linear_with_dynamic(ref_module).cuda()
         module = self.swap_linear_with_dynamic(
-            module, use_fp8_all_gather=use_fp8_all_gather
+            module, use_fsdp_fp8_all_gather=use_fsdp_fp8_all_gather
         )
         for submodule in module.modules():
             if isinstance(submodule, TransformerBlock):
@@ -109,11 +109,11 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     @skip_if_lt_x_gpu(2)
     def test_transformer_memory(self):
         """Tests peak active memory in the forward and backward passes."""
-        # for use_fp8_all_gather in [False, True]:
-        for use_fp8_all_gather in [True]:
-            self._test_transformer_memory(use_fp8_all_gather)
+        # for use_fsdp_fp8_all_gather in [False, True]:
+        for use_fsdp_fp8_all_gather in [True]:
+            self._test_transformer_memory(use_fsdp_fp8_all_gather)
 
-    def _test_transformer_memory(self, use_fp8_all_gather: bool):
+    def _test_transformer_memory(self, use_fsdp_fp8_all_gather: bool):
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage
@@ -136,7 +136,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         # Emulate the fp8 matmul to bypass the scaled matmul op's divisibility
         # requirement to use a smaller activation size
         model = self.swap_linear_with_dynamic(
-            model, use_fp8_all_gather=use_fp8_all_gather, emulate=True
+            model, use_fsdp_fp8_all_gather=use_fsdp_fp8_all_gather, emulate=True
         )
         model_unsharded_numel = sum(p.numel() for p in model.parameters())
         model_sharded_numel = (model_unsharded_numel + 1) // 2
@@ -181,7 +181,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         # number is kept much smaller than the actual memory usage, which is on
         # the order of 100-200+ MB)
         buffer_mb = 16
-        if use_fp8_all_gather:
+        if use_fsdp_fp8_all_gather:
             # Non-block parameters (fp32), 3x block non-linear-weight
             # parameters (fp32) and block linear-weight parameters (fp8)
             # (current all-gather, copy-out, and next all-gather), and other
@@ -205,7 +205,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         # Backward:
         loss.sum().backward()
         mem_mb = self._get_peak_active_memory_mb()
-        if use_fp8_all_gather:
+        if use_fsdp_fp8_all_gather:
             # Non-block parameters (fp32), 2x block non-linear weight
             # parameters (fp32) and block linear-weight parameters (fp8)
             # (current copy-out and next all-gather), 1x block gradients (fp32)
@@ -247,7 +247,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             module_fp32,
             Float8DynamicLinear,
             emulate=True,
-            use_fp8_all_gather=True,
+            use_fsdp_fp8_all_gather=True,
         )
         self.assertIsInstance(module.weight, tensor_cls)
         fully_shard(module)
@@ -262,7 +262,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             module,
             Float8DynamicLinear,
             emulate=True,
-            use_fp8_all_gather=True,
+            use_fsdp_fp8_all_gather=True,
         )
         for param_name, param in module.named_parameters():
             if "weight" in param_name:
@@ -309,7 +309,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for a single FSDP parameter group
         module_fp32 = self.init_single_module()
         ref_module = copy.deepcopy(module_fp32)
-        module = self.swap_linear_with_dynamic(module_fp32, use_fp8_all_gather=True)
+        module = self.swap_linear_with_dynamic(module_fp32, use_fsdp_fp8_all_gather=True)
         fully_shard(module)
         local_inp = self.get_local_inp()
         expected_all_gather_size = get_expected_all_gather_size(ref_module)
@@ -336,7 +336,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for multiple FSDP parameter groups
         module = self.init_multi_module()
         ref_module = copy.deepcopy(module)
-        module = self.swap_linear_with_dynamic(module, use_fp8_all_gather=True)
+        module = self.swap_linear_with_dynamic(module, use_fsdp_fp8_all_gather=True)
         for submodule in module:
             fully_shard(submodule)
         fully_shard(module)
@@ -358,12 +358,12 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         Tests numeric parity for fp32 parameters with fp8 computation with a
         single module/FSDP communication group.
         """
-        for use_fp8_all_gather in [False, True]:
+        for use_fsdp_fp8_all_gather in [False, True]:
             module_fp32 = self.init_single_module()
             ref_module = self.swap_linear_with_dynamic(copy.deepcopy(module_fp32))
             ref_module = ref_module.cuda()
             module = self.swap_linear_with_dynamic(
-                module_fp32, use_fp8_all_gather=use_fp8_all_gather
+                module_fp32, use_fsdp_fp8_all_gather=use_fsdp_fp8_all_gather
             )
             fully_shard(module)
             ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
@@ -385,12 +385,12 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         Tests numeric parity for fp32 parameters with fp8 computation with
         multiple modules/FSDP communication groups.
         """
-        for use_fp8_all_gather in [False, True]:
+        for use_fsdp_fp8_all_gather in [False, True]:
             module = self.init_multi_module()
             ref_module = copy.deepcopy(module)
             ref_module = self.swap_linear_with_dynamic(ref_module).cuda()
             module = self.swap_linear_with_dynamic(
-                module, use_fp8_all_gather=use_fp8_all_gather
+                module, use_fsdp_fp8_all_gather=use_fsdp_fp8_all_gather
             )
             for submodule in module:
                 fully_shard(submodule)

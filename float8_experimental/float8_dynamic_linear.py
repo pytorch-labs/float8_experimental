@@ -20,6 +20,8 @@ from float8_experimental.float8_tensor import (
 )
 from float8_experimental.float8_utils import tensor_to_scale
 from torch._prims_common import suggest_memory_format
+import logging
+log = logging.getLogger(__name__)
 
 
 @torch._dynamo.allow_in_graph
@@ -93,7 +95,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         cls,
         mod,
         emulate: bool = False,
-        use_fp8_all_gather: bool = False,
+        use_fsdp_fp8_all_gather: bool = False,
     ) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -101,7 +103,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            use_fp8_all_gather (bool): whether to use fp8 all-gather for FSDP
+            use_fsdp_fp8_all_gather (bool): whether to use fp8 all-gather for FSDP
         """
         with torch.device("meta"):
             super_kwargs = {
@@ -112,7 +114,7 @@ class Float8DynamicLinear(torch.nn.Linear):
             new_mod = cls(**super_kwargs)
         new_mod.weight = (
             nn.Parameter(Float8DynamicLinearWeightTensor(mod.weight, emulate))
-            if use_fp8_all_gather
+            if use_fsdp_fp8_all_gather
             else mod.weight
         )
         new_mod.bias = mod.bias
@@ -124,6 +126,7 @@ class Float8DynamicLinear(torch.nn.Linear):
 # that the padded local tensor (and any transformations like copying to GPU)
 # is of the subclass as well.
 _ops_to_preserve_subclass = {
+    torch.ops.aten.empty_like.default,
     torch.ops.aten.new_zeros.default,
     torch.ops.aten.slice.Tensor,
     torch.ops.aten.copy_.default,
@@ -153,6 +156,9 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
     def __init__(self, tensor: torch.Tensor, emulate: bool):
         self._tensor = tensor
         self._emulate = emulate
+        # Optional cache for pre-computed fp8 data/scale
+        self._fp8_data: Optional[torch.Tensor] = None
+        self._fp8_scale: Optional[torch.Tensor] = None
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -187,6 +193,8 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
         return f"Float8DynamicLinearWeightTensor(tensor={self._tensor}, emulate={self._emulate})"
 
     def fsdp_pre_all_gather(self):
+        if self._fp8_data is not None and self._fp8_scale is not None:
+            return (self._fp8_data,), (self._fp8_scale,)
         float8_tensor = cast_to_float8_e4m3fn(
             self._tensor, self._emulate, reduce_amax=True
         )
