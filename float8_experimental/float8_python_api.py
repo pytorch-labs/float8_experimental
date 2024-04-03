@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 import float8_experimental.float8_aten_api  # noqa
 
 import torch
-from float8_experimental.float8_tensor import Float8Tensor
+
 
 # [Note] Usage of scales
 # The meaning of scale in this library can be found in the definition of the Float8Tensor

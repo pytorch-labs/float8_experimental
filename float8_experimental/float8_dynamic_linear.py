@@ -10,9 +10,9 @@ import torch
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
+    ScaledMMConfig,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
-    ScaledMMConfig
 )
 from float8_experimental.float8_utils import tensor_to_scale
 
@@ -40,7 +40,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             return gradY, None
         gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, torch.float8_e5m2, ctx.emulate, mm_config=ctx.mm_config
+            gradY, gradY_scale, torch.float8_e5m2, mm_config=ctx.mm_config
         )
         return fp8_tensor, None
 
@@ -78,7 +78,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         )
 
     def cast_to_float8_e5m2_bw(self, gradY: torch.Tensor) -> torch.Tensor:
-        return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate, self.backward_config)
+        return NoopFwToFloat8E5M2Bw.apply(gradY, self.backward_config)
 
     @classmethod
     def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":

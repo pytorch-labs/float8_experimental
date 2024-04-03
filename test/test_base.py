@@ -362,7 +362,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
             module = nn.Linear(3, 3)
             module = swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
             self.assertIsInstance(module, module_cls)
-            self.assertEqual(module.emulate, emulate)
+            self.assertEqual(module.forward_config.emulate, emulate)
+            self.assertEqual(module.backward_config.emulate, emulate)
 
     def test_swap_root_linear_with_children_raises(self):
         for module_cls, emulate in itertools.product(
