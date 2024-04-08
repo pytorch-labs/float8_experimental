@@ -84,7 +84,7 @@ def to_fp8_no_autograd(
         x: the tensor to convert
         scale: the scale to use to convert the tensor
         float8_dtype: the float8 dtype to use
-        mm_config: configuration for the scaled_mm will bread from this dataclass
+        mm_config: Defines the configuration for the scaled_mm
     """
     x_scaled = x * x_scale
     bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)

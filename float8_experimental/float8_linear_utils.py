@@ -122,10 +122,7 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        print(f"Emulating: {emulate}")
-        new_mod = module_cls.from_float(module, emulate=emulate)
-        print(f"New mod: {new_mod.forward_config}")
-        return new_mod
+        return module_cls.from_float(module, emulate=emulate)
 
     # Mark all modules to skip as visited
     root_module = module

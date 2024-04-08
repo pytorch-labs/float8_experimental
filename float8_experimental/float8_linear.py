@@ -160,7 +160,7 @@ class Float8LinearMixin(object):
         )
         self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
 
-        # Whether to emulate the fp8 matmul logic in float32
+        # Defines the behavior of the matmul in the forward and backward pass
         self.forward_config = ScaledMMConfig()
         self.backward_config = ScaledMMConfig()
 
