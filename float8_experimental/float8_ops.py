@@ -8,7 +8,11 @@ from typing import Any, Dict
 import torch
 
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    merge_mm_configs,
+    ScaledMMConfig,
+)
 from float8_experimental.float8_utils import is_row_major
 from torch.utils._pytree import tree_map
 
@@ -93,7 +97,7 @@ def float8_mm(aten_op, args, kwargs=None):
     output_dtype = a._orig_dtype
     a_mm_config: ScaledMMConfig = a._mm_config
     b_mm_config: ScaledMMConfig = b._mm_config
-    mm_config: ScaledMMConfig = a_mm_config.merge(b_mm_config)
+    mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
     if mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
@@ -126,7 +130,7 @@ def float8_addmm(aten_op, args, kwargs=None):
     assert bias.dtype == output_dtype, "bias dtype must match output dtype"
     a_mm_config: ScaledMMConfig = a._mm_config
     b_mm_config: ScaledMMConfig = b._mm_config
-    mm_config: ScaledMMConfig = a_mm_config.merge(b_mm_config)
+    mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
     if mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
@@ -190,7 +194,7 @@ def allgather_fp8(aten_op, args, kwargs=None):
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     fp8_out = fp8_out.view(fp8_input._data.dtype)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._emulate
+        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )
 
 
@@ -202,5 +206,5 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
     fp8_data = fp8_input._data
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._emulate
+        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )

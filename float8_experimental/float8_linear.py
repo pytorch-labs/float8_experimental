@@ -161,7 +161,6 @@ class Float8LinearMixin(object):
         self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
 
         # Whether to emulate the fp8 matmul logic in float32
-        # self.emulate = False
         self.forward_config = ScaledMMConfig()
         self.backward_config = ScaledMMConfig()
 
@@ -255,9 +254,7 @@ class Float8LinearMixin(object):
         )
         return w_fp8
 
-    def cast_y_to_float8_in_bw(
-        self, y: torch.Tensor, emulate: bool = False
-    ) -> torch.Tensor:
+    def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
         scale_fn_name = self.recipe.scale_fn_name
         y = NoopFwToFloat8E5M2Bw.apply(
             y,
@@ -307,7 +304,7 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         y = torch.matmul(x_fp8, w_fp8.t())
 
         # Cast gradY to float8_e5m2 during backward
-        y = self.cast_y_to_float8_in_bw(y, self.emulate)
+        y = self.cast_y_to_float8_in_bw(y)
 
         if self.bias is not None:
             y = y + self.bias.to(y.dtype)

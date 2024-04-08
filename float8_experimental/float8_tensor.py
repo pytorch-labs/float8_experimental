@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from dataclasses import dataclass
+from collections import namedtuple
 from typing import Dict, Optional
 
 import torch
@@ -15,28 +15,36 @@ from torch.distributed._tensor import DTensor
 aten = torch.ops.aten
 
 
-@dataclass(frozen=True)
-class ScaledMMConfig:
-    emulate: bool = False
-    use_fast_accum: bool = False
-    fp8_output: bool = False
+# ScaledMMConfig is a namedtuple that defines the configuration for the scaled_mm in the forward and backward pass.
+# emulate: whether to emulate the matmuls in fp32
+# use_fast_accum: whether to use the fast-accumulation option for scaled_mm
+# fp8_output: whether to output the result of the scaled_mm in fp8
+ScaledMMConfig = namedtuple(
+    "ScaledMMConfig",
+    ["emulate", "use_fast_accum", "fp8_output"],
+    defaults=[False, False, False],
+)
 
-    def __post_init__(self):
-        if self.use_fast_accum:
-            assert not self.emulate, "fast_accum only works with real compute"
 
-    def merge(self, other: "ScaledMMConfig") -> "ScaledMMConfig":
-        """Merges two configs together emulate behavior must match,
-        However we want to use_fast_accum in forward and not in backward.
-        We do this by populating the fields of the backproping grad. Same applies for fp8_output.
-        """
-        assert isinstance(other, ScaledMMConfig)
-        assert self.emulate == other.emulate
-        return ScaledMMConfig(
-            emulate=self.emulate,
-            use_fast_accum=self.use_fast_accum and other.use_fast_accum,
-            fp8_output=self.fp8_output and other.fp8_output,
-        )
+def merge_mm_configs(
+    a_mm_config: ScaledMMConfig, b_mm_config: ScaledMMConfig
+) -> ScaledMMConfig:
+    """Merges two mm_configs together emulate behavior must match,
+    However we want to use_fast_accum in forward and not in backward.
+    We do this by populating the fields of the backproping grad. Same applies for fp8_output.
+
+    For both use_fast_accum and fp8_output, if either config is False, the merged config will be False.
+    """
+    assert (
+        a_mm_config.emulate == b_mm_config.emulate
+    ), "Both mm_configs must have the same emulate value, but got {} and {}".format(
+        a_mm_config.emulate, b_mm_config.emulate
+    )
+    return ScaledMMConfig(
+        emulate=a_mm_config.emulate,
+        use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
+        fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
+    )
 
 
 def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
@@ -58,7 +66,7 @@ def to_fp8_no_autograd(
     x: torch.Tensor,
     x_scale: torch.Tensor,
     float8_dtype: torch.dtype,
-    mm_config: Optional[ScaledMMConfig] = None,
+    mm_config: Optional[ScaledMMConfig],
 ) -> "Float8Tensor":
     """Convert a tensor to float8 without autograd
     This is used in multiple places in the codebase to convert a tensor to float8
@@ -218,7 +226,7 @@ class Float8Tensor(torch.Tensor):
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        mm_config: Optional[ScaledMMConfig] = None,
+        mm_config: Optional[ScaledMMConfig],
     ):
         assert (
             scale.numel() == 1
@@ -273,7 +281,6 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        # emulate: bool = False,
         mm_config: Optional[ScaledMMConfig] = None,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
