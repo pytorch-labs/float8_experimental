@@ -3,6 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
+from collections import namedtuple
 from typing import Dict, Optional
 
 import torch
@@ -12,6 +13,38 @@ from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
 from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
+
+
+# ScaledMMConfig is a namedtuple that defines the configuration for the scaled_mm in the forward and backward pass.
+# emulate: whether to emulate the matmuls in fp32
+# use_fast_accum: whether to use the fast-accumulation option for scaled_mm
+# fp8_output: whether to output the result of the scaled_mm in fp8
+ScaledMMConfig = namedtuple(
+    "ScaledMMConfig",
+    ["emulate", "use_fast_accum", "fp8_output"],
+    defaults=[False, False, False],
+)
+
+
+def merge_mm_configs(
+    a_mm_config: ScaledMMConfig, b_mm_config: ScaledMMConfig
+) -> ScaledMMConfig:
+    """Merges two mm_configs together emulate behavior must match,
+    However we want to use_fast_accum in forward and not in backward.
+    We do this by populating the fields of the backproping grad. Same applies for fp8_output.
+
+    For both use_fast_accum and fp8_output, if either config is False, the merged config will be False.
+    """
+    assert (
+        a_mm_config.emulate == b_mm_config.emulate
+    ), "Both mm_configs must have the same emulate value, but got {} and {}".format(
+        a_mm_config.emulate, b_mm_config.emulate
+    )
+    return ScaledMMConfig(
+        emulate=a_mm_config.emulate,
+        use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
+        fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
+    )
 
 
 def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
@@ -30,7 +63,10 @@ def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
 
 
 def to_fp8_no_autograd(
-    x: torch.Tensor, x_scale: torch.Tensor, float8_dtype: torch.dtype, emulate: bool
+    x: torch.Tensor,
+    x_scale: torch.Tensor,
+    float8_dtype: torch.dtype,
+    mm_config: Optional[ScaledMMConfig],
 ) -> "Float8Tensor":
     """Convert a tensor to float8 without autograd
     This is used in multiple places in the codebase to convert a tensor to float8
@@ -48,7 +84,7 @@ def to_fp8_no_autograd(
         x: the tensor to convert
         scale: the scale to use to convert the tensor
         float8_dtype: the float8 dtype to use
-        emulate: whether to emulate the matmuls in fp32
+        mm_config: Defines the configuration for the scaled_mm
     """
     x_scaled = x * x_scale
     bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
@@ -62,7 +98,7 @@ def to_fp8_no_autograd(
         local_bits = bits_fp8.to_local()
         local_scale = x_scale.to_local()
         inner_float8_tensor = Float8Tensor(
-            local_bits, local_scale, x.dtype, emulate=emulate
+            local_bits, local_scale, x.dtype, mm_config=mm_config
         )
         return DTensor.from_local(
             inner_float8_tensor,
@@ -73,7 +109,7 @@ def to_fp8_no_autograd(
             stride=bits_fp8.stride(),
         )
 
-    return Float8Tensor(bits_fp8, x_scale, x.dtype, emulate=emulate)
+    return Float8Tensor(bits_fp8, x_scale, x.dtype, mm_config=mm_config)
 
 
 def from_fp8_no_autograd(x: torch.Tensor) -> torch.Tensor:
@@ -122,7 +158,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         scale: torch.Tensor,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer: Optional[torch.Tensor] = None,
-        emulate: bool = False,
+        mm_config: Optional[ScaledMMConfig] = None,
     ):
         """Autograd enabled wrapper around to_fp8_no_autograd that will also populate the amax buffer.
         Args
@@ -135,7 +171,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        return to_fp8_no_autograd(tensor, scale, float8_dtype, emulate)
+        return to_fp8_no_autograd(tensor, scale, float8_dtype, mm_config=mm_config)
 
     @staticmethod
     def backward(ctx, g):
@@ -182,15 +218,15 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    _emulate: bool
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_emulate"]
+    _mm_config: ScaledMMConfig
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config"]
 
     def __new__(
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        emulate=False,
+        mm_config: Optional[ScaledMMConfig],
     ):
         assert (
             scale.numel() == 1
@@ -211,16 +247,17 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._emulate = emulate
+        self._mm_config = mm_config if mm_config is not None else ScaledMMConfig()
+
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, emulate={self._emulate}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
             "_orig_dtype": self._orig_dtype,
-            "_emulate": self._emulate,
+            "_mm_config": self._mm_config,
         }
         return ["_data", "_scale"], ctx
 
@@ -231,7 +268,7 @@ class Float8Tensor(torch.Tensor):
             inner_tensors["_data"],
             inner_tensors["_scale"],
             metadata["_orig_dtype"],
-            metadata["_emulate"],
+            metadata["_mm_config"],
         )
 
     def to_original_precision(self):
@@ -244,7 +281,7 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        emulate: bool = False,
+        mm_config: Optional[ScaledMMConfig] = None,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
@@ -258,11 +295,7 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor,
-            scale,
-            float8_dtype,
-            amax_buffer,
-            emulate,
+            tensor, scale, float8_dtype, amax_buffer, mm_config
         )
 
     @classmethod
