@@ -325,6 +325,8 @@ class Float8Tensor(torch.Tensor):
 
         if func in FLOAT8_OPS_TABLE:
             return FLOAT8_OPS_TABLE[func](func, args, kwargs)
+        else:
+            return func.decompose(*args, *kwargs)
         raise NotImplementedError(f"attempting to run {func}, this is not supported")
 
     # Do not force the Float8Tensor type on the returned tensor
