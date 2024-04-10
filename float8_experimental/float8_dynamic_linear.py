@@ -7,6 +7,7 @@
 A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
+import logging
 from typing import Any, Optional, Tuple
 
 import torch
@@ -20,7 +21,7 @@ from float8_experimental.float8_tensor import (
 )
 from float8_experimental.float8_utils import tensor_to_scale
 from torch._prims_common import suggest_memory_format
-import logging
+
 log = logging.getLogger(__name__)
 
 

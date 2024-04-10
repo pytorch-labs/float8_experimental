@@ -309,7 +309,9 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for a single FSDP parameter group
         module_fp32 = self.init_single_module()
         ref_module = copy.deepcopy(module_fp32)
-        module = self.swap_linear_with_dynamic(module_fp32, use_fsdp_fp8_all_gather=True)
+        module = self.swap_linear_with_dynamic(
+            module_fp32, use_fsdp_fp8_all_gather=True
+        )
         fully_shard(module)
         local_inp = self.get_local_inp()
         expected_all_gather_size = get_expected_all_gather_size(ref_module)

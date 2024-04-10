@@ -12,7 +12,10 @@ from typing import Callable, List, Optional, Type
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear, Float8DynamicLinearWeightTensor
+from float8_experimental.float8_dynamic_linear import (
+    Float8DynamicLinear,
+    Float8DynamicLinearWeightTensor,
+)
 from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import (
@@ -354,9 +357,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
         and isinstance(m.weight, DTensor)
         and isinstance(m.weight._local_tensor, Float8DynamicLinearWeightTensor)
     ]
-    weights: List[DTensor] = [
-        float8_linear.weight for float8_linear in float8_linears
-    ]
+    weights: List[DTensor] = [float8_linear.weight for float8_linear in float8_linears]
 
     def compute_weights_and_scales(weights: List[DTensor]):
         abs_weights = torch._foreach_abs(weights)
@@ -377,7 +378,9 @@ def precompute_float8_weights(module: nn.Module) -> None:
         # datas, scales = torch.compile(compute_weights_and_scales, mode="reduce-overhead")(weights)
         for data, scale, float8_linear in zip(datas, scales, float8_linears):
             float8_linear.weight._local_tensor._fp8_data = data._local_tensor
-            float8_linear.weight._local_tensor._fp8_scale = scale._local_tensor.squeeze()
+            float8_linear.weight._local_tensor._fp8_scale = (
+                scale._local_tensor.squeeze()
+            )
     else:
         warnings.warn(
             "Calling precompute_float8_weights without any weights using FSDP fp8 all-gather!"
