@@ -109,7 +109,6 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
-    use_fsdp_fp8_all_gather: bool = False,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -123,16 +122,8 @@ def swap_linear_with_float8_linear(
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
         linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
             that pass the filter function will be swapped.
-        use_fsdp_fp8_all_gather (bool): Whether to use fp8 all-gather for FSDP.
     """
-    if use_fsdp_fp8_all_gather and module_cls is not Float8DynamicLinear:
-        raise NotImplementedError(
-            f"use_fsdp_fp8_all_gather=True can only be used with Float8DynamicLinear, not {module_cls}"
-        )
     float8_kwargs = {"emulate": emulate}
-    if use_fsdp_fp8_all_gather:
-        # Only a kwarg for dynamic linear
-        float8_kwargs["use_fsdp_fp8_all_gather"] = True
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear) and (
         linear_layer_filter is None or linear_layer_filter(module)

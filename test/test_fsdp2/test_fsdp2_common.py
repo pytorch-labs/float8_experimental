@@ -1,4 +1,7 @@
+import contextlib
 from typing import List, Type
+
+import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
@@ -67,3 +70,15 @@ def check_parity_bf16_mp(
             ):
                 param_bf16.detach().copy_(param_fp32)
         test_cls.assertEqual(losses[0], losses[1])
+
+
+@contextlib.contextmanager
+def set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather: bool):
+    prev = config.enable_fsdp_fp8_all_gather
+    dist.barrier()
+    config.enable_fsdp_fp8_all_gather = enable_fsdp_fp8_all_gather
+    try:
+        yield
+    finally:
+        dist.barrier()
+        config.enable_fsdp_fp8_all_gather = prev

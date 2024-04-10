@@ -10,6 +10,8 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 import logging
 from typing import Any, Optional, Tuple
 
+import float8_experimental.config as config
+
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -96,7 +98,6 @@ class Float8DynamicLinear(torch.nn.Linear):
         cls,
         mod,
         emulate: bool = False,
-        use_fsdp_fp8_all_gather: bool = False,
     ) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -104,7 +105,6 @@ class Float8DynamicLinear(torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
-            use_fsdp_fp8_all_gather (bool): whether to use fp8 all-gather for FSDP
         """
         with torch.device("meta"):
             super_kwargs = {
@@ -115,7 +115,7 @@ class Float8DynamicLinear(torch.nn.Linear):
             new_mod = cls(**super_kwargs)
         new_mod.weight = (
             nn.Parameter(Float8DynamicLinearWeightTensor(mod.weight, emulate))
-            if use_fsdp_fp8_all_gather
+            if config.enable_fsdp_fp8_all_gather
             else mod.weight
         )
         new_mod.bias = mod.bias
