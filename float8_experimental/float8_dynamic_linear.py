@@ -92,11 +92,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         return NoopFwToFloat8E5M2Bw.apply(gradY, self.backward_config)
 
     @classmethod
-    def from_float(
-        cls,
-        mod,
-        emulate: bool = False,
-    ) -> "Float8DynamicLinear":
+    def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
@@ -164,8 +160,10 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         if func == torch.ops.aten.detach.default:
-            return args[0]
-        mm_config = None
+            return WeightWithDynamicFloat8CastTensor(
+                args[0]._tensor, args[0]._mm_config
+            )
+        mm_config: Optional[ScaledMMConfig] = None
 
         def unwrap(t):
             nonlocal mm_config
@@ -216,10 +214,6 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         (scale,) = metadata
         if out is not None:
             assert isinstance(out, Float8Tensor), f"{type(out)}"
-            assert (
-                data.untyped_storage().data_ptr()
-                == out._data.untyped_storage().data_ptr()
-            ), f"Expects out's data to be the all-gather output"
             out._scale = scale
             return
         return Float8Tensor(data, scale, param_dtype, self._mm_config), (data,)
