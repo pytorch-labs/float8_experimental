@@ -111,7 +111,7 @@ class Float8DynamicLinear(torch.nn.Linear):
             new_mod = cls(**super_kwargs)
         if config.enable_fsdp_fp8_all_gather:
             new_mod.weight = nn.Parameter(
-                Float8DynamicLinearWeightTensor(mod.weight, emulate)
+                WeightWithDynamicFloat8CastTensor(mod.weight, emulate)
             )
         else:
             new_mod.weight = mod.weight
@@ -135,7 +135,7 @@ _ops_to_preserve_subclass = {
 }
 
 
-class Float8DynamicLinearWeightTensor(torch.Tensor):
+class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, tensor: torch.Tensor, emulate: bool):
         return torch.Tensor._make_wrapper_subclass(
@@ -170,13 +170,13 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
             return t._tensor
 
         args, kwargs = pytree.tree_map_only(
-            Float8DynamicLinearWeightTensor, unwrap, (args, kwargs or {})
+            WeightWithDynamicFloat8CastTensor, unwrap, (args, kwargs or {})
         )
         out = func(*args, **kwargs)
         if func not in _ops_to_preserve_subclass:
             return out
         return pytree.tree_map_only(
-            torch.Tensor, lambda x: Float8DynamicLinearWeightTensor(x, emulate), out
+            torch.Tensor, lambda x: WeightWithDynamicFloat8CastTensor(x, emulate), out
         )
 
     def __tensor_flatten__(self):
@@ -185,10 +185,10 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
         emulate = flatten_spec
-        return Float8DynamicLinearWeightTensor(inner_tensors["_tensor"], emulate)
+        return WeightWithDynamicFloat8CastTensor(inner_tensors["_tensor"], emulate)
 
     def __repr__(self):
-        return f"Float8DynamicLinearWeightTensor(tensor={self._tensor}, emulate={self._emulate})"
+        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, emulate={self._emulate})"
 
     def fsdp_pre_all_gather(self, mesh):
         if self._fp8_data is not None and self._fp8_scale is not None:

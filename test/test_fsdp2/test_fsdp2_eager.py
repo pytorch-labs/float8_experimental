@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
-    Float8DynamicLinearWeightTensor,
+    WeightWithDynamicFloat8CastTensor,
 )
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from test_fsdp2_common import (
@@ -239,7 +239,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_weight_subclass_dynamic(self):
-        tensor_cls = Float8DynamicLinearWeightTensor
+        tensor_cls = WeightWithDynamicFloat8CastTensor
         # Check for a single FSDP paramter group
         module_fp32 = self.init_single_module()
         with set_enable_fsdp_fp8_all_gather(True):

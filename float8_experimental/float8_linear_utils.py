@@ -14,7 +14,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
-    Float8DynamicLinearWeightTensor,
+    WeightWithDynamicFloat8CastTensor,
 )
 from float8_experimental.float8_linear import Float8Linear
 
@@ -346,7 +346,7 @@ def precompute_float8_weights(module: nn.Module) -> None:
         for m in module.modules()
         if isinstance(m, Float8DynamicLinear)
         and isinstance(m.weight, DTensor)
-        and isinstance(m.weight._local_tensor, Float8DynamicLinearWeightTensor)
+        and isinstance(m.weight._local_tensor, WeightWithDynamicFloat8CastTensor)
     ]
     weights: List[DTensor] = [float8_linear.weight for float8_linear in float8_linears]
 
