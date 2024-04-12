@@ -154,9 +154,6 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def __init__(self, tensor: torch.Tensor, emulate: bool):
         self._tensor = tensor
         self._emulate = emulate
-        # Optional cache for pre-computed fp8 data/scale
-        self._fp8_data: Optional[torch.Tensor] = None
-        self._fp8_scale: Optional[torch.Tensor] = None
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -191,8 +188,6 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, emulate={self._emulate})"
 
     def fsdp_pre_all_gather(self, mesh):
-        if self._fp8_data is not None and self._fp8_scale is not None:
-            return (self._fp8_data,), (self._fp8_scale,)
         float8_tensor = cast_to_float8_e4m3fn(
             self._tensor, self._emulate, reduce_amax=True
         )
