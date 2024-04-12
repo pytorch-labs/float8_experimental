@@ -7,7 +7,6 @@
 A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 """
 
-import logging
 from typing import Any, Optional, Tuple
 
 import float8_experimental.config as config
@@ -23,8 +22,6 @@ from float8_experimental.float8_tensor import (
 )
 from float8_experimental.float8_utils import tensor_to_scale
 from torch._prims_common import suggest_memory_format
-
-log = logging.getLogger(__name__)
 
 
 @torch._dynamo.allow_in_graph
@@ -76,11 +73,10 @@ class Float8DynamicLinear(torch.nn.Linear):
 
     def forward(self, x):
         x_fp8 = self.cast_to_float8_e4m3fn(x)
-        w_fp8 = (
-            self.weight
-            if isinstance(self.weight, Float8Tensor)  # cast by FSDP
-            else self.cast_to_float8_e4m3fn(self.weight)
-        )
+        if isinstance(self.weight, Float8Tensor):  # cast by FSDP
+            w_fp8 = self.weight
+        else:
+            w_fp8 = self.cast_to_float8_e4m3fn(self.weight)
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
         y = self.cast_to_float8_e5m2_bw(y)
         return y
@@ -113,11 +109,12 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "bias": False,
             }
             new_mod = cls(**super_kwargs)
-        new_mod.weight = (
-            nn.Parameter(Float8DynamicLinearWeightTensor(mod.weight, emulate))
-            if config.enable_fsdp_fp8_all_gather
-            else mod.weight
-        )
+        if config.enable_fsdp_fp8_all_gather:
+            new_mod.weight = nn.Parameter(
+                Float8DynamicLinearWeightTensor(mod.weight, emulate)
+            )
+        else:
+            new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         new_mod.emulate = emulate
         return new_mod
@@ -193,7 +190,7 @@ class Float8DynamicLinearWeightTensor(torch.Tensor):
     def __repr__(self):
         return f"Float8DynamicLinearWeightTensor(tensor={self._tensor}, emulate={self._emulate})"
 
-    def fsdp_pre_all_gather(self):
+    def fsdp_pre_all_gather(self, mesh):
         if self._fp8_data is not None and self._fp8_scale is not None:
             return (self._fp8_data,), (self._fp8_scale,)
         float8_tensor = cast_to_float8_e4m3fn(
