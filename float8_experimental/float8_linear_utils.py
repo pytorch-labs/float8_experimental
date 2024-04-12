@@ -123,7 +123,6 @@ def swap_linear_with_float8_linear(
         linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
             that pass the filter function will be swapped.
     """
-    float8_kwargs = {"emulate": emulate}
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear) and (
         linear_layer_filter is None or linear_layer_filter(module)
@@ -132,7 +131,7 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(module, **float8_kwargs)
+        return module_cls.from_float(module, emulate=emulate)
 
     # Mark all modules to skip as visited
     root_module = module
@@ -156,7 +155,7 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            float8linear_module = module_cls.from_float(module, **float8_kwargs)
+            float8linear_module = module_cls.from_float(module, emuluate=emulate)
             setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
