@@ -22,8 +22,12 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_python_api import mm_float8
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_python_api import addmm_float8_unwrapped
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    merge_mm_configs,
+    ScaledMMConfig,
+)
 from float8_experimental.float8_utils import (
     amax_to_scale,
     compute_error,
@@ -281,7 +285,8 @@ class TestScaledMM:
     @pytest.mark.parametrize(
         "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
-    def test_scaled_mm_vs_emulated(self, base_dtype):
+    @pytest.mark.parametrize("use_fast_accum", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum):
         torch.manual_seed(42)
         input_dtype = torch.float8_e4m3fn
         output_dtype = base_dtype
@@ -296,11 +301,16 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        out_scaled_mm, output_amax_scaled = mm_float8(
-            a_fp8, b_fp8, output_dtype=output_dtype, emulate=False
+        out_scaled_mm, output_amax_scaled = addmm_float8_unwrapped(
+            a_fp8._data,
+            a_fp8._scale,
+            b_fp8._data,
+            b_fp8._scale,
+            output_dtype=output_dtype,
+            use_fast_accum=use_fast_accum,
         )
-        out_emulated, output_amax_emulated = mm_float8(
-            a_fp8, b_fp8, output_dtype=output_dtype, emulate=True
+        out_emulated, output_amax_emulated = torch.ops.aten.mm_float8_emulated(
+            a_fp8._data, a_fp8._scale, b_fp8._data, b_fp8._scale, output_dtype
         )
 
         if output_dtype != base_dtype:
@@ -319,6 +329,43 @@ class TestScaledMM:
         else:
             atol, rtol = 2e-3, 2e-3
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @unittest.skipIf(not is_H100, "CUDA not available")
+    def test_different_configs_error(self):
+        x_fp32 = torch.randn(16, 16, device="cuda")
+        x_scale = torch.tensor(1.0, device="cuda")
+        fp8_dtype = torch.float8_e4m3fn
+        a = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
+        b = Float8Tensor.to_float8(
+            x_fp32, x_scale, fp8_dtype, mm_config=ScaledMMConfig(True)
+        )
+        with pytest.raises(
+            AssertionError,
+            match="Both mm_configs must have the same emulate value, but got False and True",
+        ):
+            a @ b
+
+    def test_merge_configs(sel):
+        a = ScaledMMConfig(False, True, True)
+        b = ScaledMMConfig(True, False, False)
+        with pytest.raises(
+            AssertionError,
+            match="Both mm_configs must have the same emulate value, but got False and True",
+        ):
+            merge_mm_configs(a, b)
+        a = ScaledMMConfig(False, True, True)
+        b = ScaledMMConfig(False, False, False)
+        c = merge_mm_configs(a, b)
+        assert c.emulate is False
+        assert c.use_fast_accum is False
+        assert c.fp8_output is False
+
+        a = ScaledMMConfig(False, True, False)
+        b = ScaledMMConfig(False, True, False)
+        c = merge_mm_configs(a, b)
+        assert c.emulate is False
+        assert c.use_fast_accum is True
+        assert c.fp8_output is False
 
 
 class TestNumerics:
@@ -356,7 +403,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
             module = nn.Linear(3, 3)
             module = swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
             self.assertIsInstance(module, module_cls)
-            self.assertEqual(module.emulate, emulate)
+            self.assertEqual(module.forward_config.emulate, emulate)
+            self.assertEqual(module.backward_config.emulate, emulate)
 
     def test_swap_root_linear_with_children_raises(self):
         for module_cls, emulate in itertools.product(

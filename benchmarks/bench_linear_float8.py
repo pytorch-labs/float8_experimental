@@ -16,6 +16,7 @@ import torch
 import torch.utils.benchmark as benchmark
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from float8_experimental.float8_tensor import ScaledMMConfig
 from tqdm import tqdm
 
 # estimating TOPs for matmuls in fp32, fp16, fp8
@@ -54,8 +55,8 @@ class Experiment:
     ref_time_sec: float
     float8_time_sec: float
     dtype: torch.dtype
-    compiled: bool = False
-    float_8_dtype: Optional[torch.dtype] = torch.float8_e4m3fn
+    compiled: bool
+    use_fast_accum: bool
 
     # 3 Times since we are calculating forward backward
     @property
@@ -74,7 +75,7 @@ class Experiment:
 
     @property
     def float8_pct_top_peak(self):
-        return self.float8_tops_sec / dtype_to_peak_tops[self.float_8_dtype]
+        return self.float8_tops_sec / dtype_to_peak_tops[torch.float8_e4m3fn]
 
 
 def main(
@@ -95,9 +96,10 @@ def main(
     }
     input_bias = False
     ref_dtypes = [torch.bfloat16, torch.float16]
+    use_fast_accum = [True, False]
     experiment_list: List[Experiment] = []
-    for idx, (dtype, (name, (K, N))) in enumerate(
-        tqdm(list(product(ref_dtypes, name_to_shapes_70b.items())))
+    for idx, (dtype, fast_accum, (name, (K, N))) in enumerate(
+        tqdm(list(product(ref_dtypes, use_fast_accum, name_to_shapes_70b.items())))
     ):
         if n_limit is not None and idx >= n_limit:
             break
@@ -108,6 +110,10 @@ def main(
         linear_float8 = Float8Linear.from_float(
             copy.deepcopy(linear_ref), emulate=False
         )
+        if fast_accum:
+            linear_float8.forward_config = ScaledMMConfig(False, True, False)
+        else:
+            linear_float8.forward_config = ScaledMMConfig(False, False, False)
 
         bsz, seq_len = 4, 4096
         M = bsz * seq_len
@@ -155,6 +161,7 @@ def main(
             float8_time,
             dtype,
             compile,
+            use_fast_accum=fast_accum,
         )
         print(experiment)
         print("float8 speedup", experiment.ref_time_sec / experiment.float8_time_sec)
@@ -168,7 +175,7 @@ def main(
         "N",
         "ref_dtype",
         "compiled",
-        "fp8_dtype",
+        "use_fast_accum",
         "ref_time_sec",
         "pt_fp8_time_sec",
         "ref_tops_sec",
@@ -186,7 +193,7 @@ def main(
                 experiment.shape[2],
                 experiment.dtype,
                 experiment.compiled,
-                experiment.float_8_dtype,
+                experiment.use_fast_accum,
                 experiment.ref_time_sec,
                 experiment.float8_time_sec,
                 experiment.ref_tops_sec,
@@ -214,6 +221,7 @@ def main(
             "shape",
             "ref_dtype",
             "compiled",
+            "use_fast_accum",
             "ref_time_sec",
             "pt_fp8_time_sec",
             "pt_fp8_speedup",

@@ -10,6 +10,7 @@ import torch
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
+    ScaledMMConfig,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
@@ -27,9 +28,9 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     def forward(
         ctx,
         tensor,
-        emulate: bool,
+        mm_config: ScaledMMConfig,
     ):
-        ctx.emulate = emulate
+        ctx.mm_config = mm_config
         return tensor
 
     @staticmethod
@@ -39,7 +40,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             return gradY, None
         gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, torch.float8_e5m2, ctx.emulate
+            gradY, gradY_scale, torch.float8_e5m2, mm_config=ctx.mm_config
         )
         return fp8_tensor, None
 
@@ -73,11 +74,11 @@ class Float8DynamicLinear(torch.nn.Linear):
             return inpt_tensor
         scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn)
         return Float8Tensor.to_float8(
-            inpt_tensor, scale, torch.float8_e4m3fn, emulate=self.emulate
+            inpt_tensor, scale, torch.float8_e4m3fn, mm_config=self.forward_config
         )
 
     def cast_to_float8_e5m2_bw(self, gradY: torch.Tensor) -> torch.Tensor:
-        return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
+        return NoopFwToFloat8E5M2Bw.apply(gradY, self.backward_config)
 
     @classmethod
     def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
@@ -97,5 +98,6 @@ class Float8DynamicLinear(torch.nn.Linear):
             new_mod = cls(**super_kwargs)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
-        new_mod.emulate = emulate
+        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
+        new_mod.backward_config = ScaledMMConfig(emulate, False)
         return new_mod
