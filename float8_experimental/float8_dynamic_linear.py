@@ -17,6 +17,8 @@ import torch.utils._pytree as pytree
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
+    merge_mm_configs,
+    ScaledMMConfig,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
@@ -35,9 +37,9 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     def forward(
         ctx,
         tensor,
-        emulate: bool,
+        mm_config: ScaledMMConfig,
     ):
-        ctx.emulate = emulate
+        ctx.mm_config = mm_config
         return tensor
 
     @staticmethod
@@ -46,19 +48,19 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             return gradY, None
         gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, torch.float8_e5m2, ctx.emulate
+            gradY, gradY_scale, torch.float8_e5m2, mm_config=ctx.mm_config
         )
         return fp8_tensor, None
 
 
 def cast_to_float8_e4m3fn(
-    inpt_tensor: torch.Tensor, emulate: bool, reduce_amax: bool = False
+    inpt_tensor: torch.Tensor, mm_config: ScaledMMConfig, reduce_amax: bool = False
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
     scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn, reduce_amax)
     return Float8Tensor.to_float8(
-        inpt_tensor, scale, torch.float8_e4m3fn, emulate=emulate
+        inpt_tensor, scale, torch.float8_e4m3fn, mm_config=mm_config
     )
 
 
@@ -84,10 +86,10 @@ class Float8DynamicLinear(torch.nn.Linear):
     def cast_to_float8_e4m3fn(
         self, inpt_tensor: torch.Tensor, reduce_amax: bool = False
     ) -> Float8Tensor:
-        return cast_to_float8_e4m3fn(inpt_tensor, self.emulate, reduce_amax)
+        return cast_to_float8_e4m3fn(inpt_tensor, self.forward_config, reduce_amax)
 
     def cast_to_float8_e5m2_bw(self, gradY: torch.Tensor) -> torch.Tensor:
-        return NoopFwToFloat8E5M2Bw.apply(gradY, self.emulate)
+        return NoopFwToFloat8E5M2Bw.apply(gradY, self.backward_config)
 
     @classmethod
     def from_float(
@@ -109,14 +111,15 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "bias": False,
             }
             new_mod = cls(**super_kwargs)
+        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
+        new_mod.backward_config = ScaledMMConfig(emulate, False)
         if config.enable_fsdp_fp8_all_gather:
             new_mod.weight = nn.Parameter(
-                WeightWithDynamicFloat8CastTensor(mod.weight, emulate)
+                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
             )
         else:
             new_mod.weight = mod.weight
         new_mod.bias = mod.bias
-        new_mod.emulate = emulate
         return new_mod
 
 
@@ -137,7 +140,7 @@ _ops_to_preserve_subclass = {
 
 class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, tensor: torch.Tensor, emulate: bool):
+    def __new__(cls, tensor: torch.Tensor, mm_config: ScaledMMConfig):
         return torch.Tensor._make_wrapper_subclass(
             cls,
             tensor.size(),
@@ -151,9 +154,9 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             requires_grad=tensor.requires_grad,
         )
 
-    def __init__(self, tensor: torch.Tensor, emulate: bool):
+    def __init__(self, tensor: torch.Tensor, mm_config: ScaledMMConfig):
         self._tensor = tensor
-        self._emulate = emulate
+        self._mm_config = mm_config
         # Optional cache for pre-computed fp8 data/scale
         self._fp8_data: Optional[torch.Tensor] = None
         self._fp8_scale: Optional[torch.Tensor] = None
@@ -162,11 +165,14 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         if func == torch.ops.aten.detach.default:
             return args[0]
-        emulate = False
+        mm_config = None
 
         def unwrap(t):
-            nonlocal emulate
-            emulate |= t._emulate
+            nonlocal mm_config
+            if mm_config is None:
+                mm_config = t._mm_config
+            else:
+                mm_config = merge_mm_configs(mm_config, t._mm_config)
             return t._tensor
 
         args, kwargs = pytree.tree_map_only(
@@ -176,25 +182,25 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         if func not in _ops_to_preserve_subclass:
             return out
         return pytree.tree_map_only(
-            torch.Tensor, lambda x: WeightWithDynamicFloat8CastTensor(x, emulate), out
+            torch.Tensor, lambda x: WeightWithDynamicFloat8CastTensor(x, mm_config), out
         )
 
     def __tensor_flatten__(self):
-        return ["_tensor"], self._emulate
+        return ["_tensor"], self._mm_config
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        emulate = flatten_spec
-        return WeightWithDynamicFloat8CastTensor(inner_tensors["_tensor"], emulate)
+        mm_config = flatten_spec
+        return WeightWithDynamicFloat8CastTensor(inner_tensors["_tensor"], mm_config)
 
     def __repr__(self):
-        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, emulate={self._emulate})"
+        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
         if self._fp8_data is not None and self._fp8_scale is not None:
             return (self._fp8_data,), (self._fp8_scale,)
         float8_tensor = cast_to_float8_e4m3fn(
-            self._tensor, self._emulate, reduce_amax=True
+            self._tensor, self._mm_config, reduce_amax=True
         )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
@@ -216,4 +222,4 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             ), f"Expects out's data to be the all-gather output"
             out._scale = scale
             return
-        return Float8Tensor(data, scale, param_dtype, self._emulate), (data,)
+        return Float8Tensor(data, scale, param_dtype, self._mm_config), (data,)

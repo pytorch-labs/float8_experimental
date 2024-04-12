@@ -21,7 +21,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_tensor import Float8Tensor
+from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -118,7 +118,7 @@ class TestGraphBreaks(DynamoTestCase):
                 self.fp8_scale_x,
                 torch.float8_e4m3fn,
                 self.fp8_amax_x,
-                emulate=True,  # TODO: I set this to True so that people on A100 can test, but once fix is in, set to False
+                ScaledMMConfig(),
             )
             if self.graph_break:
                 torch._dynamo.graph_break()
@@ -181,9 +181,9 @@ class TestGraphBreaks(DynamoTestCase):
             type(y_compiled._orig_dtype)
         )
         assert isinstance(
-            y_compiled._emulate, bool
+            y_compiled._mm_config.emulate, bool
         ), "Float8Tensor._emulate should be a bool but got {}".format(
-            type(y_compiled._emulate)
+            type(y_compiled._mm_config.emulate)
         )
 
 
