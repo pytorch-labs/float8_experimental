@@ -155,7 +155,7 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            float8linear_module = module_cls.from_float(module, emuluate=emulate)
+            float8linear_module = module_cls.from_float(module, emulate=emulate)
             setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
