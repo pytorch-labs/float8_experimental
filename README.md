@@ -90,13 +90,17 @@ for _ in range(N_ITER):
     optimizer.step()
 ```
 
-# code tips
+# 🧭 Code Organization
 
-* `float8_experimental/float8_linear.py` - `Float8Linear` (main user facing entry point for delayed scaling)
-* `float8_experimental/float8_dynamic_linear.py` - `Float8DynamicLinear` (main user facing entry point for dynamic scaling)
-* `float8_experimental/float8_tensor.py` - `Float8Tensor`, which allows `Float8Linear` to abide by the `x.dtype == x.grad.dtype` restriction
+* `float8_experimental/float8_linear.py`
+    - `Float8Linear` (main user facing entry point for delayed scaling)
+* `float8_experimental/float8_dynamic_linear.py`
+    - `Float8DynamicLinear` (main user facing entry point for dynamic scaling)
+* `float8_experimental/float8_tensor.py`
+    - `Float8Tensor`, which allows `Float8Linear` to abide by the `x.dtype == x.grad.dtype` restriction
+    - `ScaledMMConfig` defines the semantics for matmul in the forward and backwards pass
 
-# testing
+# Testing
 
 ```bash
 # run single-GPU unit tests
@@ -117,7 +121,7 @@ pytest test/test_compile.py
 ./test/run_everything.sh
 ```
 
-# benchmarking
+# Benchmarking
 
 ```bash
 # benchmark the torch._scaled_mm function on LLaMa 2 70B shapes
@@ -130,4 +134,3 @@ pytest test/test_compile.py
 
 # License
 PyTorch has a BSD 3-Clause License, as found in the LICENSE file.
-
