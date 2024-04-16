@@ -14,3 +14,8 @@ enable_amax_init = True
 # this doesn't work with autocast + torch.compile + FSDP. Enabling this
 # option is useful for safety, but not strictly necessary.
 enable_pre_and_post_forward = True
+
+# If True, then uses a tensor subclass for the fp8 linear module's weight that
+# implements pre/post-all-gather methods to do fp8 all-gather with FSDP2.
+# Only dynamic scaling is supported for now.
+enable_fsdp_fp8_all_gather = False
