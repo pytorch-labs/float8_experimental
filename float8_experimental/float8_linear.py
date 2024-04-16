@@ -52,7 +52,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
     with torch.no_grad():
         # Note: we need to enable distributed reduction here in order
         # to match numerics between single GPU and multi GPU code
-        new_amax = tensor_to_amax(x, distributed_reduction=True)
+        new_amax = tensor_to_amax(x, reduce_amax=True)
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
         new_scale = amax_history_to_scale(
