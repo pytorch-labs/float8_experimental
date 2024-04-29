@@ -44,6 +44,12 @@ torch.manual_seed(0)
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
 
 
+def bitwise_identical(a: Float8Tensor, b: Float8Tensor) -> bool:
+    assert torch.all(a._data == b._data).item(), "scales are not identical"
+    assert torch.all(a._data == b._data).item(), "data is not identical"
+    return True
+
+
 class TestFloat8Tensor(unittest.TestCase):
     def test_preserves_dtype(self) -> None:
         # hp means high precision, lp means low precision
@@ -67,6 +73,15 @@ class TestFloat8Tensor(unittest.TestCase):
             x_f8_hp.backward(grad)
             # the gradient should be unchanged through both casts
             torch.testing.assert_close(grad, x.grad, rtol=0, atol=0)
+
+    def test_split_cat(self):
+        a = torch.rand(16, 16, dtype=torch.bfloat16)
+        scale = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale, torch.float8_e4m3fn)
+
+        splits = torch.split(fp8_a, 16)
+        catted = torch.cat(splits, dim=0)
+        assert bitwise_identical(fp8_a, catted)
 
 
 class TestFloat8Linear:
@@ -357,7 +372,7 @@ class TestScaledMM:
         ):
             a @ b
 
-    def test_merge_configs(sel):
+    def test_merge_configs(self):
         a = ScaledMMConfig(False, True, True)
         b = ScaledMMConfig(True, False, False)
         with pytest.raises(

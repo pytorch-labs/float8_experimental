@@ -3,7 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import torch
 
@@ -64,24 +64,39 @@ def float8_split(aten_op, args, kwargs=None):
 
 
 # Errors cant `cat_cuda float8 e4m3fn`
-# @implements([aten.cat.default])
-# def float8_cat(aten_op, args, kwargs=None):
-#     chunked_tensors: Tuple[Float8Tensor] = args[0]
+@implements([aten.cat.default])
+def float8_cat(aten_op, args, kwargs=None):
+    chunked_tensors: Tuple[Float8Tensor] = args[0]
 
-#     orig_dtype = args[0][0]._orig_dtype
-#     scale = args[0][0]._scale
-#     mm_config = args[0][0]._mm_config
-#     chunk_data =[]
-#     for chunk in chunked_tensors:
-#         assert chunk._orig_dtype == orig_dtype, "Expecting all chunks to be of the same dtype"
-#         assert chunk._scale is scale, "Expecting all chunks to have thee same scale as a result of a split"
-#         assert chunk._mm_config is mm_config, "Expecting all chunks to have thee same mm config as a result of a split"
-#         chunk_data.append(chunk._data)
-#     new_data = aten_op(chunk_data, *args[1:], **kwargs)
-#     return Float8Tensor(new_data, scale, orig_dtype, mm_config)
+    orig_dtype = chunked_tensors[0]._orig_dtype
+    scale = chunked_tensors[0]._scale
+    mm_config = chunked_tensors[0]._mm_config
+    fp8_dtype = chunked_tensors[0]._data.dtype
+    chunk_data = []
+    for chunk in chunked_tensors:
+        assert isinstance(
+            chunk, Float8Tensor
+        ), "Expecting all chunks to be of type Float8Tensor"
+        assert (
+            chunk._orig_dtype == orig_dtype
+        ), "Expecting all chunks to be of the same dtype"
+        assert (
+            chunk._scale is scale
+        ), "Expecting all chunks to have thee same scale as a result of a split"
+        assert (
+            chunk._mm_config is mm_config
+        ), "Expecting all chunks to have thee same mm config as a result of a split"
+        assert (
+            chunk._data.dtype == fp8_dtype
+        ), "Expecting all chunks to be of the same dtype as a result of a split"
+        chunk_data.append(chunk._data.view(torch.uint8))
+
+    new_data = aten_op(chunk_data, *args[1:], **kwargs)
+    new_data = new_data.view(fp8_dtype)
+    return Float8Tensor(new_data, scale, orig_dtype, mm_config)
 
 
-@implements([aten.sum.dim_IntList, aten.cat.default])
+@implements([aten.sum.dim_IntList])
 def float8_cast_up_op(aten_op, args, kwargs=None):
     """Be careful with this function, this is a "fallback" op that
     casts the output of the op to the original precision. And performs the op.
