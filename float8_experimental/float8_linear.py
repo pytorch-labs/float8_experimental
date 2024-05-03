@@ -183,6 +183,10 @@ class Float8LinearMixin(object):
 
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
+        # Note that when using `config.enable_pre_and_post_forward = False`,
+        # it's recommended to also set `config.enable_amax_init = False`.
+        # Otherwise, the amax buffer would never be marked as initialized and
+        # would be initialized in every iteration.
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
     def register_always_float32_buffer(

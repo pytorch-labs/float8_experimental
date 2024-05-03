@@ -499,30 +499,22 @@ class TestFloat8LinearUtils(unittest.TestCase):
             # Overflow caused by a too large scaling factor
             s_overflow = torch.tensor(1e9)
             fp8_overflow = Float8Tensor.to_float8(x1_hp, s_overflow, lp_dtype)
-            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
-                fp8_overflow, lp_dtype
-            )
-            self.assertEqual((underflow_cnt, fp8_overflow_cnt), (0, tensor_len))
+            (zero_cnt, max_cnt) = fp8_tensor_statistics(fp8_overflow, lp_dtype)
+            self.assertEqual((zero_cnt, max_cnt), (0, tensor_len))
 
             # Underflow caused by a too small scaling factor
             s_underflow = torch.tensor(1e-9)
             fp8_underflow = Float8Tensor.to_float8(x1_hp, s_underflow, lp_dtype)
-            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
-                fp8_underflow, lp_dtype
-            )
-            self.assertEqual((underflow_cnt, fp8_overflow_cnt), (tensor_len, 0))
+            (zero_cnt, max_cnt) = fp8_tensor_statistics(fp8_underflow, lp_dtype)
+            self.assertEqual((zero_cnt, max_cnt), (tensor_len, 0))
 
             # Both overflow and underflow
             x2_hp = torch.cat((x1_hp * 1e9, x1_hp * 1.0, x1_hp * 1e-9), 0)
             fp8_over_underflow = Float8Tensor.to_float8(
                 x2_hp, torch.tensor(1.0), lp_dtype
             )
-            (underflow_cnt, fp8_overflow_cnt) = fp8_tensor_statistics(
-                fp8_over_underflow, lp_dtype
-            )
-            self.assertEqual(
-                (underflow_cnt, fp8_overflow_cnt), (tensor_len, tensor_len)
-            )
+            (zero_cnt, max_cnt) = fp8_tensor_statistics(fp8_over_underflow, lp_dtype)
+            self.assertEqual((zero_cnt, max_cnt), (tensor_len, tensor_len))
 
 
 if __name__ == "__main__":

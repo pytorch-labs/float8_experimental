@@ -119,9 +119,9 @@ def fp8_tensor_statistics(
     else:  # e5m2
         FP8_MAX = E5M2_MAX_POS
     tensor_orig_type = tensor._data.to(dtype=tensor._orig_dtype)
-    num_overflows = (tensor_orig_type == FP8_MAX).sum().item()
-    num_underflows = (tensor_orig_type == 0).sum().item()
-    return (num_underflows, num_overflows)
+    num_max = (torch.abs(tensor_orig_type) == FP8_MAX).sum().item()
+    num_zero = (tensor_orig_type == 0).sum().item()
+    return (num_zero, num_max)
 
 
 def is_row_major(stride):
