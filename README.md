@@ -118,7 +118,7 @@ pytest test/test_compile.py
 ./test/test_tp.sh
 
 # run all of these tests
-./test/run_everything.sh
+./test/test_everything.sh
 ```
 
 # Benchmarking

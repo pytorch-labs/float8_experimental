@@ -112,43 +112,12 @@ def to_fp8_no_autograd(
     return Float8Tensor(bits_fp8, x_scale, x.dtype, mm_config=mm_config)
 
 
-def from_fp8_no_autograd(x: torch.Tensor) -> torch.Tensor:
-    """Convert a tensor from float8 without autograd
-
-    This function will handle 3 cases:
-        1. If the tensor is a DTensor, it will convert the inner tensor to the original precision
-        2. If the tensor is a Float8Tensor, it will convert the tensor to the original precision
-        3. If the tensor is a regular tensor, it will pass through this tensor
-
-    Args:
-        x: the tensor to convert
-    """
-
-    def to_original_precision(grad):
-        if isinstance(grad, Float8Tensor):
-            return grad.to_original_precision()
-        else:
-            return grad
-
-    if isinstance(x, DTensor):
-        local_grad = x.to_local()
-        original_precision_grad = to_original_precision(local_grad)
-        return DTensor.from_local(
-            original_precision_grad,
-            x.device_mesh,
-            x.placements,
-            run_check=False,
-            shape=x.size(),
-            stride=x.stride(),
-        )
-    else:
-        return to_original_precision(x)
-
-
 @torch._dynamo.allow_in_graph
 class ToFloat8ConstrFunc(torch.autograd.Function):
     """
-    A differentiable conversion to fp8
+    A differentiable conversion to fp8.
+    * forward: convert from high precision to float8
+    * backward: pass the gradient without changes
     """
 
     @staticmethod
@@ -175,14 +144,15 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        grad = from_fp8_no_autograd(g)
-        return grad, None, None, None, None
+        return g, None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
 class FromFloat8ConstrFunc(torch.autograd.Function):
     """
-    A differentiable conversion from fp8
+    A differentiable conversion from fp8.
+    * forward: convert from float8 to high precision
+    * backward: pass the gradient without changes
     """
 
     @staticmethod
@@ -191,7 +161,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, g):
-        return Float8Tensor.to_float8(g), None, None
+        return g, None, None
 
 
 class Float8Tensor(torch.Tensor):
