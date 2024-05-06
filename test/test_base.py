@@ -56,6 +56,18 @@ class TestFloat8Tensor(unittest.TestCase):
             x3_hp = x2_lp.to_original_precision()
             self.assertTrue(x3_hp.dtype == hp_dtype)
 
+    def test_differentiable_casts(self) -> None:
+        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        for f8_dtype in lp_dtypes:
+            x = torch.randn(1).requires_grad_()
+            grad = torch.randn(1)
+            x_s = tensor_to_scale(x, f8_dtype)
+            x_f8 = Float8Tensor.to_float8(x, x_s, f8_dtype)
+            x_f8_hp = x_f8.to_original_precision()
+            x_f8_hp.backward(grad)
+            # the gradient should be unchanged through both casts
+            torch.testing.assert_close(grad, x.grad, rtol=0, atol=0)
+
 
 class TestFloat8Linear:
     def _test_linear_impl(
