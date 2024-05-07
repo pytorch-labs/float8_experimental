@@ -158,7 +158,9 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     loss.backward()
 
 
-def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
+def test_fp8_mlp_tensor_parallelism_base(
+    mesh: DeviceMesh, size=16, compile: bool = False
+):
     device = mesh.device_type
 
     toy_model = ToyModel().to(device)
@@ -197,6 +199,9 @@ def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
         },
     )
 
+    if compile:
+        tp_model = torch.compile(tp_model)
+
     x_fp32 = torch.rand(size * 2, size, device=device, requires_grad=False)
     x_fp32_tp_input = x_fp32.clone()
     x_fp32_sp_input = distribute_tensor(x_fp32.clone(), mesh, [Shard(0)])
@@ -217,6 +222,10 @@ def test_fp8_mlp_tensor_parallelism(mesh: DeviceMesh, size=16):
     )
 
 
+def test_fp8_mlp_tensor_parallelism_compile(mesh: DeviceMesh, size=16):
+    test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
+
+
 if __name__ == "__main__":
     # float8 only works on CUDA H100 so we only test cuda and we follow
     # other test files to not use TestCase but instead just add the test
@@ -227,7 +236,8 @@ if __name__ == "__main__":
         test_fp8_redistribute,
         test_dtensor_cast_to_fp8,
         test_dtensor_fp8_autograd,
-        test_fp8_mlp_tensor_parallelism,
+        test_fp8_mlp_tensor_parallelism_base,
+        test_fp8_mlp_tensor_parallelism_compile,
     ]
 
     for test in tqdm(tests, desc="Running tests"):
