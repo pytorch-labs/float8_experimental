@@ -77,12 +77,14 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_scale_dL_dY,
         scale_fn_name,
         is_amax_initialized,
-        mm_config: ScaledMMConfig,
+        mm_config_arg0: ScaledMMConfig,
+        mm_config_arg1: ScaledMMConfig,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
-        ctx.mm_config = mm_config
+        ctx.mm_config_arg0 = mm_config_arg0
+        ctx.mm_config_arg1 = mm_config_arg1
         return tensor
 
     @staticmethod
@@ -104,9 +106,10 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
 
         res = to_fp8_no_autograd(
-            go, fp8_scale_dL_dY, torch.float8_e5m2, mm_config=ctx.mm_config
+            go, fp8_scale_dL_dY, torch.float8_e5m2, mm_config_arg0=ctx.mm_config_arg0,
+            mm_config_arg1=ctx.mm_config_arg1
         )
-        empty_grads = None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None
         return res, *empty_grads
 
 
@@ -159,10 +162,6 @@ class Float8LinearMixin(object):
             "fp8_amax_history_dL_dY", torch.zeros(history_len)
         )
         self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
-
-        # Defines the behavior of the matmul in the forward and backward pass
-        self.forward_config = ScaledMMConfig()
-        self.backward_config = ScaledMMConfig()
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -231,7 +230,7 @@ class Float8LinearMixin(object):
             self.fp8_scale_x,
             torch.float8_e4m3fn,
             self.fp8_amax_x,
-            self.forward_config,
+            self.fwd_gemm_config,
         )
         return x_fp8
 
@@ -254,7 +253,6 @@ class Float8LinearMixin(object):
             self.fp8_scale_w,
             torch.float8_e4m3fn,
             self.fp8_amax_w,
-            self.forward_config,
         )
         return w_fp8
 
@@ -267,7 +265,8 @@ class Float8LinearMixin(object):
             self.fp8_scale_dL_dY,
             scale_fn_name,
             self.is_amax_initialized,
-            self.backward_config,
+            self.bwd_gradX_gemm_config,
+            self.bwd_gradW_gemm_config,
         )
         return y
 
@@ -332,10 +331,14 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
 
-        # Defines the behavior of the matmul in the forward and backward
-        # Forward we use fast_accum, backwards we do not
-        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
-        new_mod.backward_config = ScaledMMConfig(emulate, False)
+        # Defines the behavior of the matmul in the forward and backward pass
+        new_mod.fwd_gemm_config = ScaledMMConfig(
+            emulate=emulate, 
+            use_fast_accum=True if not emulate else False)
+        new_mod.bwd_gradX_gemm_config = ScaledMMConfig(
+            emulate=emulate, use_fast_accum=False)
+        new_mod.bwd_gradW_gemm_config = ScaledMMConfig(
+            emulate=emulate, use_fast_accum=False)
 
         # I think its okay to send all params and buffers to device
         new_mod.to(mod.weight.device)

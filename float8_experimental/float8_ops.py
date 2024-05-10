@@ -46,7 +46,8 @@ def implements(aten_ops):
 def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(
-        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config
+        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config_arg0,
+        args[0]._mm_config_arg1,
     )
 
 
@@ -56,7 +57,8 @@ def float8_split(aten_op, args, kwargs=None):
 
     def make_float8(data):
         return Float8Tensor(
-            data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config
+            data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config_arg0,
+            args[0]._mm_config_arg1,
         )
 
     out = map(make_float8, new_data_tensors)
@@ -70,7 +72,8 @@ def float8_cat(aten_op, args, kwargs=None):
 
     orig_dtype = chunked_tensors[0]._orig_dtype
     scale = chunked_tensors[0]._scale
-    mm_config = chunked_tensors[0]._mm_config
+    mm_config_arg0 = chunked_tensors[0]._mm_config_arg0
+    mm_config_arg1 = chunked_tensors[0]._mm_config_arg1
     fp8_dtype = chunked_tensors[0]._data.dtype
     chunk_data = []
     for chunk in chunked_tensors:
@@ -84,8 +87,11 @@ def float8_cat(aten_op, args, kwargs=None):
             chunk._scale is scale
         ), "Expecting all chunks to have thee same scale as a result of a split"
         assert (
-            chunk._mm_config is mm_config
-        ), "Expecting all chunks to have thee same mm config as a result of a split"
+            chunk._mm_config_arg0 is mm_config_arg0
+        ), "Expecting all chunks to have thee same mm config arg0 as a result of a split"
+        assert (
+            chunk._mm_config_arg1 is mm_config_arg1
+        ), "Expecting all chunks to have thee same mm config arg1 as a result of a split"
         assert (
             chunk._data.dtype == fp8_dtype
         ), "Expecting all chunks to be of the same dtype as a result of a split"
@@ -93,7 +99,7 @@ def float8_cat(aten_op, args, kwargs=None):
 
     new_data = aten_op(chunk_data, *args[1:], **kwargs)
     new_data = new_data.view(fp8_dtype)
-    return Float8Tensor(new_data, scale, orig_dtype, mm_config)
+    return Float8Tensor(new_data, scale, orig_dtype, mm_config_arg0, mm_config_arg1)
 
 
 @implements([aten.sum.dim_IntList])
@@ -141,8 +147,8 @@ def float8_mm(aten_op, args, kwargs=None):
     )
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
-    a_mm_config: ScaledMMConfig = a._mm_config
-    b_mm_config: ScaledMMConfig = b._mm_config
+    a_mm_config: Optional[ScaledMMConfig] = a._mm_config_arg0
+    b_mm_config: Optional[ScaledMMConfig] = b._mm_config_arg1
     mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
     if mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
@@ -174,8 +180,8 @@ def float8_addmm(aten_op, args, kwargs=None):
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
     assert bias.dtype == output_dtype, "bias dtype must match output dtype"
-    a_mm_config: ScaledMMConfig = a._mm_config
-    b_mm_config: ScaledMMConfig = b._mm_config
+    a_mm_config: ScaledMMConfig = a._mm_config_arg0
+    b_mm_config: ScaledMMConfig = b._mm_config_arg1
     mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
     if mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
@@ -215,7 +221,8 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         torch.bfloat16,
     }, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
-        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._mm_config
+        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._mm_config_arg0,
+        args[0]._mm_config_arg1
     )
 
 
@@ -240,7 +247,8 @@ def allgather_fp8(aten_op, args, kwargs=None):
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     fp8_out = fp8_out.view(fp8_input._data.dtype)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
+        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config_arg0,
+        fp8_input._mm_config_arg1
     )
 
 
@@ -252,5 +260,6 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
     fp8_data = fp8_input._data
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
+        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config_arg0,
+        fp8_input._mm_config_arg1
     )

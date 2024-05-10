@@ -180,11 +180,18 @@ class TestGraphBreaks(DynamoTestCase):
         ), "Float8Tensor._orig_dtype should be a dtype but got {}".format(
             type(y_compiled._orig_dtype)
         )
-        assert isinstance(
-            y_compiled._mm_config.emulate, bool
-        ), "Float8Tensor._emulate should be a bool but got {}".format(
-            type(y_compiled._mm_config.emulate)
-        )
+        if y_compiled._mm_config_arg0 is not None:
+            assert isinstance(
+                y_compiled._mm_config_arg0.emulate, bool
+            ), "Float8Tensor._mm_config_arg0._emulate should be a bool but got {}".format(
+                type(y_compiled._mm_config_arg0.emulate)
+            )
+        if y_compiled._mm_config_arg1 is not None:
+            assert isinstance(
+                y_compiled._mm_config_arg1.emulate, bool
+            ), "Float8Tensor._mm_config_arg1._emulate should be a bool but got {}".format(
+                type(y_compiled._mm_config_arg1.emulate)
+            )
 
 
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
