@@ -19,6 +19,33 @@ aten = torch.ops.aten
 # emulate: whether to emulate the matmuls in fp32
 # use_fast_accum: whether to use the fast-accumulation option for scaled_mm
 # fp8_output: whether to output the result of the scaled_mm in fp8
+#
+# Y = X @ W_t
+# gradX = gradY @ W
+# gradW = X_t @ gradY
+#
+# X always first
+# W always last
+# G switches
+#
+# in config, specify "valid_for" which is either first_arg or second_arg
+#
+# Option 1:
+# * 0. Float8Tensor contains two configs, first_arg and second_arg, both optional
+# * 1. don't define config on W
+# * 2. set X's config to Y for first_arg and None for second_arg
+# * 3. set gradY's config to gradX for first_arg, and gradW for second_arg
+#
+# In the merging logic:
+# * if only one config is defined, use that
+#   - will cover Y and gradX
+# * if two configs are defined, use the one for second_arg, ignore first_arg
+#   - will cover gradW
+#
+# Option 2:
+# * each Float8Tensor has all 3 configs
+# * merging logic decides which to use:
+#   - this will be hairy
 ScaledMMConfig = namedtuple(
     "ScaledMMConfig",
     ["emulate", "use_fast_accum", "fp8_output"],
@@ -26,25 +53,20 @@ ScaledMMConfig = namedtuple(
 )
 
 
+# TODO delete this function
 def merge_mm_configs(
     a_mm_config: ScaledMMConfig, b_mm_config: ScaledMMConfig
 ) -> ScaledMMConfig:
-    """Merges two mm_configs together emulate behavior must match,
-    However we want to use_fast_accum in forward and not in backward.
-    We do this by populating the fields of the backproping grad. Same applies for fp8_output.
-
-    For both use_fast_accum and fp8_output, if either config is False, the merged config will be False.
+    """Merges two mm_configs together, TODO write up new logic better
     """
-    assert (
-        a_mm_config.emulate == b_mm_config.emulate
-    ), "Both mm_configs must have the same emulate value, but got {} and {}".format(
-        a_mm_config.emulate, b_mm_config.emulate
-    )
-    return ScaledMMConfig(
-        emulate=a_mm_config.emulate,
-        use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
-        fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
-    )
+    if a_mm_config is not None and b_mm_config is None:
+        return a_mm_config
+    elif a_mm_config is None and b_mm_config is not None:
+        return b_mm_config
+    elif a_mm_config is not None and b_mm_config is not None:
+        return b_mm_config
+    else:
+        raise AssertionError('at least one of a_mm_config or b_mm_config must be defined')
 
 
 def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
@@ -66,7 +88,8 @@ def to_fp8_no_autograd(
     x: torch.Tensor,
     x_scale: torch.Tensor,
     float8_dtype: torch.dtype,
-    mm_config: Optional[ScaledMMConfig],
+    mm_config_arg0: Optional[ScaledMMConfig],
+    mm_config_arg1: Optional[ScaledMMConfig],
 ) -> "Float8Tensor":
     """Convert a tensor to float8 without autograd
     This is used in multiple places in the codebase to convert a tensor to float8
@@ -98,7 +121,8 @@ def to_fp8_no_autograd(
         local_bits = bits_fp8.to_local()
         local_scale = x_scale.to_local()
         inner_float8_tensor = Float8Tensor(
-            local_bits, local_scale, x.dtype, mm_config=mm_config
+            local_bits, local_scale, x.dtype, mm_config_arg0=mm_config_arg0,
+            mm_config_arg1=mm_config_arg1
         )
         return DTensor.from_local(
             inner_float8_tensor,
@@ -109,7 +133,9 @@ def to_fp8_no_autograd(
             stride=bits_fp8.stride(),
         )
 
-    return Float8Tensor(bits_fp8, x_scale, x.dtype, mm_config=mm_config)
+    return Float8Tensor(
+        bits_fp8, x_scale, x.dtype, mm_config_arg0=mm_config_arg0, 
+        mm_config_arg1=mm_config_arg1)
 
 
 @torch._dynamo.allow_in_graph
@@ -127,7 +153,8 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         scale: torch.Tensor,
         float8_dtype=torch.float8_e4m3fn,
         amax_buffer: Optional[torch.Tensor] = None,
-        mm_config: Optional[ScaledMMConfig] = None,
+        mm_config_arg0: Optional[ScaledMMConfig] = None,
+        mm_config_arg1: Optional[ScaledMMConfig] = None,
     ):
         """Autograd enabled wrapper around to_fp8_no_autograd that will also populate the amax buffer.
         Args
@@ -135,16 +162,19 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             scale: the scale to use to convert the tensor
             float8_dtype: the float8 dtype either, torch.float8_e4m3fn or torch.float8_e5m2fn
             amax_buffer: an Optional buffer buffer to store the amax value in prior to conversion
-            emulate: whether to emulate the matmuls in fp32
+            mm_config_arg0: optional mm_config to use when this tensor is the first argument to a matmul
+            mm_config_arg1: optional mm_config to use when this tensor is the second argument to a matmul
         """
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        return to_fp8_no_autograd(tensor, scale, float8_dtype, mm_config=mm_config)
+        return to_fp8_no_autograd(
+            tensor, scale, float8_dtype, mm_config_arg0=mm_config_arg0,
+            mm_config_arg1=mm_config_arg1)
 
     @staticmethod
     def backward(ctx, g):
-        return g, None, None, None, None
+        return g, None, None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
@@ -188,15 +218,17 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    _mm_config: ScaledMMConfig
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config"]
+    _mm_config_arg0: Optional[ScaledMMConfig]
+    _mm_config_arg1: Optional[ScaledMMConfig]
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config_arg0", "_mm_config_arg1"]
 
     def __new__(
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        mm_config: Optional[ScaledMMConfig],
+        mm_config_arg0: Optional[ScaledMMConfig],
+        mm_config_arg1: Optional[ScaledMMConfig],
     ):
         assert (
             scale.numel() == 1
@@ -217,17 +249,19 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._mm_config = mm_config if mm_config is not None else ScaledMMConfig()
+        self._mm_config_arg0 = mm_config_arg0
+        self._mm_config_arg1 = mm_config_arg1
 
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config_arg0={self._mm_config_arg0}, mm_config_arg1={self._mm_config_arg1}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
             "_orig_dtype": self._orig_dtype,
-            "_mm_config": self._mm_config,
+            "_mm_config_arg0": self._mm_config_arg0,
+            "_mm_config_arg1": self._mm_config_arg1,
         }
         return ["_data", "_scale"], ctx
 
@@ -238,7 +272,8 @@ class Float8Tensor(torch.Tensor):
             inner_tensors["_data"],
             inner_tensors["_scale"],
             metadata["_orig_dtype"],
-            metadata["_mm_config"],
+            metadata["_mm_config_arg0"],
+            metadata["_mm_config_arg1"],
         )
 
     def to_original_precision(self):
@@ -251,7 +286,8 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        mm_config: Optional[ScaledMMConfig] = None,
+        mm_config_arg0: Optional[ScaledMMConfig] = None,
+        mm_config_arg1: Optional[ScaledMMConfig] = None,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
@@ -265,7 +301,7 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor, scale, float8_dtype, amax_buffer, mm_config
+            tensor, scale, float8_dtype, amax_buffer, mm_config_arg0, mm_config_arg1
         )
 
     @classmethod
