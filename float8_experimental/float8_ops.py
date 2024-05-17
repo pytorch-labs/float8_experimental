@@ -41,6 +41,10 @@ def implements(aten_ops):
         aten.as_strided.default,
         aten.clone.default,
         aten.detach.default,
+        aten.slice.Tensor,
+        aten.transpose.int,
+        aten.fill_.Scalar,
+        aten.copy_.default,
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
@@ -254,3 +258,38 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
     return Float8Tensor(
         fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )
+
+@implements([aten.index_put_.default])
+def index_put_fp8(aten_op, args, kwargs=None):
+    fp8_self = args[0]
+    fp8_values = args[2]
+    assert isinstance(fp8_self, Float8Tensor)
+    assert isinstance(fp8_values, Float8Tensor)
+
+    fp8_data = fp8_self._data
+    fp8_values_data = fp8_values._data
+    fp8_out = aten_op(fp8_data, args[1], fp8_values_data, *args[3:], **kwargs)
+    return Float8Tensor(
+        fp8_out, fp8_self._scale, fp8_self._orig_dtype, fp8_self._mm_config
+    )
+
+@implements([aten.copy_.default])
+def copy_fp8(aten_op, args, kwargs=None):
+    self = args[0]
+    src = args[1]
+    assert isinstance(self, Float8Tensor) or isinstance(src, Float8Tensor)
+
+    self_data = self
+    if isinstance(self, Float8Tensor):
+        self_data = self._data
+        
+    src_data = src
+    if isinstance(src, Float8Tensor):
+        src_data = src._data
+
+    fp8_out = aten_op(self_data, src_data, *args[2:], **kwargs)
+    if isinstance(self, Float8Tensor):
+        return Float8Tensor(
+            fp8_out, self._scale, self._orig_dtype, self._mm_config
+        )
+    return fp8_out
