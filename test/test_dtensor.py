@@ -246,3 +246,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Test {test.__name__} failed with error: {e}")
             raise e
+
+    torch.distributed.destroy_process_group()
