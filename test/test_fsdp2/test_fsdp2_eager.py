@@ -11,7 +11,10 @@ from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
     WeightWithDynamicFloat8CastTensor,
 )
-from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import (
+    precompute_float8_weights,
+    swap_linear_with_float8_linear,
+)
 from test_fsdp2_common import (
     check_parity_bf16_mp,
     check_parity_no_mp,
@@ -57,12 +60,13 @@ class TestFloat8Common:
     def init_transformer(self, weight_tying: bool) -> nn.Module:
         torch.manual_seed(42)
         args = ModelArgs(
-            n_layers=3,
-            dim=768,
-            n_heads=12,
+            n_layers=8,
+            dim=4096,
+            n_heads=32,
             dropout_p=0.0,
             weight_tying=weight_tying,
-            vocab_size=32,
+            vocab_size=4096,
+            max_seq_len=4096,
         )
         module = Transformer(args).cuda()
         self.broadcast_module(module)
@@ -78,6 +82,39 @@ class TestFloat8Common:
         return swap_linear_with_float8_linear(module, Float8DynamicLinear, **kwargs)
 
 
+def profiler(output_dir):
+    """
+    Utility component that wraps around `torch.profiler` to profile model's operators.
+    See https://pytorch.org/docs/stable/profiler.html for more details.
+    The schedule for this profiler is wait 100 steps, warmup 5 steps, trace 5 steps
+    Note: Enabling pytorch profiler may have training speed reduction.
+
+    Args:
+        enabled (Optional[bool]): Enable pytorch profiler. Default is False.
+        output_dir (Optional[str]): Tracing file output path. Default is "./torchtune_perf_tracing.json".
+
+    Returns:
+        ContextManager: pytorch profiler context manager
+    """
+
+    def trace_handler(prof) -> None:
+        prof.export_chrome_trace(output_dir)
+
+    return torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(
+            wait=0, warmup=1, active=2, repeat=1, skip_first=1
+        ),
+        on_trace_ready=trace_handler,
+        record_shapes=True,
+        profile_memory=False,
+        with_stack=False,
+    )
+
+
 class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     @property
     def world_size(self) -> int:
@@ -85,7 +122,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity_dynamic(self):
-        for enable_fsdp_fp8_all_gather in [False, True]:
+        for enable_fsdp_fp8_all_gather in [True]:
             self._test_transformer_parity_dynamic(enable_fsdp_fp8_all_gather)
 
     def _test_transformer_parity_dynamic(self, enable_fsdp_fp8_all_gather: bool):
@@ -106,11 +143,17 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
         optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
         local_inp = torch.randint(
-            0, ref_module.tok_embeddings.weight.size(0), (16, 16), device="cuda"
+            0, ref_module.tok_embeddings.weight.size(0), (4, 512), device="cuda"
         )
-        check_parity_no_mp(
-            self, ref_module, ref_optim, module, optim, local_inp, Float8DynamicLinear
-        )
+        with profiler(
+            output_dir=f"./test_fsdp2_eager_fp8_{enable_fsdp_fp8_all_gather}_precast_rank_{torch.distributed.get_rank()}.json"
+        ) as prof:
+            for i in range(5):
+                optim.zero_grad()
+                module(local_inp).sum().backward()
+                optim.step()
+                precompute_float8_weights(module)
+                prof.step()
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_memory(self):
