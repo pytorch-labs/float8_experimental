@@ -68,7 +68,6 @@ class TestFloat8Common:
             weight_tying=weight_tying,
             vocab_size=4096,
             max_seq_len=4096,
-            vocab_size=32,
         )
         module = Transformer(args).cuda()
         self.broadcast_module(module)
