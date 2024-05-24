@@ -22,7 +22,7 @@ from float8_experimental.float8_tensor import (
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
-from float8_experimental.float8_utils import tensor_to_scale
+from float8_experimental.float8_utils import amax_to_scale, tensor_to_scale
 from torch._prims_common import suggest_memory_format
 
 
@@ -144,7 +144,9 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             dtype=tensor.dtype,
             layout=tensor.layout,
             device=tensor.device,
-            pin_memory=tensor.is_pinned(),
+            # TODO: workaround fake tensor not implementing is.pinned
+            # pin_memory=tensor.is_pinned(),
+            pin_memory=False,
             requires_grad=tensor.requires_grad,
         )
 
@@ -154,6 +156,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         # Optional cache for pre-computed fp8 data/scale
         self._fp8_data: Optional[torch.Tensor] = None
         self._fp8_scale: Optional[torch.Tensor] = None
+        self._fp8_amax: Optional[torch.Tensor] = None
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -195,9 +198,20 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def fsdp_pre_all_gather(self, mesh):
         if self._fp8_data is not None and self._fp8_scale is not None:
             return (self._fp8_data,), (self._fp8_scale,)
-        float8_tensor = cast_to_float8_e4m3fn(
-            self._tensor, self._mm_config, reduce_amax=True
-        )
+        if self._fp8_amax is not None:
+            scale = amax_to_scale(
+                self._fp8_amax,
+                torch.float8_e4m3fn,
+                self._fp8_amax.dtype,
+                clamp_amax=False,
+            )
+            float8_tensor = Float8Tensor.to_float8(
+                self._tensor, scale, torch.float8_e4m3fn, mm_config=self._mm_config
+            )
+        else:
+            float8_tensor = cast_to_float8_e4m3fn(
+                self._tensor, self._mm_config, reduce_amax=True
+            )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
     def fsdp_post_all_gather(

@@ -24,12 +24,18 @@ EPS = 1e-12
 
 
 @torch.no_grad()
-def amax_to_scale(amax, float8_dtype, orig_dtype):
+def amax_to_scale(amax, float8_dtype, orig_dtype, clamp_amax=True):
     scale = torch.empty_like(amax, dtype=torch.float32)
     if float8_dtype == torch.float8_e4m3fn:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        if clamp_amax:
+            res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+        else:
+            res = E4M3_MAX_POS / amax
     else:  # e5m2
-        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+        if clamp_amax:
+            res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
+        else:
+            res = E5M2_MAX_POS / amax
 
     # Ensure that the scale is representable in float16,
     # this helps when amax is small. We are assuming that we don't need

@@ -1,7 +1,7 @@
 import copy
 import threading
 import unittest
-from typing import Any, List
+from typing import Any, List, Union
 
 import torch
 import torch._dynamo.testing
@@ -12,6 +12,7 @@ from float8_experimental.float8_dynamic_linear import (
     WeightWithDynamicFloat8CastTensor,
 )
 from float8_experimental.float8_linear_utils import (
+    precompute_float8_amax,
     precompute_float8_weights,
     swap_linear_with_float8_linear,
 )
@@ -124,9 +125,14 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity_dynamic(self):
         for enable_fsdp_fp8_all_gather in [True]:
-            self._test_transformer_parity_dynamic(enable_fsdp_fp8_all_gather)
+            for pre_compute in [None, "cast", "amax"]:
+                self._test_transformer_parity_dynamic(
+                    enable_fsdp_fp8_all_gather, pre_compute
+                )
 
-    def _test_transformer_parity_dynamic(self, enable_fsdp_fp8_all_gather: bool):
+    def _test_transformer_parity_dynamic(
+        self, enable_fsdp_fp8_all_gather: bool, pre_compute: Union[str, None]
+    ):
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
@@ -147,13 +153,21 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             0, ref_module.tok_embeddings.weight.size(0), (4, 512), device="cuda"
         )
         with profiler(
-            output_dir=f"./test_fsdp2_eager_fp8_{enable_fsdp_fp8_all_gather}_precast_rank_{torch.distributed.get_rank()}.json"
+            output_dir=f"./test_fsdp2_eager_fp8_{enable_fsdp_fp8_all_gather}_{pre_compute}_rank_{torch.distributed.get_rank()}.json"
         ) as prof:
             for i in range(5):
                 optim.zero_grad()
-                module(local_inp).sum().backward()
+                loss = module(local_inp).sum()
+                # if torch.distributed.get_rank() == 0:
+                #     print(f"{pre_compute=} {i=} {loss=}")
+                loss.backward()
                 optim.step()
-                precompute_float8_weights(module)
+                if pre_compute is None:
+                    pass
+                elif pre_compute == "cast":
+                    precompute_float8_weights(module)
+                elif pre_compute == "amax":
+                    precompute_float8_amax(module)
                 prof.step()
 
     @skip_if_lt_x_gpu(2)
