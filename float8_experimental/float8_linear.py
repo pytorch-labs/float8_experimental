@@ -11,6 +11,7 @@ an example of how features such as casting to and from float8 as well
 as stateful scaling can be implemented. For now, we expect framework
 owners to implement their own UEX.
 a
+b
 """
 
 import dataclasses
