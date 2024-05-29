@@ -10,6 +10,7 @@ Note: this UEX is not intended for real usage. It merely demonstrates
 an example of how features such as casting to and from float8 as well
 as stateful scaling can be implemented. For now, we expect framework
 owners to implement their own UEX.
+a
 """
 
 import dataclasses
