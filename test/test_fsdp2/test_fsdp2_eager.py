@@ -13,6 +13,7 @@ from float8_experimental.float8_dynamic_linear import (
 )
 from float8_experimental.float8_linear_utils import (
     precompute_float8_amax,
+    precompute_float8_amax_fused,
     precompute_float8_weights,
     swap_linear_with_float8_linear,
 )
@@ -124,7 +125,8 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity_dynamic(self):
         for enable_fsdp_fp8_all_gather in [True]:
-            for pre_compute in [None, "cast", "amax"]:
+            # for pre_compute in [None, "cast", "amax", "amax_fused"]:
+            for pre_compute in [None, "amax", "amax_fused"]:
                 self._test_transformer_parity_dynamic(
                     enable_fsdp_fp8_all_gather, pre_compute
                 )
@@ -167,6 +169,8 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
                     precompute_float8_weights(module)
                 elif pre_compute == "amax":
                     precompute_float8_amax(module)
+                elif pre_compute == "amax_fused":
+                    precompute_float8_amax_fused(module)
                 prof.step()
 
     @skip_if_lt_x_gpu(2)
