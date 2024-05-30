@@ -265,8 +265,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
             # Note: do not reduce the weight values, because FSDP already ensures
             # the weight values on all ranks are the same.
             all_amax_tensors = torch.cat(
-                fp8_amax_x_tensor_list
-                + fp8_amax_dL_dY_tensor_list
+                fp8_amax_x_tensor_list + fp8_amax_dL_dY_tensor_list
             )
             all_reduced_amax_tensor = all_reduce(
                 all_amax_tensors, "MAX", list(range(dist.get_world_size()))
