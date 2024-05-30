@@ -160,10 +160,6 @@ class Float8Linear(torch.nn.Linear):
         # update function for torch.float16
         self.last_seen_input_dtype = None
 
-        # If true, this enables TP+SP style distributed comms in TP primitives
-        # Note: this is not used in non-TP code.
-        self.use_sequence_parallel = False
-
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
         # Note that when using `config.enable_pre_and_post_forward = False`,
