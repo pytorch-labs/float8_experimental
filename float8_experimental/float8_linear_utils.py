@@ -176,7 +176,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     """
     Manages the float8 amax and scale bookkeeping. In detail, it does the
     following:
-    1. in distributed contexts, syncs amax values across workers
+    1. in distributed contexts, syncs amax values across workers for activations and gradients
     2. adds the `amax` values to history
     3. calculates the scales to be used for next iteration
     4. sets the `amax_and_scale_synced` flag on the Float8Linear modules
@@ -262,9 +262,10 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
 
         if dist.is_initialized():
             # Combine all the amax tensors into one tensor and reduce it
+            # Note: do not reduce the weight values, because FSDP already ensures
+            # the weight values on all ranks are the same.
             all_amax_tensors = torch.cat(
                 fp8_amax_x_tensor_list
-                + fp8_amax_w_tensor_list
                 + fp8_amax_dL_dY_tensor_list
             )
             all_reduced_amax_tensor = all_reduce(
@@ -275,13 +276,11 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
 
             (
                 reduced_fp8_amax_tensor,
-                reduced_fp8_amax_w_tensor,
                 reduced_fp8_amax_dL_dY_tensor,
             ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
 
             for idx, child in enumerate(fp8_layers):
                 child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
-                child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
                 child.fp8_amax_dL_dY.copy_(reduced_fp8_amax_dL_dY_tensor[idx])
 
         # We create two stacked tensor groups, one for the amax history and one for the current scales
