@@ -157,6 +157,7 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, tensor):
+        # return torch.ops.fp8_fast.copy_and_scale(tensor._data, tensor._orig_dtype, tensor._scale)
         return (tensor._data.to(tensor._orig_dtype) / tensor._scale).to(tensor._orig_dtype)
 
     @staticmethod
