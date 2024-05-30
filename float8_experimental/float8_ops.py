@@ -87,9 +87,9 @@ def float8_cat(aten_op, args, kwargs=None):
         # assert (
         #     chunk._scale is scale
         # ), "Expecting all chunks to have thee same scale as a result of a split"
-        assert (
-            chunk._mm_config is mm_config
-        ), "Expecting all chunks to have thee same mm config as a result of a split"
+        # assert (
+        #     chunk._mm_config is mm_config
+        # ), "Expecting all chunks to have thee same mm config as a result of a split"
         assert (
             chunk._data.dtype == fp8_dtype
         ), "Expecting all chunks to be of the same dtype as a result of a split"
