@@ -12,19 +12,17 @@ import torch.distributed as dist
 # Helpful visualizer for debugging (only supports fp32):
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html
 
-# define the e4m3/e5m2 constants
-E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-E4M3_FNUZ_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
-E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
-E5M2_FNUZ_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
-
-FP16_MAX_POS = torch.finfo(torch.float16).max
-
 # avoid division by zero when calculating scale
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
 EPS = 1e-12
 
 IS_AMD = torch.cuda.is_available() and torch.version.hip is not None
+FP8_TYPES = {
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+    torch.float8_e4m3fnuz,
+    torch.float8_e5m2fnuz,
+}
 
 
 @torch.no_grad()
@@ -38,14 +36,8 @@ def amax_to_scale(
         orig_dtype: The original dtype of the tensor.
     """
     scale = torch.empty_like(amax, dtype=torch.float32)
-    if float8_dtype == torch.float8_e4m3fn:
-        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
-    elif float8_dtype == torch.float8_e4m3fnuz:
-        res = E4M3_FNUZ_MAX_POS / torch.clamp(amax, min=EPS)
-    elif float8_dtype == torch.float8_e5m2:
-        res = E5M2_MAX_POS / torch.clamp(amax, min=EPS)
-    elif float8_dtype == torch.float8_e5m2fnuz:
-        res = E5M2_FNUZ_MAX_POS / torch.clamp(amax, min=EPS)
+    if float8_dtype in FP8_TYPES:
+        res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=EPS)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
@@ -53,7 +45,7 @@ def amax_to_scale(
     # this helps when amax is small. We are assuming that we don't need
     # to care about this for float32/bfloat16.
     if orig_dtype is torch.float16:
-        res = torch.clamp(res, max=FP16_MAX_POS)
+        res = torch.clamp(res, max=torch.finfo(torch.float16).max)
     scale.copy_(res)
     return scale
 
@@ -132,18 +124,12 @@ def to_fp8_saturated(x: torch.Tensor, float8_dtype: torch.dtype):
         is `amax2`, where `amax1 < amax2`. This is common when using delayed
         scaling.
     """
-
-    if float8_dtype == torch.float8_e4m3fn:
-        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
-    elif float8_dtype == torch.float8_e4m3fnuz:
-        x = x.clamp(min=-1 * E4M3_FNUZ_MAX_POS, max=E4M3_FNUZ_MAX_POS)
-    elif float8_dtype == torch.float8_e5m2:
-        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
-    elif float8_dtype == torch.float8_e5m2fnuz:
-        x = x.clamp(min=-1 * E5M2_FNUZ_MAX_POS, max=E5M2_FNUZ_MAX_POS)
+    if float8_dtype in FP8_TYPES:
+        max_value = torch.finfo(float8_dtype).max
+        x = x.clamp(min=-max_value, max=max_value)
+        return x.to(float8_dtype)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
-    return x.to(float8_dtype)
 
 
 def compute_error(x: torch.Tensor, y: torch.Tensor):
@@ -164,11 +150,19 @@ def compute_error(x: torch.Tensor, y: torch.Tensor):
 def fp8_tensor_statistics(
     tensor: torch.Tensor, float8_dtype=torch.float8_e4m3fn
 ) -> Tuple[int, ...]:
-    """Calculate FP8 tensor stats"""
-    if float8_dtype == torch.float8_e4m3fn:
-        FP8_MAX = E4M3_MAX_POS
-    else:  # e5m2
-        FP8_MAX = E5M2_MAX_POS
+    """Calculate FP8 tensor stats
+
+    Args:
+        tensor: The tensor to calculate stats for.
+        float8_dtype: The float8 dtype.
+
+    Returns:
+        A tuple containing the number of zeros and the number of max values.
+    """
+    if float8_dtype in FP8_TYPES:
+        FP8_MAX = torch.finfo(float8_dtype).max
+    else:
+        raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
     tensor_orig_type = tensor._data.to(dtype=tensor._orig_dtype)
     num_max = (torch.abs(tensor_orig_type) == FP8_MAX).sum().item()
     num_zero = (tensor_orig_type == 0).sum().item()
