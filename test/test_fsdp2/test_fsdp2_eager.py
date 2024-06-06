@@ -12,9 +12,9 @@ from float8_experimental.float8_dynamic_linear import (
     WeightWithDynamicFloat8CastTensor,
 )
 from float8_experimental.float8_linear_utils import (
-    precompute_float8_amax,
-    precompute_float8_amax_fused,
-    precompute_float8_weights,
+    # precompute_float8_amax,
+    # precompute_float8_amax_fused,
+    # precompute_float8_weights,
     swap_linear_with_float8_linear,
 )
 from test_fsdp2_common import (
@@ -126,7 +126,9 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     def test_transformer_parity_dynamic(self):
         for enable_fsdp_fp8_all_gather in [True]:
             # for pre_compute in [None, "cast", "amax", "amax_fused"]:
-            for pre_compute in [None, "amax", "amax_fused"]:
+            # for pre_compute in [None, "amax", "amax_fused"]:
+            for pre_compute in [None, "cast", "amax_fused"]:
+                # for pre_compute in ["amax_fused"]:
                 self._test_transformer_parity_dynamic(
                     enable_fsdp_fp8_all_gather, pre_compute
                 )
@@ -151,27 +153,37 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
         optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
         local_inp = torch.randint(
-            0, ref_module.tok_embeddings.weight.size(0), (4, 512), device="cuda"
+            0, ref_module.tok_embeddings.weight.size(0), (16, 16), device="cuda"
         )
-        with profiler(
-            output_dir=f"./test_fsdp2_eager_fp8_{enable_fsdp_fp8_all_gather}_{pre_compute}_rank_{torch.distributed.get_rank()}.json"
-        ) as prof:
-            for i in range(5):
-                optim.zero_grad()
-                loss = module(local_inp).sum()
-                # if torch.distributed.get_rank() == 0:
-                #     print(f"{pre_compute=} {i=} {loss=}")
-                loss.backward()
-                optim.step()
-                if pre_compute is None:
-                    pass
-                elif pre_compute == "cast":
-                    precompute_float8_weights(module)
-                elif pre_compute == "amax":
-                    precompute_float8_amax(module)
-                elif pre_compute == "amax_fused":
-                    precompute_float8_amax_fused(module)
-                prof.step()
+        check_parity_no_mp(
+            self,
+            ref_module,
+            ref_optim,
+            module,
+            optim,
+            local_inp,
+            Float8DynamicLinear,
+            pre_compute,
+        )
+        # with profiler(
+        #     output_dir=f"./test_fsdp2_eager_fp8_{enable_fsdp_fp8_all_gather}_{pre_compute}_rank_{torch.distributed.get_rank()}.json"
+        # ) as prof:
+        #     for i in range(5):
+        #         optim.zero_grad()
+        #         loss = module(local_inp).sum()
+        #         # if torch.distributed.get_rank() == 0:
+        #         #     print(f"{pre_compute=} {i=} {loss=}")
+        #         loss.backward()
+        #         optim.step()
+        #         if pre_compute is None:
+        #             pass
+        #         elif pre_compute == "cast":
+        #             precompute_float8_weights(module)
+        #         elif pre_compute == "amax":
+        #             precompute_float8_amax(module)
+        #         elif pre_compute == "amax_fused":
+        #             precompute_float8_amax_fused(module)
+        #         prof.step()
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_memory(self):

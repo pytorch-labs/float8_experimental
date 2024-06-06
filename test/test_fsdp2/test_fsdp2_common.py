@@ -1,13 +1,19 @@
 import contextlib
-from typing import List, Type
+from typing import List, Optional, Type, Union
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_utils import (
+    precompute_float8_amax,
+    precompute_float8_amax_fused,
+    precompute_float8_weights,
+    sync_float8_amax_and_scale_history,
+)
 
 
 def check_parity_no_mp(
@@ -18,6 +24,7 @@ def check_parity_no_mp(
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
     module_cls: Type,
+    pre_compute: Optional[Union[str, None]],
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -32,6 +39,15 @@ def check_parity_no_mp(
             if module_cls is Float8Linear:
                 sync_float8_amax_and_scale_history(model)
             optim.step()
+            if module_cls is Float8DynamicLinear and model is fsdp_model:
+                if pre_compute is None:
+                    pass
+                elif pre_compute == "cast":
+                    precompute_float8_weights(model)
+                elif pre_compute == "amax":
+                    precompute_float8_amax(model)
+                elif pre_compute == "amax_fused":
+                    precompute_float8_amax_fused(model)
         test_cls.assertEqual(losses[0], losses[1])
 
 
