@@ -27,7 +27,11 @@ FP8_TYPES = {
 
 @torch.no_grad()
 def amax_to_scale(
-    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype, clamp_amax: bool = True):
+    amax: torch.Tensor,
+    float8_dtype: torch.dtype,
+    orig_dtype: torch.dtype,
+    clamp_amax: bool = True,
+):
     """Converts the amax value of a tensor to the fp8 scale.
     Args:
         amax: The amax value of the tensor.
