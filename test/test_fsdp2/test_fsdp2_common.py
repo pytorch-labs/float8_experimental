@@ -1,6 +1,5 @@
 import contextlib
 
-# from typing import List, Optional, Type, Union
 from typing import List, Type
 
 import float8_experimental.config as config

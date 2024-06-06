@@ -144,9 +144,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             dtype=tensor.dtype,
             layout=tensor.layout,
             device=tensor.device,
-            # TODO: workaround fake tensor not implementing is.pinned
-            # pin_memory=tensor.is_pinned(),
-            pin_memory=False,
+            pin_memory=tensor.is_pinned(),
             requires_grad=tensor.requires_grad,
         )
 
