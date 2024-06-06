@@ -182,7 +182,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __tensor_flatten__(self):
-        return ["_tensor", "_pre_computed_amax"], self._mm_config
+        return ["_tensor"], self._mm_config
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
