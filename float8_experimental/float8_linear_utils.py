@@ -19,11 +19,7 @@ from float8_experimental.float8_dynamic_linear import (
 )
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import (
-    amax_history_to_scale_stack,
-    EPS,
-    to_fp8_saturated,
-)
+from float8_experimental.float8_utils import amax_history_to_scale_stack, EPS
 from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
@@ -350,40 +346,6 @@ def precompute_float8_amax(module: nn.Module) -> None:
     weights: List[DTensor] = [float8_linear.weight for float8_linear in float8_linears]
 
     def compute_amaxes(weights: List[DTensor]):
-        abs_weights = torch._foreach_abs(weights)  # S0
-        max_weights = [torch.max(a) for a in abs_weights]
-        amax_tensor = torch.vstack(max_weights)  # P
-        amax_tensor = torch.clamp(amax_tensor, EPS)  # R
-        amaxes = torch.split(amax_tensor, 1)  # R
-        return amaxes
-
-    if weights:
-        amaxes = compute_amaxes(weights)
-        # amaxes = torch.compile(compute_amaxes, mode="reduce-overhead")(weights)
-        # amaxes = torch.compile(compute_amaxes)(weights)
-        for amax, float8_linear in zip(amaxes, float8_linears):
-            float8_linear.weight._local_tensor._fp8_amax = amax._local_tensor
-    else:
-        warnings.warn(
-            "Calling precompute_float8_weights without any weights using FSDP fp8 all-gather!"
-        )
-
-
-def precompute_float8_amax_fused(module: nn.Module) -> None:
-    from torch.distributed._tensor import DTensor
-
-    if any(isinstance(m, Float8Linear) for m in module.modules()):
-        raise NotImplementedError("Only supports Float8DynamicLinear, not Float8Linear")
-    float8_linears: List[Float8DynamicLinear] = [
-        m
-        for m in module.modules()
-        if isinstance(m, Float8DynamicLinear)
-        and isinstance(m.weight, DTensor)
-        and isinstance(m.weight._local_tensor, WeightWithDynamicFloat8CastTensor)
-    ]
-    weights: List[DTensor] = [float8_linear.weight for float8_linear in float8_linears]
-
-    def compute_amaxes(weights: List[DTensor]):
         max_weights = torch._foreach_norm(weights, ord=math.inf)
         amax_tensor = torch.vstack(max_weights)
         amax_tensor = torch.clamp(amax_tensor, EPS)  # R
@@ -395,50 +357,7 @@ def precompute_float8_amax_fused(module: nn.Module) -> None:
         # amaxes = torch.compile(compute_amaxes, mode="reduce-overhead")(weights)
         # amaxes = torch.compile(compute_amaxes)(weights)
         for amax, float8_linear in zip(amaxes, float8_linears):
-            float8_linear.weight._local_tensor._fp8_amax = amax._local_tensor
-    else:
-        warnings.warn(
-            "Calling precompute_float8_weights without any weights using FSDP fp8 all-gather!"
-        )
-
-
-def precompute_float8_weights(module: nn.Module) -> None:
-    from torch.distributed._tensor import DTensor
-
-    if any(isinstance(m, Float8Linear) for m in module.modules()):
-        raise NotImplementedError("Only supports Float8DynamicLinear, not Float8Linear")
-    float8_linears: List[Float8DynamicLinear] = [
-        m
-        for m in module.modules()
-        if isinstance(m, Float8DynamicLinear)
-        and isinstance(m.weight, DTensor)
-        and isinstance(m.weight._local_tensor, WeightWithDynamicFloat8CastTensor)
-    ]
-    weights: List[DTensor] = [float8_linear.weight for float8_linear in float8_linears]
-
-    def compute_weights_and_scales(weights: List[DTensor]):
-        abs_weights = torch._foreach_abs(weights)  # S0
-        # abs_weights = [torch.abs(w) for w in weights]
-        amax_tensor = torch.vstack([torch.max(a) for a in abs_weights])  # P
-        amax_tensor = torch.clamp(amax_tensor, EPS)  # R
-        scales_tensor = E4M3_MAX_POS / amax_tensor  # R
-        scales = torch.split(scales_tensor, 1)  # R
-        weights_scaled = torch._foreach_mul(weights, scales)  # S0
-        datas = [to_fp8_saturated(w, torch.float8_e4m3fn) for w in weights_scaled]  # S0
-        # torch._foreach_clamp_min_(weights_scaled, -1 * E4M3_MAX_POS)
-        # torch._foreach_clamp_max_(weights_scaled, E4M3_MAX_POS)
-        # datas = [w.to(torch.float8_e4m3fn) for w in weights_scaled]
-        return datas, scales
-
-    if weights:
-        datas, scales = compute_weights_and_scales(weights)
-        # datas, scales = torch.compile(compute_weights_and_scales)(weights)
-        # datas, scales = torch.compile(compute_weights_and_scales, mode="reduce-overhead")(weights)
-        for data, scale, float8_linear in zip(datas, scales, float8_linears):
-            float8_linear.weight._local_tensor._fp8_data = data._local_tensor
-            float8_linear.weight._local_tensor._fp8_scale = (
-                scale._local_tensor.squeeze()
-            )
+            float8_linear.weight._local_tensor._pre_computed_amax = amax._local_tensor
     else:
         warnings.warn(
             "Calling precompute_float8_weights without any weights using FSDP fp8 all-gather!"

@@ -1,7 +1,7 @@
 import copy
 import threading
 import unittest
-from typing import Any, List, Union
+from typing import Any, List
 
 import torch
 import torch._dynamo.testing
@@ -11,12 +11,7 @@ from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
     WeightWithDynamicFloat8CastTensor,
 )
-from float8_experimental.float8_linear_utils import (
-    # precompute_float8_amax,
-    # precompute_float8_amax_fused,
-    # precompute_float8_weights,
-    swap_linear_with_float8_linear,
-)
+from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from test_fsdp2_common import (
     check_parity_bf16_mp,
     check_parity_no_mp,
@@ -124,18 +119,21 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity_dynamic(self):
-        for enable_fsdp_fp8_all_gather in [True]:
-            # for pre_compute in [None, "cast", "amax", "amax_fused"]:
-            # for pre_compute in [None, "amax", "amax_fused"]:
-            for pre_compute in [None, "cast", "amax_fused"]:
-                # for pre_compute in ["amax_fused"]:
-                self._test_transformer_parity_dynamic(
-                    enable_fsdp_fp8_all_gather, pre_compute
-                )
+        self.run_subtests(
+            {
+                "enable_fsdp_fp8_all_gather": [False, True],
+                "pre_compute": [False, True],
+            },
+            self._test_transformer_parity_dynamic,
+        )
 
     def _test_transformer_parity_dynamic(
-        self, enable_fsdp_fp8_all_gather: bool, pre_compute: Union[str, None]
+        self,
+        enable_fsdp_fp8_all_gather: bool,
+        pre_compute: bool,
     ):
+        if not enable_fsdp_fp8_all_gather and pre_compute:
+            return
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
