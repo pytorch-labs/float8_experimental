@@ -21,7 +21,6 @@ from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale_stack,
-    E4M3_MAX_POS,
     EPS,
     to_fp8_saturated,
 )
@@ -29,6 +28,8 @@ from torch.distributed._functional_collectives import all_reduce, AsyncCollectiv
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
+
+E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
 
 
 class LinearType(Enum):
