@@ -23,7 +23,7 @@ from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
-    PrepareFloat8ModuleInput
+    PrepareFloat8ModuleInput,
 )
 from float8_experimental.float8_utils import tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
@@ -51,6 +51,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.out_proj(F.silu(self.w1(x)) * self.w2(x))
+
 
 class ToyModel(nn.Module):
     def __init__(self):
@@ -203,7 +204,9 @@ def test_fp8_mlp_tensor_parallelism_base(
         sp_model,
         mesh,
         {
-            "ffn": PrepareFloat8ModuleInput(input_layouts=Shard(1), desired_input_layouts=Replicate()),
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1), desired_input_layouts=Replicate()
+            ),
             "ffn.w1": Float8ColwiseParallel(),
             "ffn.w2": Float8ColwiseParallel(),
             "ffn.out_proj": Float8RowwiseParallel(
@@ -227,9 +230,7 @@ def test_fp8_mlp_tensor_parallelism_base(
     global_out.sum().backward()
     torch.testing.assert_close(tp_out, global_out)
     torch.testing.assert_close(sp_out.full_tensor(), global_out)
-    torch.testing.assert_close(
-        tp_model.ffn.w1.weight.grad, sp_model.ffn.w1.weight.grad
-    )
+    torch.testing.assert_close(tp_model.ffn.w1.weight.grad, sp_model.ffn.w1.weight.grad)
     torch.testing.assert_close(
         tp_model.ffn.out_proj.weight.grad, sp_model.ffn.out_proj.weight.grad
     )
