@@ -21,12 +21,7 @@ from float8_experimental.float8_tensor import (
     to_fp8_no_autograd,
 )
 
-from float8_experimental.float8_utils import (
-    amax_history_to_scale,
-    E4M3_MAX_POS,
-    E5M2_MAX_POS,
-    tensor_to_amax,
-)
+from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -169,10 +164,15 @@ class Float8Linear(torch.nn.Linear):
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
 
     def create_buffers(self):
+        # Default values for history buffers, see above TODO
         history_len = self.recipe.history_len
         device = self.weight.device
+        default_x = torch.finfo(torch.float8_e4m3fn).max
+        default_w = torch.finfo(torch.float8_e4m3fn).max
+        default_dl_dy = torch.finfo(torch.float8_e5m2).max
+
         self.register_always_float32_buffer(
-            "fp8_amax_x", torch.tensor([E4M3_MAX_POS], device=device)
+            "fp8_amax_x", torch.tensor([default_x], device=device)
         )
         self.register_always_float32_buffer(
             "fp8_amax_history_x", torch.zeros(history_len, device=device)
@@ -181,7 +181,7 @@ class Float8Linear(torch.nn.Linear):
             "fp8_scale_x", torch.tensor([1.0], device=device)
         )
         self.register_always_float32_buffer(
-            "fp8_amax_w", torch.tensor([E4M3_MAX_POS], device=device)
+            "fp8_amax_w", torch.tensor([default_w], device=device)
         )
         self.register_always_float32_buffer(
             "fp8_amax_history_w", torch.zeros(history_len, device=device)
@@ -190,7 +190,7 @@ class Float8Linear(torch.nn.Linear):
             "fp8_scale_w", torch.tensor([1.0], device=device)
         )
         self.register_always_float32_buffer(
-            "fp8_amax_dL_dY", torch.tensor([E5M2_MAX_POS], device=device)
+            "fp8_amax_dL_dY", torch.tensor([default_dl_dy], device=device)
         )
         self.register_always_float32_buffer(
             "fp8_amax_history_dL_dY", torch.zeros(history_len, device=device)
