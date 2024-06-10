@@ -26,12 +26,7 @@ from float8_experimental.float8_tensor import (
     to_fp8_no_autograd,
 )
 
-from float8_experimental.float8_utils import (
-    amax_history_to_scale,
-    E4M3_MAX_POS,
-    E5M2_MAX_POS,
-    tensor_to_amax,
-)
+from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -142,18 +137,23 @@ class Float8LinearMixin(object):
         self.recipe = delayed_scaling_recipe
         history_len = self.recipe.history_len
 
-        self.register_always_float32_buffer("fp8_amax_x", torch.tensor([E4M3_MAX_POS]))
+        # Default values for history buffers, see above TODO
+        default_x = torch.finfo(torch.float8_e4m3fn).max
+        default_w = torch.finfo(torch.float8_e4m3fn).max
+        default_dl_dy = torch.finfo(torch.float8_e5m2).max
+
+        self.register_always_float32_buffer("fp8_amax_x", torch.tensor([default_x]))
         self.register_always_float32_buffer(
             "fp8_amax_history_x", torch.zeros(history_len)
         )
         self.register_always_float32_buffer("fp8_scale_x", torch.tensor([1.0]))
-        self.register_always_float32_buffer("fp8_amax_w", torch.tensor([E4M3_MAX_POS]))
+        self.register_always_float32_buffer("fp8_amax_w", torch.tensor([default_w]))
         self.register_always_float32_buffer(
             "fp8_amax_history_w", torch.zeros(history_len)
         )
         self.register_always_float32_buffer("fp8_scale_w", torch.tensor([1.0]))
         self.register_always_float32_buffer(
-            "fp8_amax_dL_dY", torch.tensor([E5M2_MAX_POS])
+            "fp8_amax_dL_dY", torch.tensor([default_dl_dy])
         )
         self.register_always_float32_buffer(
             "fp8_amax_history_dL_dY", torch.zeros(history_len)
