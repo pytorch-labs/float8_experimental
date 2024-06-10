@@ -25,7 +25,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 torch.manual_seed(0)
 
 # TODO: Add more shapes for the benchmark
-B, M, K, N = 32, 32, 32, 32
+B, M, K, N = 32, 1024, 1024, 1024
 lr = 0.01
 
 
@@ -152,8 +152,7 @@ def fsdp_main(rank, world_size, args):
     cleanup()
 
 
-def run():
-    compile = True
+def run(compile: bool):
     base_dtype = torch.bfloat16
     WORLD_SIZE = torch.cuda.device_count()
     print(f"{base_dtype = }")
