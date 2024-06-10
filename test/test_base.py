@@ -31,10 +31,8 @@ from float8_experimental.float8_tensor import (
 from float8_experimental.float8_utils import (
     amax_to_scale,
     compute_error,
-    E4M3_MAX_POS,
-    E5M2_MAX_POS,
-    FP16_MAX_POS,
     fp8_tensor_statistics,
+    FP8_TYPES,
     tensor_to_scale,
 )
 
@@ -118,9 +116,10 @@ class TestFloat8Linear:
                 "fp8_amax_w",
                 "fp8_amax_dL_dY",
             ]
+            max_float8_pos = {torch.finfo(dtype).max for dtype in FP8_TYPES}
             for buffer_name in amax_buffer_names:
                 buffer_value = getattr(m_fp8, buffer_name)
-                for init_val in (E4M3_MAX_POS, E5M2_MAX_POS):
+                for init_val in max_float8_pos:
                     assert torch.ne(
                         buffer_value, torch.tensor(init_val)
                     ), f"{buffer_name} not filled, current value {buffer_value}"
@@ -412,9 +411,8 @@ class TestNumerics:
         #
         #   amax + eps >= fp8_max_pos / fp16_max_pos
 
-        float8_max_pos = (
-            E4M3_MAX_POS if float8_dtype is torch.float8_e4m3fn else E5M2_MAX_POS
-        )
+        float8_max_pos = torch.finfo(float8_dtype).max
+        FP16_MAX_POS = torch.finfo(torch.float16).max
 
         target_amax = float8_max_pos / (FP16_MAX_POS + 1e-12)
         x = torch.tensor([target_amax], dtype=torch.float16, device="cuda")
