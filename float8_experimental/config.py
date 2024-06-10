@@ -19,3 +19,7 @@ enable_pre_and_post_forward = True
 # implements pre/post-all-gather methods to do fp8 all-gather with FSDP2.
 # Only dynamic scaling is supported for now.
 enable_fsdp_fp8_all_gather = False
+
+# If True, use 'fnuz' float8 types for calculations.
+# Currently, ROCm only supports fnuz variants.
+use_fnuz_dtype = False

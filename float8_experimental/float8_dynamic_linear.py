@@ -22,7 +22,7 @@ from float8_experimental.float8_tensor import (
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
-from float8_experimental.float8_utils import tensor_to_scale
+from float8_experimental.float8_utils import tensor_to_scale, e4m3_dtype, e5m2_dtype
 from torch._prims_common import suggest_memory_format
 
 
@@ -46,9 +46,9 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     def backward(ctx, gradY):
         if tensor_already_casted_to_fp8(gradY):
             return gradY, None
-        gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
+        gradY_scale = tensor_to_scale(gradY, e5m2_dtype)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, torch.float8_e5m2, mm_config=ctx.mm_config
+            gradY, gradY_scale, e5m2_dtype, mm_config=ctx.mm_config
         )
         return fp8_tensor, None
 
@@ -105,9 +105,9 @@ def cast_to_float8_e4m3fn(
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
-    scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn, reduce_amax)
+    scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
     return Float8Tensor.to_float8(
-        inpt_tensor, scale, torch.float8_e4m3fn, mm_config=mm_config
+        inpt_tensor, scale, e4m3_dtype, mm_config=mm_config
     )
 
 

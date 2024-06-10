@@ -25,7 +25,7 @@ from float8_experimental.float8_tensor_parallel import (
     Float8RowwiseParallel,
     PrepareFloat8ModuleInput,
 )
-from float8_experimental.float8_utils import tensor_to_scale
+from float8_experimental.float8_utils import tensor_to_scale, e4m3_dtype
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import parallelize_module
@@ -64,7 +64,7 @@ class ToyModel(nn.Module):
 
 def test_scaled_mm(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
     world_size = mesh.size()
 
     x_fp32 = torch.rand(size, size, device=device)
@@ -103,7 +103,7 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
 
 def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
     world_size = mesh.size()
 
     x_fp32 = torch.rand(size, size, device=device)
@@ -130,7 +130,7 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
 
 def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
 
     x_fp32 = torch.rand(size, size, device=device)
     dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
@@ -144,7 +144,7 @@ def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
 
 def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
 
     x_fp32 = torch.rand(size, size, device=device, requires_grad=True)
     local_weight = torch.rand(2 * size, size, device=device, requires_grad=True)

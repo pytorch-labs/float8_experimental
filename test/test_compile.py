@@ -22,6 +22,7 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_utils import e4m3_dtype, IS_ROCM
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -116,7 +117,7 @@ class TestGraphBreaks(DynamoTestCase):
             x_fp8 = Float8Tensor.to_float8(
                 x,
                 self.fp8_scale_x,
-                torch.float8_e4m3fn,
+                e4m3_dtype,
                 self.fp8_amax_x,
                 ScaledMMConfig(),
             )
@@ -127,12 +128,14 @@ class TestGraphBreaks(DynamoTestCase):
             return x_fp8
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(IS_ROCM, "test doesn't currently work on the ROCm stack")
     def test_float8_with_graph_break_in_the_middle(self):
         """Test that having Float8Tensor object at the boundary of a subgraph"""
         cnts = CompileCounterWithBackend("inductor")
         mod = self.MockLinear(graph_break=True).cuda()
         compiled_mod = copy.deepcopy(mod)
         compiled_mod = torch.compile(compiled_mod, backend=cnts)
+        torch.manual_seed(0)
         x = torch.randn(16, 16, device="cuda")
         y_eager = mod(x)
         y_compiled = compiled_mod(x)
