@@ -4,12 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 """
-A simple manual UEX for a float8 version of `torch.nn.Linear`.
-
-Note: this UEX is not intended for real usage. It merely demonstrates
-an example of how features such as casting to and from float8 as well
-as stateful scaling can be implemented. For now, we expect framework
-owners to implement their own UEX.
+A simple module swap UX for a float8 version of `torch.nn.Linear`.
 """
 
 import dataclasses
@@ -122,7 +117,12 @@ class DelayedScalingRecipe:
         ), f"{self.scale_fn_name} is not implemented yet. Only max is supported for now."
 
 
-class Float8LinearMixin(object):
+class Float8Linear(torch.nn.Linear):
+    """
+    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
+    scales in way friendly to delayed scaling.
+    """
+
     def __init__(self, *args, **kwargs):
         delayed_scaling_recipe = kwargs.pop(
             "delayed_scaling_recipe", DelayedScalingRecipe()
@@ -135,30 +135,8 @@ class Float8LinearMixin(object):
         # module, saving implementing that until we need it.
         # TODO(future): serialization for recipes
         self.recipe = delayed_scaling_recipe
-        history_len = self.recipe.history_len
 
-        # Default values for history buffers, see above TODO
-        default_x = torch.finfo(torch.float8_e4m3fn).max
-        default_w = torch.finfo(torch.float8_e4m3fn).max
-        default_dl_dy = torch.finfo(torch.float8_e5m2).max
-
-        self.register_always_float32_buffer("fp8_amax_x", torch.tensor([default_x]))
-        self.register_always_float32_buffer(
-            "fp8_amax_history_x", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_x", torch.tensor([1.0]))
-        self.register_always_float32_buffer("fp8_amax_w", torch.tensor([default_w]))
-        self.register_always_float32_buffer(
-            "fp8_amax_history_w", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_w", torch.tensor([1.0]))
-        self.register_always_float32_buffer(
-            "fp8_amax_dL_dY", torch.tensor([default_dl_dy])
-        )
-        self.register_always_float32_buffer(
-            "fp8_amax_history_dL_dY", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
+        self.create_buffers()
 
         # Defines the behavior of the matmul in the forward and backward pass
         self.forward_config = ScaledMMConfig()
@@ -177,10 +155,6 @@ class Float8LinearMixin(object):
         # update function for torch.float16
         self.last_seen_input_dtype = None
 
-        # If true, this enables TP+SP style distributed comms in TP primitives
-        # Note: this is not used in non-TP code.
-        self.use_sequence_parallel = False
-
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
         # Note that when using `config.enable_pre_and_post_forward = False`,
@@ -188,6 +162,42 @@ class Float8LinearMixin(object):
         # Otherwise, the amax buffer would never be marked as initialized and
         # would be initialized in every iteration.
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
+
+    def create_buffers(self):
+        # Default values for history buffers, see above TODO
+        history_len = self.recipe.history_len
+        device = self.weight.device
+        default_x = torch.finfo(torch.float8_e4m3fn).max
+        default_w = torch.finfo(torch.float8_e4m3fn).max
+        default_dl_dy = torch.finfo(torch.float8_e5m2).max
+
+        self.register_always_float32_buffer(
+            "fp8_amax_x", torch.tensor([default_x], device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_history_x", torch.zeros(history_len, device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_scale_x", torch.tensor([1.0], device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_w", torch.tensor([default_w], device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_history_w", torch.zeros(history_len, device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_scale_w", torch.tensor([1.0], device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_dL_dY", torch.tensor([default_dl_dy], device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_amax_history_dL_dY", torch.zeros(history_len, device=device)
+        )
+        self.register_always_float32_buffer(
+            "fp8_scale_dL_dY", torch.tensor([1.0], device=device)
+        )
 
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
@@ -292,13 +302,6 @@ class Float8LinearMixin(object):
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
-
-class Float8Linear(Float8LinearMixin, torch.nn.Linear):
-    """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
-    scales in way friendly to delayed scaling.
-    """
-
     def forward(self, x):
         self.float8_pre_forward(x)
 
@@ -325,18 +328,15 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
         """
-        # TODO Follow up! This is a great idea but we need the mixin base to create real
-        # Tensors and the Linear base to create empty params
-        # with torch.device("meta"):
-        new_mod = cls(mod.in_features, mod.out_features, bias=False)
+        with torch.device("meta"):
+            new_mod = cls(mod.in_features, mod.out_features, bias=False)
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
-
+        # need to create buffers again when moving from meta device to
+        # real device
+        new_mod.create_buffers()
         # Defines the behavior of the matmul in the forward and backward
         # Forward we use fast_accum, backwards we do not
         new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
         new_mod.backward_config = ScaledMMConfig(emulate, False)
-
-        # I think its okay to send all params and buffers to device
-        new_mod.to(mod.weight.device)
         return new_mod
