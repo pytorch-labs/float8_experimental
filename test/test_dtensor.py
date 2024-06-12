@@ -238,7 +238,6 @@ def test_fp8_mlp_tensor_parallelism_base(
         },
     )
 
-
     if compile:
         tp_model = torch.compile(tp_model)
         sp_model = torch.compile(sp_model)
@@ -264,10 +263,13 @@ def test_fp8_mlp_tensor_parallelism_base(
     sp_out2 = sp_model2(x_fp32_sp_input)
     sp_out2.sum().backward()
     torch.testing.assert_close(sp_out2.full_tensor(), global_out)
-    torch.testing.assert_close(tp_model.ffn.w1.weight.grad, sp_model2.ffn.w1.weight.grad)
+    torch.testing.assert_close(
+        tp_model.ffn.w1.weight.grad, sp_model2.ffn.w1.weight.grad
+    )
     torch.testing.assert_close(
         tp_model.ffn.out_proj.weight.grad, sp_model2.ffn.out_proj.weight.grad
     )
+
 
 def test_fp8_mlp_tensor_parallelism_compile(mesh: DeviceMesh, size=16):
     test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
