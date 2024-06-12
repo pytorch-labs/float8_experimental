@@ -12,6 +12,7 @@ import os
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
@@ -22,6 +23,7 @@ from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
+    PrepareFloat8ModuleInput,
 )
 from float8_experimental.float8_utils import tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
@@ -38,17 +40,26 @@ def setup_distributed():
     return device_mesh
 
 
-class ToyModel(nn.Module):
+class FeedForward(nn.Module):
     """MLP based model"""
 
     def __init__(self):
-        super(ToyModel, self).__init__()
-        self.in_proj = nn.Linear(16, 32)
-        self.relu = nn.ReLU()
-        self.out_proj = nn.Linear(32, 16)
+        super(FeedForward, self).__init__()
+        self.w1 = nn.Linear(16, 32, bias=False)
+        self.w2 = nn.Linear(16, 32, bias=False)
+        self.out_proj = nn.Linear(32, 16, bias=False)
 
     def forward(self, x):
-        return self.out_proj(self.relu(self.in_proj(x)))
+        return self.out_proj(F.silu(self.w1(x)) * self.w2(x))
+
+
+class ToyModel(nn.Module):
+    def __init__(self):
+        super(ToyModel, self).__init__()
+        self.ffn = FeedForward()
+
+    def forward(self, x):
+        return self.ffn(x)
 
 
 def test_scaled_mm(mesh: DeviceMesh, size=16):
@@ -182,8 +193,9 @@ def test_fp8_mlp_tensor_parallelism_base(
         tp_model,
         mesh,
         {
-            "in_proj": Float8ColwiseParallel(),
-            "out_proj": Float8RowwiseParallel(),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(),
         },
     )
 
@@ -192,17 +204,46 @@ def test_fp8_mlp_tensor_parallelism_base(
         sp_model,
         mesh,
         {
-            "in_proj": Float8ColwiseParallel(input_layouts=Shard(0)),
-            "out_proj": Float8RowwiseParallel(
-                output_layouts=Shard(0), use_local_output=False
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1), desired_input_layouts=Replicate()
+            ),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(1), use_local_output=False
+            ),
+        },
+    )
+
+    # PrepareFloat8ModuleInput with specific submodule fqn
+    sp_model2 = copy.deepcopy(toy_model)
+    sp_model2 = swap_linear_with_float8_linear(
+        sp_model2, Float8DynamicLinear, emulate=True
+    )
+
+    sp_model2 = parallelize_module(
+        sp_model2,
+        mesh,
+        {
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1),
+                desired_input_layouts=Replicate(),
+                fwd_config_submodule_fqn="w2",
+            ),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(1), use_local_output=False
             ),
         },
     )
 
     if compile:
         tp_model = torch.compile(tp_model)
+        sp_model = torch.compile(sp_model)
+        sp_model2 = torch.compile(sp_model2)
 
-    x_fp32 = torch.rand(size * 2, size, device=device, requires_grad=False)
+    x_fp32 = torch.rand(size, size * 2, size, device=device, requires_grad=False)
     x_fp32_tp_input = x_fp32.clone()
     x_fp32_sp_input = distribute_tensor(x_fp32.clone(), mesh, [Shard(0)])
 
@@ -214,11 +255,19 @@ def test_fp8_mlp_tensor_parallelism_base(
     global_out.sum().backward()
     torch.testing.assert_close(tp_out, global_out)
     torch.testing.assert_close(sp_out.full_tensor(), global_out)
+    torch.testing.assert_close(tp_model.ffn.w1.weight.grad, sp_model.ffn.w1.weight.grad)
     torch.testing.assert_close(
-        tp_model.in_proj.weight.grad, sp_model.in_proj.weight.grad
+        tp_model.ffn.out_proj.weight.grad, sp_model.ffn.out_proj.weight.grad
+    )
+
+    sp_out2 = sp_model2(x_fp32_sp_input)
+    sp_out2.sum().backward()
+    torch.testing.assert_close(sp_out2.full_tensor(), global_out)
+    torch.testing.assert_close(
+        tp_model.ffn.w1.weight.grad, sp_model2.ffn.w1.weight.grad
     )
     torch.testing.assert_close(
-        tp_model.out_proj.weight.grad, sp_model.out_proj.weight.grad
+        tp_model.ffn.out_proj.weight.grad, sp_model2.ffn.out_proj.weight.grad
     )
 
 
