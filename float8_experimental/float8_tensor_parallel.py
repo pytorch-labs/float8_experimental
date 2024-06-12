@@ -117,11 +117,18 @@ class Float8RowwiseParallel(RowwiseParallel):
 
 
 class PrepareFloat8ModuleInput(PrepareModuleInput):
-    # subclass the PrepareModuleInput classes, the only difference is that after we prepare
-    # the input DTensor, we cast the input to DTensor(Float8Tensor)
+    # subclass the PrepareModuleInput classes to implement fp8 specific logic, the only difference is that
+    # after we prepare the input DTensor, we cast the input to DTensor(Float8Tensor)
     # This is to ensure the float8 cast happens before the all-gather (i.e. Shard -> Replicate)
     # so that if there are multiple float8 users of the input activation, we perform fp8 allgather
     # only once.
+    # FP8 Args:
+    #   float8_dtype (torch.dtype, optional): control what float8 dtype to cast to when prepare the module input,
+    #       we currently only support torch.float8_e4m3fn. default: torch.float8_e4m3fn
+    #   fwd_config_submodule_fqn (str, optional): the fqn of the submodule that contains the forward config used
+    #       for the float8 cast. If not specified, we will search for the Float8DynamicLinear in the submodules
+    #       and use the forward config from that module, in this case all module's forward config must be
+    #       the same.
 
     def __init__(
         self,

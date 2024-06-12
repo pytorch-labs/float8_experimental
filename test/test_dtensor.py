@@ -215,8 +215,34 @@ def test_fp8_mlp_tensor_parallelism_base(
         },
     )
 
+    # PrepareFloat8ModuleInput with specific submodule fqn
+    sp_model2 = copy.deepcopy(toy_model)
+    sp_model2 = swap_linear_with_float8_linear(
+        sp_model2, Float8DynamicLinear, emulate=True
+    )
+
+    sp_model2 = parallelize_module(
+        sp_model2,
+        mesh,
+        {
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1),
+                desired_input_layouts=Replicate(),
+                fwd_config_submodule_fqn="w2",
+            ),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(1), use_local_output=False
+            ),
+        },
+    )
+
+
     if compile:
         tp_model = torch.compile(tp_model)
+        sp_model = torch.compile(sp_model)
+        sp_model2 = torch.compile(sp_model2)
 
     x_fp32 = torch.rand(size, size * 2, size, device=device, requires_grad=False)
     x_fp32_tp_input = x_fp32.clone()
@@ -235,6 +261,13 @@ def test_fp8_mlp_tensor_parallelism_base(
         tp_model.ffn.out_proj.weight.grad, sp_model.ffn.out_proj.weight.grad
     )
 
+    sp_out2 = sp_model2(x_fp32_sp_input)
+    sp_out2.sum().backward()
+    torch.testing.assert_close(sp_out2.full_tensor(), global_out)
+    torch.testing.assert_close(tp_model.ffn.w1.weight.grad, sp_model2.ffn.w1.weight.grad)
+    torch.testing.assert_close(
+        tp_model.ffn.out_proj.weight.grad, sp_model2.ffn.out_proj.weight.grad
+    )
 
 def test_fp8_mlp_tensor_parallelism_compile(mesh: DeviceMesh, size=16):
     test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
