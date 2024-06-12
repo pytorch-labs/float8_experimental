@@ -126,13 +126,13 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
     def __init__(
         self,
         *,
-        input_layouts = None,
-        desired_input_layouts = None,
-        input_kwarg_layouts = None,
-        desired_input_kwarg_layouts = None,
-        use_local_output = False,
-        float8_dtype = torch.float8_e4m3fn,
-        fwd_config_submodule_fqn = None,
+        input_layouts=None,
+        desired_input_layouts=None,
+        input_kwarg_layouts=None,
+        desired_input_kwarg_layouts=None,
+        use_local_output=False,
+        float8_dtype=torch.float8_e4m3fn,
+        fwd_config_submodule_fqn=None,
     ):
         super().__init__(
             input_layouts=input_layouts,
@@ -147,7 +147,9 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
         self.fwd_config_submodule_fqn = fwd_config_submodule_fqn
 
         if self.float8_dtype != torch.float8_e4m3fn:
-            raise NotImplementedError("PrepareFloat8ModuleInput only support casting to float8_e4m3fn for now")
+            raise NotImplementedError(
+                "PrepareFloat8ModuleInput only support casting to float8_e4m3fn for now"
+            )
 
     def _prepare_input_arg(self, input, mesh, input_layout, desired_layout):
         if input_layout is not None:
@@ -156,8 +158,12 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                 # assert inp.placements[0] == input_layout
                 dt_inp = input
             else:
-                assert isinstance(input, torch.Tensor), "expecting input to be a torch.Tensor!"
-                dt_inp = DTensor.from_local(input, mesh, (input_layout,), run_check=False)
+                assert isinstance(
+                    input, torch.Tensor
+                ), "expecting input to be a torch.Tensor!"
+                dt_inp = DTensor.from_local(
+                    input, mesh, (input_layout,), run_check=False
+                )
 
             dt_inp = cast_to_float8_e4m3fn(
                 dt_inp, self.fwd_linear_config
