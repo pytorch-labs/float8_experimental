@@ -29,7 +29,6 @@ from float8_experimental.float8_tensor import (
     ScaledMMConfig,
 )
 from float8_experimental.float8_utils import (
-    amax_to_scale,
     compute_error,
     fp8_tensor_statistics,
     FP8_TYPES,
@@ -327,7 +326,7 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        out_scaled_mm, output_amax_scaled = addmm_float8_unwrapped(
+        out_scaled_mm = addmm_float8_unwrapped(
             a_fp8._data,
             a_fp8._scale,
             b_fp8._data,
@@ -335,20 +334,13 @@ class TestScaledMM:
             output_dtype=output_dtype,
             use_fast_accum=use_fast_accum,
         )
-        out_emulated, output_amax_emulated = torch.ops.aten.mm_float8_emulated(
+        out_emulated = torch.ops.aten.mm_float8_emulated(
             a_fp8._data, a_fp8._scale, b_fp8._data, b_fp8._scale, output_dtype
         )
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)
             out_emulated = out_emulated.to(compare_type)
-
-            out_scaled_mm = out_scaled_mm / amax_to_scale(
-                output_amax_scaled, input_dtype
-            )
-            out_emulated = out_emulated / amax_to_scale(
-                output_amax_emulated, input_dtype
-            )
 
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
