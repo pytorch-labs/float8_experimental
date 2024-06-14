@@ -235,10 +235,8 @@ def allgather_fp8(aten_op, args, kwargs=None):
     ), f"expecting a Float8Tensor for allgather but found {type(fp8_input)}"
 
     fp8_data = fp8_input._data
-    fp8_data = fp8_data.view(torch.uint8)
     fp8_data = fp8_data.contiguous()
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
-    fp8_out = fp8_out.view(fp8_input._data.dtype)
     return Float8Tensor(
         fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )
