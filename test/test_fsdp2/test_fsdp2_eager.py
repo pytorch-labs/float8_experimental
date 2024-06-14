@@ -57,7 +57,12 @@ class TestFloat8Common:
     def init_transformer(self, weight_tying: bool) -> nn.Module:
         torch.manual_seed(42)
         args = ModelArgs(
-            n_layers=3, dim=768, n_heads=12, dropout_p=0.0, weight_tying=weight_tying
+            n_layers=3,
+            dim=768,
+            n_heads=12,
+            dropout_p=0.0,
+            weight_tying=weight_tying,
+            vocab_size=32,
         )
         module = Transformer(args).cuda()
         self.broadcast_module(module)
