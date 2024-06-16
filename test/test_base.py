@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 import itertools
 import random
+import re
 import unittest
 import warnings
 
@@ -313,7 +314,7 @@ class TestScaledMM:
         "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     @pytest.mark.parametrize("use_fast_accum", [True, False])
-    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum):
+    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum, padded):
         torch.manual_seed(42)
         input_dtype = e4m3_dtype
         output_dtype = base_dtype
@@ -386,6 +387,59 @@ class TestScaledMM:
         assert c.emulate is False
         assert c.use_fast_accum is True
         assert c.fp8_output is False
+
+    @unittest.skipIf(
+        not is_H100,
+        "CUDA not available",
+    )
+    @pytest.mark.parametrize(
+        "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
+    )
+    @pytest.mark.parametrize("use_fast_accum", [True, False])
+    def test_pad_inner_dim(self, base_dtype, use_fast_accum):
+        torch.manual_seed(42)
+        input_dtype = torch.float8_e4m3fn
+        compare_type = torch.float32
+
+        a = torch.randn(16, 41, device="cuda", dtype=base_dtype)
+        b = torch.randn(41, 128, device="cuda", dtype=base_dtype)
+
+        a_scale = tensor_to_scale(a, input_dtype).float()
+        b_scale = tensor_to_scale(b, input_dtype).float()
+
+        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
+        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
+
+        with pytest.raises(
+            RuntimeError,
+            match=re.escape(
+                "Expected trailing dimension of mat1 to be divisible by 16 but got mat1 shape: (16x41."
+            ),
+        ):
+            a_fp8 @ b_fp8
+
+        pad_config = ScaledMMConfig(False, use_fast_accum, False, True)
+
+        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype, mm_config=pad_config)
+        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype, mm_config=pad_config)
+        out_padded = a_fp8 @ b_fp8
+        out_padded.to(compare_type)
+
+        emulated_conifg = ScaledMMConfig(True, use_fast_accum, False, False)
+        a_fp8 = Float8Tensor.to_float8(
+            a, a_scale, input_dtype, mm_config=emulated_conifg
+        )
+        b_fp8 = Float8Tensor.to_float8(
+            b, b_scale, input_dtype, mm_config=emulated_conifg
+        )
+        out_emualted = a_fp8 @ b_fp8
+        out_emualted.to(compare_type)
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+        torch.testing.assert_close(out_padded, out_emualted, atol=atol, rtol=rtol)
 
 
 class TestNumerics:

@@ -123,6 +123,12 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     b_data = b._data
 
     if a._mm_config.pad_inner_dim:
+        assert (
+            b._mm_config.pad_inner_dim
+        ), "Both mm configs must have pad_inner_dim set to True"
+        assert a._data.size(1) == b._data.size(
+            0
+        ), f"Inner dims must match for mm, got {a._data.size(1)} and {b._data.size(0)}"
         a_data = pad_tensor_for_matmul(a_data, dims=1)
         b_data = pad_tensor_for_matmul(b_data, dims=0)
 
