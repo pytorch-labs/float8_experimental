@@ -23,10 +23,11 @@ aten = torch.ops.aten
 # emulate: whether to emulate the matmuls in fp32
 # use_fast_accum: whether to use the fast-accumulation option for scaled_mm
 # fp8_output: whether to output the result of the scaled_mm in fp8
+# pad_inner_dim: whether to pad the inner dimension of a and b with 0s. This is needed for matmuls not aligned to 16.
 ScaledMMConfig = namedtuple(
     "ScaledMMConfig",
-    ["emulate", "use_fast_accum", "fp8_output"],
-    defaults=[False, False, False],
+    ["emulate", "use_fast_accum", "fp8_output", "pad_inner_dim"],
+    defaults=[False, False, False, False],
 )
 
 
@@ -48,6 +49,7 @@ def merge_mm_configs(
         emulate=a_mm_config.emulate,
         use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
         fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
+        pad_inner_dim=a_mm_config.pad_inner_dim and b_mm_config.pad_inner_dim,
     )
 
 

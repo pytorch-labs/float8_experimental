@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Literal, Tuple
+from typing import Iterable, Literal, Tuple, Union
 
 import float8_experimental.config as config
 
@@ -197,7 +197,9 @@ def get_min_alignment(size: int, alignment_value: int):
     return (1 + (size // alignment_value)) * alignment_value
 
 
-def pad_tensor_for_matmul(tensor: torch.Tensor, both: bool = False) -> torch.Tensor:
+def pad_tensor_for_matmul(
+    tensor: torch.Tensor, dims: Union[int, Iterable[int]]
+) -> torch.Tensor:
     """
     Pads a 2D tensor with zeros to ensure that its dimensions are multiples of 16, which is required for H100s.
 
@@ -211,9 +213,12 @@ def pad_tensor_for_matmul(tensor: torch.Tensor, both: bool = False) -> torch.Ten
     assert tensor.dim() == 2
     dim1, dim2 = tensor.shape
 
-    # Calculate aligned dimensions
-    dim2_aligned = get_min_alignment(dim2, 16)
-    dim1_aligned = get_min_alignment(dim1, 16) if both else dim1
+    if isinstance(dims, int):
+        dims = (dims,)
+
+    # Calculate aligned dimensions based on the specified dims
+    dim1_aligned = get_min_alignment(dim1, 16) if 0 in dims else dim1
+    dim2_aligned = get_min_alignment(dim2, 16) if 1 in dims else dim2
 
     # Check if padding is needed for either dimension
     if dim1 == dim1_aligned and dim2 == dim2_aligned:
