@@ -21,7 +21,12 @@ from float8_experimental.float8_tensor import (
     to_fp8_no_autograd,
 )
 
-from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax, e4m3_dtype, e5m2_dtype
+from float8_experimental.float8_utils import (
+    amax_history_to_scale,
+    e4m3_dtype,
+    e5m2_dtype,
+    tensor_to_amax,
+)
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(

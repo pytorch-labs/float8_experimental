@@ -9,7 +9,11 @@ from typing import Dict, Optional
 import torch
 
 import torch.distributed._functional_collectives as funcol
-from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated, e4m3_dtype
+from float8_experimental.float8_utils import (
+    e4m3_dtype,
+    tensor_to_amax,
+    to_fp8_saturated,
+)
 from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten

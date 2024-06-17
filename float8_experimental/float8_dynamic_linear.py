@@ -22,7 +22,7 @@ from float8_experimental.float8_tensor import (
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
-from float8_experimental.float8_utils import tensor_to_scale, e4m3_dtype, e5m2_dtype
+from float8_experimental.float8_utils import e4m3_dtype, e5m2_dtype, tensor_to_scale
 from torch._prims_common import suggest_memory_format
 
 
@@ -106,9 +106,7 @@ def cast_to_float8_e4m3fn(
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
     scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
-    return Float8Tensor.to_float8(
-        inpt_tensor, scale, e4m3_dtype, mm_config=mm_config
-    )
+    return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
 
 
 def cast_to_float8_e5m2_bw(
