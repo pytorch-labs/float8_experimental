@@ -28,6 +28,7 @@ from float8_experimental.float8_linear_utils import (
 )
 from torch.profiler import profile, ProfilerActivity, record_function
 from utils import (
+    kernel_name_to_category,
     profiler_output_to_gpu_time_for_key,
     profiler_output_to_time_by_kernel_name,
 )
@@ -294,9 +295,9 @@ def main(
         if dtype_filter != "bfloat16":
             float8_forw_backward_wrapper(input_tensor)
 
-    # profile_iters = 5
-    profile_iters = 2
+    profile_iters = 5
     ref_times, float8_times = None, None
+    data = []
 
     if dtype_filter != "float8":
         # Profile Reference Model
@@ -309,6 +310,12 @@ def main(
         p = profile_function(profile_config, ref_forw_backward, input_tensor)
         print(f"saved {ref_path}")
         ref_times = profiler_output_to_time_by_kernel_name(p)
+        total_time_ms = sum(v for v in ref_times.values()) / 1e3 / profile_iters
+        for k, v in ref_times.items():
+            v_ms = v / 1e3 / profile_iters
+            data.append(
+                ["0_ref", k, kernel_name_to_category(k), v_ms, v_ms / total_time_ms]
+            )
 
     if dtype_filter != "bfloat16":
         # Profile Float8 Model
@@ -325,67 +332,45 @@ def main(
         p = profile_function(profile_config, float8_forw_backward_wrapper, input_tensor)
         print(f"saved {float8_path}")
         float8_times = profiler_output_to_time_by_kernel_name(p)
+        total_time_ms = sum(v for v in float8_times.values()) / 1e3 / profile_iters
+        for k, v in float8_times.items():
+            v_ms = v / 1e3 / profile_iters
+            data.append(
+                [
+                    "1_float8",
+                    k,
+                    kernel_name_to_category(k),
+                    v / 1e3 / profile_iters,
+                    v_ms / total_time_ms,
+                ]
+            )
 
         # get the time spent per user annotation
         sync_time_us = profiler_output_to_gpu_time_for_key(p, "scale_amax_and_scales")
         sync_time_ms = sync_time_us / profile_iters / 1e3
         print(f"Sync time ms: {sync_time_ms}")
 
+    df = pd.DataFrame(
+        data, columns=["experiment", "kernel", "category", "time_ms", "pct_gpu_time"]
+    )
+    print("\nSummary of GPU time by CPU kernel\n\n", df)
+
+    # compare gemm and overhead time
+    df_p = df.pivot_table(
+        columns=["category"],
+        index="experiment",
+        values="time_ms",
+        aggfunc="sum",
+        fill_value=0,
+        margins=True,
+    )
+    # drop last row, which has totals across ref + float8 which does not make sense
+    df_p = df_p[:-1]
+    df_p = df_p.transpose()
+
     if dtype_filter == "both":
-        data = []
-
-        def kernel_name_to_category(k):
-            # number prefix is for easy sorting
-            if k in ("aten::mm", "aten::addmm", "aten::_scaled_mm"):
-                return "0_gemm"
-            elif (
-                # max(abs(tensor))
-                ("abs" in k and "max" in k)
-                or
-                # casting pointwise to float8
-                ("clamp" in k)
-                or
-                # things related to scaled_mm
-                ("scaled_mm" in k)
-                or
-                # syncing amaxes and scales
-                ("roll" in k)
-            ):
-                # note: the above filter is approximate and will give false
-                # positives if model code contains other code to abs/max/clamp
-                return "1_f8_overhead"
-            return "2_other"
-
-        for k, v in ref_times.items():
-            data.append(
-                ["0_ref", k, kernel_name_to_category(k), v / 1e3 / profile_iters]
-            )
-        for k, v in float8_times.items():
-            data.append(
-                ["1_float8", k, kernel_name_to_category(k), v / 1e3 / profile_iters]
-            )
-
-        df = pd.DataFrame(data, columns=["experiment", "kernel", "category", "time_ms"])
-        print("\nSummary of GPU time by CPU kernel\n\n", df)
-
-        # compare gemm and overhead time
-        df_p = df.pivot_table(
-            columns=["category"],
-            index="experiment",
-            values="time_ms",
-            aggfunc="sum",
-            fill_value=0,
-            margins=True,
-        )
-        # drop last row, which has totals across ref + float8 which does not make sense
-        df_p = df_p[:-1]
-
-        df_p = df_p.transpose()
         df_p["f8_div_ref"] = df_p["1_float8"] / df_p["0_ref"]
         df_p["ref_div_f8"] = df_p["0_ref"] / df_p["1_float8"]
-        print(
-            "\nSummary of time (ms) by kernel category, across ref and float8\n\n", df_p
-        )
 
         # calculate sync time as pct of total float time
         total_float8_ms = df_p.iloc[3]["1_float8"]
@@ -393,6 +378,8 @@ def main(
         print(
             f"\nFloat8 amax/scale sync approx ratio of total time: {sync_approx_ratio:.3f}"
         )
+
+    print("\nSummary of time (ms) by kernel category\n\n", df_p)
 
 
 def invoke_main() -> None:

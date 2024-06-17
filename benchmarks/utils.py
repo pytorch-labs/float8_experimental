@@ -45,3 +45,26 @@ def profiler_output_to_gpu_time_for_key(prof, key):
         if e.key == key:
             total += e.device_time_total
     return total
+
+
+def kernel_name_to_category(k):
+    # number prefix is for easy sorting
+    if k in ("aten::mm", "aten::addmm", "aten::_scaled_mm"):
+        return "0_gemm"
+    elif (
+        # max(abs(tensor))
+        ("abs" in k and "max" in k)
+        or
+        # casting pointwise to float8
+        ("clamp" in k)
+        or
+        # things related to scaled_mm
+        ("scaled_mm" in k)
+        or
+        # syncing amaxes and scales
+        ("roll" in k)
+    ):
+        # note: the above filter is approximate and will give false
+        # positives if model code contains other code to abs/max/clamp
+        return "1_f8_overhead"
+    return "2_other"
