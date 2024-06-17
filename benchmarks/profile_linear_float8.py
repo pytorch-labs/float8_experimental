@@ -391,6 +391,11 @@ def main(
             "bw_gpbs",
         ],
     )
+    df.sort_values(
+        ["experiment", "category", "pct_gpu_time"],
+        ascending=[True, True, False],
+        inplace=True,
+    )
     print("\nSummary of GPU time by CPU kernel\n\n", df)
 
     # compare gemm and overhead time
