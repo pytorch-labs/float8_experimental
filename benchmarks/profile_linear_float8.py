@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import fire
+import pandas as pd
 
 import torch
 import torch.nn as nn
@@ -26,6 +27,15 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from torch.profiler import profile, ProfilerActivity, record_function
+from utils import (
+    profiler_output_to_gpu_time_for_key,
+    profiler_output_to_time_by_kernel_name,
+)
+
+# don't truncate long kernel names
+pd.options.display.max_colwidth = 100
+# display 3 trailing decimal points for floats
+pd.set_option("display.float_format", "{:.3f}".format)
 
 
 class LNLinear(torch.nn.Module):
@@ -188,9 +198,6 @@ def profile_function(
     if config.file_path is not None:
         prof.export_chrome_trace(config.file_path)
 
-    if config.file_path is None:
-        print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
-
     return prof
 
 
@@ -199,8 +206,10 @@ def main(
     compile: bool = True,
     linear_type: str = "dynamic",
     model_type: str = "linear",
+    dtype_filter: str = "both",
 ):
     assert model_type in ("linear", "ln_linear", "norm_ffn_norm"), "unsupported"
+    assert dtype_filter in ("both", "float8", "bfloat16")
 
     print(f"Compile is set to          | {compile}")
     print(f"Using Linear type:         | {linear_type}")
@@ -251,6 +260,8 @@ def main(
         out = m_float8(x)
         return out
 
+    sync_amax_history = sync_float8_amax_and_scale_history
+
     def float8_forw_backward_wrapper(x):
         # sync_float8_amax_and_scale_history is not full graph torch
         # compile friendly, so we add a high level wrapper to allow
@@ -259,7 +270,7 @@ def main(
         # TODO(future): make this better
         if linear_requires_sync(linear_type):
             with record_function("scale_amax_and_scales"):
-                sync_float8_amax_and_scale_history(m_float8)
+                sync_amax_history(m_float8)
         out = float8_forw(x)
 
         # out.sum().backward() is also not torch.compile fullgraph
@@ -268,30 +279,120 @@ def main(
             out.sum().backward()
 
     if compile:
-        ref_forw_backward = torch.compile(ref_forw_backward)
+        m_ref = torch.compile(m_ref, fullgraph=True)
         float8_forw = torch.compile(float8_forw, fullgraph=True)
+        # Note: it's faster to compile the combination of sync_amax_history wit
+        # forward because we only look up from dynamo cache once.
+        # However, compiling the sync function separately makes it more
+        # convenient to analyze the total time spent on it.
+        sync_amax_history = torch.compile(sync_amax_history)
 
-    for _ in range(5):
-        ref_forw_backward(input_tensor)
-        float8_forw_backward_wrapper(input_tensor)
+    # warm up
+    for _ in range(1):
+        if dtype_filter != "float8":
+            ref_forw_backward(input_tensor)
+        if dtype_filter != "bfloat16":
+            float8_forw_backward_wrapper(input_tensor)
 
-    # Profile Reference Model
-    ref_suffix = f"_{model_type}_ref_compile_{compile}.json"
-    profile_config = ProfileConfig(
-        profile_path_prefix + ref_suffix, ref_suffix, iters=5, warmup_iters=5, sync=True
-    )
-    profile_function(profile_config, ref_forw_backward, input_tensor)
+    # profile_iters = 5
+    profile_iters = 2
+    ref_times, float8_times = None, None
 
-    # Profile Float8 Model
-    float8_suffix = f"_{model_type}_float8_compile_{compile}_{linear_type}.json"
-    profile_config = ProfileConfig(
-        profile_path_prefix + float8_suffix,
-        float8_suffix,
-        iters=5,
-        warmup_iters=5,
-        sync=True,
-    )
-    profile_function(profile_config, float8_forw_backward_wrapper, input_tensor)
+    if dtype_filter != "float8":
+        # Profile Reference Model
+        print("profiling ref")
+        ref_suffix = f"_{model_type}_ref_compile_{compile}.json"
+        ref_path = profile_path_prefix + ref_suffix
+        profile_config = ProfileConfig(
+            ref_path, ref_suffix, iters=profile_iters, warmup_iters=2, sync=True
+        )
+        p = profile_function(profile_config, ref_forw_backward, input_tensor)
+        print(f"saved {ref_path}")
+        ref_times = profiler_output_to_time_by_kernel_name(p)
+
+    if dtype_filter != "bfloat16":
+        # Profile Float8 Model
+        print("profiling float8")
+        float8_suffix = f"_{model_type}_float8_compile_{compile}_{linear_type}.json"
+        float8_path = profile_path_prefix + float8_suffix
+        profile_config = ProfileConfig(
+            float8_path,
+            float8_suffix,
+            iters=profile_iters,
+            warmup_iters=2,
+            sync=True,
+        )
+        p = profile_function(profile_config, float8_forw_backward_wrapper, input_tensor)
+        print(f"saved {float8_path}")
+        float8_times = profiler_output_to_time_by_kernel_name(p)
+
+        # get the time spent per user annotation
+        sync_time_us = profiler_output_to_gpu_time_for_key(p, "scale_amax_and_scales")
+        sync_time_ms = sync_time_us / profile_iters / 1e3
+        print(f"Sync time ms: {sync_time_ms}")
+
+    if dtype_filter == "both":
+        data = []
+
+        def kernel_name_to_category(k):
+            # number prefix is for easy sorting
+            if k in ("aten::mm", "aten::addmm", "aten::_scaled_mm"):
+                return "0_gemm"
+            elif (
+                # max(abs(tensor))
+                ("abs" in k and "max" in k)
+                or
+                # casting pointwise to float8
+                ("clamp" in k)
+                or
+                # things related to scaled_mm
+                ("scaled_mm" in k)
+                or
+                # syncing amaxes and scales
+                ("roll" in k)
+            ):
+                # note: the above filter is approximate and will give false
+                # positives if model code contains other code to abs/max/clamp
+                return "1_f8_overhead"
+            return "2_other"
+
+        for k, v in ref_times.items():
+            data.append(
+                ["0_ref", k, kernel_name_to_category(k), v / 1e3 / profile_iters]
+            )
+        for k, v in float8_times.items():
+            data.append(
+                ["1_float8", k, kernel_name_to_category(k), v / 1e3 / profile_iters]
+            )
+
+        df = pd.DataFrame(data, columns=["experiment", "kernel", "category", "time_ms"])
+        print("\nSummary of GPU time by CPU kernel\n\n", df)
+
+        # compare gemm and overhead time
+        df_p = df.pivot_table(
+            columns=["category"],
+            index="experiment",
+            values="time_ms",
+            aggfunc="sum",
+            fill_value=0,
+            margins=True,
+        )
+        # drop last row, which has totals across ref + float8 which does not make sense
+        df_p = df_p[:-1]
+
+        df_p = df_p.transpose()
+        df_p["f8_div_ref"] = df_p["1_float8"] / df_p["0_ref"]
+        df_p["ref_div_f8"] = df_p["0_ref"] / df_p["1_float8"]
+        print(
+            "\nSummary of time (ms) by kernel category, across ref and float8\n\n", df_p
+        )
+
+        # calculate sync time as pct of total float time
+        total_float8_ms = df_p.iloc[3]["1_float8"]
+        sync_approx_ratio = sync_time_ms / total_float8_ms
+        print(
+            f"\nFloat8 amax/scale sync approx ratio of total time: {sync_approx_ratio:.3f}"
+        )
 
 
 def invoke_main() -> None:
