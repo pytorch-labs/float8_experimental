@@ -5,8 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
+import io
 import random
-from contextlib import nullcontext
+from contextlib import nullcontext, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -29,6 +30,7 @@ from float8_experimental.float8_linear_utils import (
 from torch.profiler import profile, ProfilerActivity, record_function
 from utils import (
     kernel_name_to_category,
+    parse_bw_and_kernel_name,
     profiler_output_to_gpu_time_for_key,
     profiler_output_to_time_by_kernel_name,
 )
@@ -288,70 +290,106 @@ def main(
         # convenient to analyze the total time spent on it.
         sync_amax_history = torch.compile(sync_amax_history)
 
-    # warm up
-    for _ in range(1):
+    # if the `TORCHINDUCTOR_PROFILE` env var is enabled, parse its output
+    # to populate triton kernel bandwidth further down in the script
+    f = io.StringIO()
+    with redirect_stdout(f):
+        # warm up
+        for _ in range(1):
+            if dtype_filter != "float8":
+                ref_forw_backward(input_tensor)
+            if dtype_filter != "bfloat16":
+                float8_forw_backward_wrapper(input_tensor)
+
+        profile_iters = 5
+        ref_times, float8_times = None, None
+        data = []
+
         if dtype_filter != "float8":
-            ref_forw_backward(input_tensor)
+            # Profile Reference Model
+            print("profiling ref")
+            ref_suffix = f"_{model_type}_ref_compile_{compile}.json"
+            ref_path = profile_path_prefix + ref_suffix
+            profile_config = ProfileConfig(
+                ref_path, ref_suffix, iters=profile_iters, warmup_iters=2, sync=True
+            )
+            p = profile_function(profile_config, ref_forw_backward, input_tensor)
+            print(f"saved {ref_path}")
+            ref_times = profiler_output_to_time_by_kernel_name(p)
+            total_time_ms = sum(v for v in ref_times.values()) / 1e3 / profile_iters
+            for k, v in ref_times.items():
+                v_ms = v / 1e3 / profile_iters
+                data.append(
+                    [
+                        "0_ref",
+                        k,
+                        kernel_name_to_category(k),
+                        v_ms,
+                        v_ms / total_time_ms,
+                        None,
+                    ]
+                )
+
         if dtype_filter != "bfloat16":
-            float8_forw_backward_wrapper(input_tensor)
-
-    profile_iters = 5
-    ref_times, float8_times = None, None
-    data = []
-
-    if dtype_filter != "float8":
-        # Profile Reference Model
-        print("profiling ref")
-        ref_suffix = f"_{model_type}_ref_compile_{compile}.json"
-        ref_path = profile_path_prefix + ref_suffix
-        profile_config = ProfileConfig(
-            ref_path, ref_suffix, iters=profile_iters, warmup_iters=2, sync=True
-        )
-        p = profile_function(profile_config, ref_forw_backward, input_tensor)
-        print(f"saved {ref_path}")
-        ref_times = profiler_output_to_time_by_kernel_name(p)
-        total_time_ms = sum(v for v in ref_times.values()) / 1e3 / profile_iters
-        for k, v in ref_times.items():
-            v_ms = v / 1e3 / profile_iters
-            data.append(
-                ["0_ref", k, kernel_name_to_category(k), v_ms, v_ms / total_time_ms]
+            # Profile Float8 Model
+            print("profiling float8")
+            float8_suffix = f"_{model_type}_float8_compile_{compile}_{linear_type}.json"
+            float8_path = profile_path_prefix + float8_suffix
+            profile_config = ProfileConfig(
+                float8_path,
+                float8_suffix,
+                iters=profile_iters,
+                warmup_iters=2,
+                sync=True,
             )
-
-    if dtype_filter != "bfloat16":
-        # Profile Float8 Model
-        print("profiling float8")
-        float8_suffix = f"_{model_type}_float8_compile_{compile}_{linear_type}.json"
-        float8_path = profile_path_prefix + float8_suffix
-        profile_config = ProfileConfig(
-            float8_path,
-            float8_suffix,
-            iters=profile_iters,
-            warmup_iters=2,
-            sync=True,
-        )
-        p = profile_function(profile_config, float8_forw_backward_wrapper, input_tensor)
-        print(f"saved {float8_path}")
-        float8_times = profiler_output_to_time_by_kernel_name(p)
-        total_time_ms = sum(v for v in float8_times.values()) / 1e3 / profile_iters
-        for k, v in float8_times.items():
-            v_ms = v / 1e3 / profile_iters
-            data.append(
-                [
-                    "1_float8",
-                    k,
-                    kernel_name_to_category(k),
-                    v / 1e3 / profile_iters,
-                    v_ms / total_time_ms,
-                ]
+            p = profile_function(
+                profile_config, float8_forw_backward_wrapper, input_tensor
             )
+            print(f"saved {float8_path}")
+            float8_times = profiler_output_to_time_by_kernel_name(p)
+            total_time_ms = sum(v for v in float8_times.values()) / 1e3 / profile_iters
+            for k, v in float8_times.items():
+                v_ms = v / 1e3 / profile_iters
+                data.append(
+                    [
+                        "1_float8",
+                        k,
+                        kernel_name_to_category(k),
+                        v / 1e3 / profile_iters,
+                        v_ms / total_time_ms,
+                        None,
+                    ]
+                )
 
-        # get the time spent per user annotation
-        sync_time_us = profiler_output_to_gpu_time_for_key(p, "scale_amax_and_scales")
-        sync_time_ms = sync_time_us / profile_iters / 1e3
-        print(f"Sync time ms: {sync_time_ms}")
+            # get the time spent per user annotation
+            sync_time_us = profiler_output_to_gpu_time_for_key(
+                p, "scale_amax_and_scales"
+            )
+            sync_time_ms = sync_time_us / profile_iters / 1e3
+            print(f"Sync time ms: {sync_time_ms}")
+
+    # print the redirected stdout back to regular stdout
+    print(f.getvalue())
+
+    # populate the triton kernel bandwidth
+    for line in f.getvalue().split("\n"):
+        maybe_bw, maybe_kernel_name = parse_bw_and_kernel_name(line)
+        if maybe_kernel_name is not None:
+            # O(N) search, but it's ok since lists are small
+            for datum in data:
+                if datum[1] == maybe_kernel_name:
+                    datum[-1] = maybe_bw
 
     df = pd.DataFrame(
-        data, columns=["experiment", "kernel", "category", "time_ms", "pct_gpu_time"]
+        data,
+        columns=[
+            "experiment",
+            "kernel",
+            "category",
+            "time_ms",
+            "pct_gpu_time",
+            "bw_gpbs",
+        ],
     )
     print("\nSummary of GPU time by CPU kernel\n\n", df)
 
@@ -373,6 +411,7 @@ def main(
         df_p["ref_div_f8"] = df_p["0_ref"] / df_p["1_float8"]
 
         # calculate sync time as pct of total float time
+        # note: this time is not useful if TORCHINDUCTOR_PROFILE is on
         total_float8_ms = df_p.iloc[3]["1_float8"]
         sync_approx_ratio = sync_time_ms / total_float8_ms
         print(
@@ -384,6 +423,7 @@ def main(
 
 def invoke_main() -> None:
     # Example usage: python benchmarks/profile_linear_float8.py benchmarks/data/profiles/current_profile --compile=True --linear_type="dynamic"
+    # You can set TORCHINDUCTOR_PROFILE=1 to also capture triton kernel bandwidth
     fire.Fire(main)
 
 

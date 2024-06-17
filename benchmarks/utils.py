@@ -6,6 +6,7 @@
 
 import collections
 import json
+import re
 
 
 def profiler_output_to_time_by_kernel_name(prof):
@@ -68,3 +69,16 @@ def kernel_name_to_category(k):
         # positives if model code contains other code to abs/max/clamp
         return "1_f8_overhead"
     return "2_other"
+
+
+def parse_bw_and_kernel_name(line):
+    """
+    Input: a single line of stdout of TORCHINDUCTOR_PROFILE=1 output, such as
+        0.257ms         0.537 GB         2092.43GB/s     triton_red_fused_native_layer_norm_0
+    Output: the bandwidth value and the kernel name, or None and None
+    """
+    result = re.search(".* ([0-9\.]+)GB/s.*(triton_[a-z_0-9]+)", line)
+    if result:
+        return result.group(1), result.group(2)
+    else:
+        return None, None
