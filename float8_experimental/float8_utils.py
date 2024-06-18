@@ -6,10 +6,10 @@
 
 from typing import Literal, Tuple
 
+import float8_experimental.config as config
+
 import torch
 import torch.distributed as dist
-
-import float8_experimental.config as config
 
 # Helpful visualizer for debugging (only supports fp32):
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html

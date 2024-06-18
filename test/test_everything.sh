@@ -2,7 +2,7 @@
 
 # terminate script on first error
 set -e
-IS_ROCM=$(rocm-smi --version)
+IS_ROCM=$(rocm-smi --version || true)
 
 pytest test/test_base.py
 pytest test/test_sam.py

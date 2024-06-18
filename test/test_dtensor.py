@@ -25,7 +25,7 @@ from float8_experimental.float8_tensor_parallel import (
     Float8RowwiseParallel,
     PrepareFloat8ModuleInput,
 )
-from float8_experimental.float8_utils import tensor_to_scale, e4m3_dtype
+from float8_experimental.float8_utils import e4m3_dtype, tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import parallelize_module
