@@ -147,8 +147,8 @@ def float8_mm(aten_op, args, kwargs=None):
     if mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
-    tensor_out, amax = addmm_float8_unwrapped(
+        )
+    tensor_out = addmm_float8_unwrapped(
         a_data,
         a_scale,
         b_data,
@@ -180,9 +180,9 @@ def float8_addmm(aten_op, args, kwargs=None):
     if mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
-        )[0]
+        )
         return out + bias
-    tensor_out, amax = addmm_float8_unwrapped(
+    tensor_out = addmm_float8_unwrapped(
         a_data,
         a_scale,
         b_data,
