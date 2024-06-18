@@ -6,8 +6,12 @@ import float8_experimental.config as config
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import sync_float8_amax_and_scale_history
+from float8_experimental.float8_linear_utils import (
+    precompute_float8_amax,
+    sync_float8_amax_and_scale_history,
+)
 
 
 def check_parity_no_mp(
@@ -18,6 +22,7 @@ def check_parity_no_mp(
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
     module_cls: Type,
+    pre_compute: bool = False,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -32,6 +37,12 @@ def check_parity_no_mp(
             if module_cls is Float8Linear:
                 sync_float8_amax_and_scale_history(model)
             optim.step()
+            if (
+                model is fsdp_model
+                and module_cls is Float8DynamicLinear
+                and pre_compute
+            ):
+                precompute_float8_amax(model)
         test_cls.assertEqual(losses[0], losses[1])
 
 
