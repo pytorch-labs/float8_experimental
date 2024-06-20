@@ -44,7 +44,6 @@ def implements(aten_ops):
         aten.slice.Tensor,
         aten.transpose.int,
         aten.fill_.Scalar,
-        aten.copy_.default,
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
