@@ -67,6 +67,26 @@ def float8_split(aten_op, args, kwargs=None):
     return list(out)
 
 
+@implements([aten.copy_.default])
+def copy_fp8(aten_op, args, kwargs=None):
+    self = args[0]
+    src = args[1]
+    assert isinstance(self, Float8Tensor) or isinstance(src, Float8Tensor)
+
+    self_data = self
+    if isinstance(self, Float8Tensor):
+        self_data = self._data
+
+    src_data = src
+    if isinstance(src, Float8Tensor):
+        src_data = src._data
+
+    fp8_out = aten_op(self_data, src_data, *args[2:], **kwargs)
+    if isinstance(self, Float8Tensor):
+        return Float8Tensor(fp8_out, self._scale, self._orig_dtype, self._mm_config)
+    return fp8_out
+
+
 # Errors cant `cat_cuda float8 e4m3fn`
 @implements([aten.cat.default])
 def float8_cat(aten_op, args, kwargs=None):
