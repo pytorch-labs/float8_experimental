@@ -81,6 +81,24 @@ class TestFloat8Tensor(unittest.TestCase):
         catted = torch.cat(splits, dim=0)
         assert bitwise_identical(fp8_a, catted)
 
+    def test_index_put(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        index = torch.randint(0, 15, (16,), dtype=torch.long)
+
+        b = torch.rand(16, 16, dtype=torch.bfloat16)
+        scale_b = tensor_to_scale(b, torch.float8_e4m3fn)
+        fp8_b = Float8Tensor.to_float8(b, scale_a, torch.float8_e4m3fn)
+        fp8_b_bad = Float8Tensor.to_float8(b, scale_b, torch.float8_e4m3fn)
+
+        with self.assertRaises(AssertionError):
+            b[index] = fp8_a
+            fp8_b[index] = a
+            fp8_b_bad[index] = fp8_a
+        fp8_b[index] = fp8_a
+
 
 class TestFloat8Linear:
     def _test_linear_impl(

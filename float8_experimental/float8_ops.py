@@ -257,12 +257,16 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
         fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )
 
+
 @implements([aten.index_put_.default])
 def index_put_fp8(aten_op, args, kwargs=None):
     fp8_self = args[0]
     fp8_values = args[2]
     assert isinstance(fp8_self, Float8Tensor)
     assert isinstance(fp8_values, Float8Tensor)
+    assert fp8_self._scale == fp8_values._scale
+    assert fp8_self.dtype == fp8_values.dtype
+    assert fp8_self._orig_dtype == fp8_values._orig_dtype
 
     fp8_data = fp8_self._data
     fp8_values_data = fp8_values._data
@@ -270,6 +274,7 @@ def index_put_fp8(aten_op, args, kwargs=None):
     return Float8Tensor(
         fp8_out, fp8_self._scale, fp8_self._orig_dtype, fp8_self._mm_config
     )
+
 
 @implements([aten.copy_.default])
 def copy_fp8(aten_op, args, kwargs=None):
@@ -287,7 +292,5 @@ def copy_fp8(aten_op, args, kwargs=None):
 
     fp8_out = aten_op(self_data, src_data, *args[2:], **kwargs)
     if isinstance(self, Float8Tensor):
-        return Float8Tensor(
-            fp8_out, self._scale, self._orig_dtype, self._mm_config
-        )
+        return Float8Tensor(fp8_out, self._scale, self._orig_dtype, self._mm_config)
     return fp8_out
