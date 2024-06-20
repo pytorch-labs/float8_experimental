@@ -6,6 +6,8 @@
 
 from typing import Literal, Tuple
 
+import float8_experimental.config as config
+
 import torch
 import torch.distributed as dist
 
@@ -16,13 +18,18 @@ import torch.distributed as dist
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
 EPS = 1e-12
 
-IS_AMD = torch.cuda.is_available() and torch.version.hip is not None
+IS_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 FP8_TYPES = {
     torch.float8_e4m3fn,
     torch.float8_e5m2,
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
 }
+
+
+# User defined type for using the individual F8 type based on config
+e4m3_dtype = torch.float8_e4m3fn if not config.use_fnuz_dtype else torch.float8_e4m3fnuz
+e5m2_dtype = torch.float8_e5m2 if not config.use_fnuz_dtype else torch.float8_e5m2fnuz
 
 
 @torch.no_grad()
@@ -148,7 +155,7 @@ def compute_error(x: torch.Tensor, y: torch.Tensor):
 
 
 def fp8_tensor_statistics(
-    tensor: torch.Tensor, float8_dtype=torch.float8_e4m3fn
+    tensor: torch.Tensor, float8_dtype=e4m3_dtype
 ) -> Tuple[int, ...]:
     """Calculate FP8 tensor stats
 

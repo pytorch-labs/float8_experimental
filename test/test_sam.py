@@ -18,7 +18,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_utils import compute_error
+from float8_experimental.float8_utils import compute_error, IS_ROCM
 from transformers import SamModel
 
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
@@ -31,6 +31,7 @@ class TestFloat8SAMIntegrationTest:
     @pytest.mark.parametrize("data_dtype", [torch.float16, torch.bfloat16])
     @pytest.mark.parametrize("linear_type", [Float8Linear, Float8DynamicLinear])
     @pytest.mark.skipif(not is_H100, reason="requires H100 GPU")
+    @pytest.mark.skipif(IS_ROCM, reason="test doesn't currently work on the ROCm stack")
     def test_encoder_fw_bw(self, data_dtype, linear_type):
         model = SamModel.from_pretrained("facebook/sam-vit-base").to(data_dtype).cuda()
         # print(model)
