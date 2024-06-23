@@ -314,7 +314,7 @@ class TestScaledMM:
         "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     @pytest.mark.parametrize("use_fast_accum", [True, False])
-    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum, padded):
+    def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum):
         torch.manual_seed(42)
         input_dtype = e4m3_dtype
         output_dtype = base_dtype
