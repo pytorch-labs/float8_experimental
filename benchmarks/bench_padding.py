@@ -47,24 +47,30 @@ def do_fp8_matmul(A, B, fp8_dtype, out_dtype):
     A_fp8 = A.to(fp8_dtype)
     B_fp8 = B.to(fp8_dtype).t()  # view
 
-    A_pad = pad_tensor_for_matmul(A_fp8)  # mem copy
-    B_pad = pad_tensor_for_matmul(B_fp8, both=True).contiguous().t()  # mem copy
+    scale_a = torch.tensor([1], device="cuda", dtype=torch.float32)
+    scale_b = torch.tensor([1], device="cuda", dtype=torch.float32)
 
-    return torch._scaled_mm(A_pad, B_pad, out_dtype=out_dtype)[0][
+    A_pad = pad_tensor_for_matmul(A_fp8, dims=1)  # mem copy
+    B_pad = pad_tensor_for_matmul(B_fp8, dims=[0, 1]).contiguous().t()  # mem copy
+
+    return torch._scaled_mm(A_pad, B_pad, scale_a, scale_b, out_dtype=out_dtype)[
         : A.shape[0], : B.shape[1]
     ]
 
 
 def do_fp8_pad_first_matmul(A, B, fp8_dtype, out_dtype):
-    A_pad = pad_tensor_for_matmul(A)  # mem copy
-    B_pad = pad_tensor_for_matmul(B, both=True)  # mem copy
+    A_pad = pad_tensor_for_matmul(A, dims=1)  # mem copy
+    B_pad = pad_tensor_for_matmul(B, dims=[0, 1])  # mem copy
+
+    scale_a = torch.tensor([1], device="cuda", dtype=torch.float32)
+    scale_b = torch.tensor([1], device="cuda", dtype=torch.float32)
 
     A_pad = A_pad.to(fp8_dtype)  # mem copy
     B_pad = B_pad.to(fp8_dtype)  # mem copy
 
     B_pad = B_pad.t().contiguous().t()  # mem copy
 
-    return torch._scaled_mm(A_pad, B_pad, out_dtype=out_dtype)[0][
+    return torch._scaled_mm(A_pad, B_pad, scale_a, scale_b, out_dtype=out_dtype)[
         : A.shape[0], : B.shape[1]
     ]
 
@@ -86,8 +92,8 @@ class Experiment_config:
 
 
 def gen_configs():
-    shapes = [(8192, 2500, 5000), (4096, 10, 4096)]
-    output_dtype = torch.float32
+    shapes = [(8192, 2500, 5000), (64, 255, 4096)]
+    output_dtype = torch.bfloat16
     fp8_dtype = torch.float8_e4m3fn
     return [Experiment_config(*shape, output_dtype, fp8_dtype) for shape in shapes]
 
