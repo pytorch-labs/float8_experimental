@@ -181,7 +181,7 @@ def is_row_major(stride):
     return stride[0] > stride[1] and stride[1] == 1
 
 
-def get_min_alignment(size: int, alignment_value: int):
+def _get_min_alignment(size: int, alignment_value: int) -> int:
     """
     Returns the minimum alignment value that is greater than or equal to the given size.
 
@@ -191,6 +191,12 @@ def get_min_alignment(size: int, alignment_value: int):
 
     Returns:
         int: The minimum alignment value that is greater than or equal to the given size.
+
+    Usage:
+    ```
+        >>> _get_min_alignment(10, 8)
+        16
+    ```
     """
     if size % alignment_value == 0:
         return size
@@ -201,7 +207,7 @@ def pad_tensor_for_matmul(
     tensor: torch.Tensor, dims: Union[int, Iterable[int]]
 ) -> torch.Tensor:
     """
-    Pads a 2D tensor with zeros to ensure that its dimensions are multiples of 16, which is required for H100s.
+    Pads a 2D tensor with zeros to ensure that its dimensions are multiples of 16, which is required `torch._scaled_mm`
 
     Args:
         tensor: The tensor to pad.
@@ -209,6 +215,16 @@ def pad_tensor_for_matmul(
 
     Returns:
         torch.Tensor: The padded tensor.
+
+    Usage:
+    ```
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=0).shape
+        torch.Size([16, 10])
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=1).shape
+        torch.Size([10, 16])
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=(0, 1)).shape
+        torch.Size([16, 16])
+    ```
     """
     assert tensor.dim() == 2
     dim1, dim2 = tensor.shape
@@ -217,8 +233,8 @@ def pad_tensor_for_matmul(
         dims = (dims,)
 
     # Calculate aligned dimensions based on the specified dims
-    dim1_aligned = get_min_alignment(dim1, 16) if 0 in dims else dim1
-    dim2_aligned = get_min_alignment(dim2, 16) if 1 in dims else dim2
+    dim1_aligned = _get_min_alignment(dim1, 16) if 0 in dims else dim1
+    dim2_aligned = _get_min_alignment(dim2, 16) if 1 in dims else dim2
 
     # Check if padding is needed for either dimension
     if dim1 == dim1_aligned and dim2 == dim2_aligned:
