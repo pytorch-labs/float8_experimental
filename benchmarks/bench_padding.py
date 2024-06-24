@@ -80,6 +80,12 @@ def do_hp_matmul(A, B):
     return torch.matmul(A, B)
 
 
+def do_aligned_bf16_matmul(A, B):
+    A_pad = pad_tensor_for_matmul(A, dims=1)
+    B_pad = pad_tensor_for_matmul(B, dims=0)
+    return torch.matmul(A_pad, B_pad)
+
+
 @dataclass
 class Experiment_config:
     M: int
@@ -120,8 +126,10 @@ def run(compile: bool = False, n_limit: Optional[int] = None):
         "Shape",
         "Ref Dtype",
         "Ref Tops",
+        "Aligned BF16 Tops",
         "FP8 Tops",
         "Ref % Peak",
+        "Aligned BF16 % Peak",
         "FP8 % Peak",
     ]
 
@@ -133,15 +141,22 @@ def run(compile: bool = False, n_limit: Optional[int] = None):
         B_base = torch.rand(K, N, device=device, dtype=output_dtype)
 
         hp_func = torch.compile(do_hp_matmul) if compile else do_hp_matmul
+        aligned_bf16_func = (
+            torch.compile(do_aligned_bf16_matmul) if compile else do_aligned_bf16_matmul
+        )
         fp8_func = torch.compile(do_fp8_pad_first_matmul) if compile else do_fp8_matmul
 
         ref_time = benchmark_fn_in_usec(hp_func, A_base, B_base)
+        aligned_bf16_time = benchmark_fn_in_usec(aligned_bf16_func, A_base, B_base)
         fp8_time = benchmark_fn_in_usec(
             fp8_func, A_base, B_base, fp8_dtype, output_dtype
         )
 
         ref_tops_sec, ref_pct_top_peak = get_tops_info(
             tops, ref_time, dtype_to_peak_tops[output_dtype]
+        )
+        aligned_bf16_tops_sec, aligned_bf16_pct_top_peak = get_tops_info(
+            tops, aligned_bf16_time, dtype_to_peak_tops[torch.bfloat16]
         )
         fp8_tops_sec, fp8_pct_top_peak = get_tops_info(
             tops, fp8_time, dtype_to_peak_tops[fp8_dtype]
@@ -151,19 +166,37 @@ def run(compile: bool = False, n_limit: Optional[int] = None):
                 f"({M}x{K}x{N})",
                 f"{output_dtype}",
                 f"{ref_tops_sec:.2E}",
+                f"{aligned_bf16_tops_sec:.2E}",
                 f"{fp8_tops_sec:.2E}",
                 f"{ref_pct_top_peak:.3f}",
+                f"{aligned_bf16_pct_top_peak:.3f}",
                 f"{fp8_pct_top_peak:.3f}",
             ]
         )
         results.append(
-            [(M, K, N), output_dtype, ref_time, fp8_time, ref_time / fp8_time]
+            [
+                (M, K, N),
+                output_dtype,
+                ref_time,
+                aligned_bf16_time,
+                fp8_time,
+                ref_time / aligned_bf16_time,
+                ref_time / fp8_time,
+            ]
         )
 
     print("TOPs".center(80, "*"))
     print(tabulate(tops_table, headers=tops_headers))
     print("Speed Results".center(80, "*"))
-    headers = ["Shape", "Ref Dtype", "Ref Time", "FP8 Time", "Speedup"]
+    headers = [
+        "Shape",
+        "Ref Dtype",
+        "Ref Time",
+        "Aligned BF16 Time",
+        "FP8 Time",
+        "Aligned BF16 Speedup",
+        "FP8 Speedup",
+    ]
     print(tabulate(results, headers=headers, tablefmt="grid"))
 
 
