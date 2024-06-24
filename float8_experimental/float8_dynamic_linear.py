@@ -88,8 +88,19 @@ class Float8DynamicLinear(torch.nn.Linear):
                 "bias": False,
             }
             new_mod = cls(**super_kwargs)
-        new_mod.forward_config = ScaledMMConfig(emulate, not bool(emulate))
-        new_mod.backward_config = ScaledMMConfig(emulate, False)
+
+        new_mod.forward_config = ScaledMMConfig(
+            emulate=emulate,
+            use_fast_accum=not bool(emulate),
+            fp8_output=False,
+            pad_inner_dim=config.pad_inner_dim,
+        )
+        new_mod.backward_config = ScaledMMConfig(
+            emulate=emulate,
+            use_fast_accum=False,
+            fp8_output=False,
+            pad_inner_dim=config.pad_inner_dim,
+        )
         if config.enable_fsdp_fp8_all_gather:
             new_mod.weight = nn.Parameter(
                 WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)

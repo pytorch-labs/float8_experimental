@@ -347,6 +347,10 @@ class Float8Linear(torch.nn.Linear):
         new_mod.create_buffers()
         # Defines the behavior of the matmul in the forward and backward
         # Forward we use fast_accum, backwards we do not
-        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
-        new_mod.backward_config = ScaledMMConfig(emulate, False)
+        new_mod.forward_config = ScaledMMConfig(
+            emulate, True if not emulate else False, False, config.pad_inner_dim
+        )
+        new_mod.backward_config = ScaledMMConfig(
+            emulate, False, False, config.pad_inner_dim
+        )
         return new_mod

@@ -13,7 +13,8 @@ from float8_experimental.float8_tensor import (
     merge_mm_configs,
     ScaledMMConfig,
 )
-from float8_experimental.float8_utils import is_row_major
+from float8_experimental.float8_utils import is_row_major, pad_tensor_for_matmul
+
 from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
@@ -120,6 +121,16 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     a_data = a._data
     a_scale = a._scale
     b_data = b._data
+
+    if a._mm_config.pad_inner_dim:
+        assert (
+            b._mm_config.pad_inner_dim
+        ), "Both mm configs must have pad_inner_dim set to True"
+        assert a._data.size(1) == b._data.size(
+            0
+        ), f"Inner dims must match for mm, got {a._data.size(1)} and {b._data.size(0)}"
+        a_data = pad_tensor_for_matmul(a_data, dims=1)
+        b_data = pad_tensor_for_matmul(b_data, dims=0)
 
     if not is_row_major(a_data.stride()):
         a_data = a_data.contiguous()
