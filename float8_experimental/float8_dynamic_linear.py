@@ -134,7 +134,12 @@ _ops_to_preserve_subclass = {
 
 class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, tensor: torch.Tensor, mm_config: ScaledMMConfig):
+    def __new__(
+        cls,
+        tensor: torch.Tensor,
+        mm_config: ScaledMMConfig,
+        amax: Optional[torch.Tensor] = None,
+    ):
         return torch.Tensor._make_wrapper_subclass(
             cls,
             tensor.size(),
@@ -144,14 +149,20 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             dtype=tensor.dtype,
             layout=tensor.layout,
             device=tensor.device,
-            pin_memory=tensor.is_pinned(),
+            pin_memory=False,
+            # pin_memory=tensor.is_pinned(),
             requires_grad=tensor.requires_grad,
         )
 
-    def __init__(self, tensor: torch.Tensor, mm_config: ScaledMMConfig):
+    def __init__(
+        self,
+        tensor: torch.Tensor,
+        mm_config: ScaledMMConfig,
+        amax: Optional[torch.Tensor] = None,
+    ):
         self._tensor = tensor
         self._mm_config = mm_config
-        self._pre_computed_amax = None
+        self._pre_computed_amax = amax
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -180,15 +191,22 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __tensor_flatten__(self):
-        return ["_tensor"], self._mm_config
+        if self._pre_computed_amax:
+            return ["_tensor", "_pre_computed_amax"], self._mm_config
+        else:
+            return ["_tensor"], self._mm_config
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
         mm_config = flatten_spec
-        return WeightWithDynamicFloat8CastTensor(inner_tensors["_tensor"], mm_config)
+        return WeightWithDynamicFloat8CastTensor(
+            inner_tensors["_tensor"],
+            mm_config,
+            getattr(inner_tensors, "_pre_computed_amax", None),
+        )
 
     def __repr__(self):
-        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
+        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config}, pre_computed_amax={self._pre_computed_amax})"
 
     def fsdp_pre_all_gather(self, mesh):
         if self._pre_computed_amax is not None:
