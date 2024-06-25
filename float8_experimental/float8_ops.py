@@ -295,10 +295,10 @@ def copy_fp8(aten_op, args, kwargs=None):
             self._orig_dtype == src._orig_dtype
         ), "Expecting both Float8Tensors to be of the same dtype"
         assert (
-            self._scale is src._scale
+            self._scale == src._scale
         ), "Expecting both Float8Tensors to have thee same scale"
         assert (
-            self._mm_config is src._mm_config
+            self._mm_config == src._mm_config
         ), "Expecting both Float8Tensors to have thee same mm config"
         assert (
             self._data.dtype == src._data.dtype
