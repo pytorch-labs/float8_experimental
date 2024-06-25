@@ -277,19 +277,33 @@ def index_put_fp8(aten_op, args, kwargs=None):
 
 @implements([aten.copy_.default])
 def copy_fp8(aten_op, args, kwargs=None):
+    # For a copy op with Float8Tensors involved, only the following combinations are allowed:
+    # 1. self is a high precision (hp) tensor, src is a Float8Tensor:
+    #    in this case src is upcasted and unscaled to go into the hp tensor
+    # 2. self and src are Float8Tensors:
+    #    the copy is only allowed if all the Float8Tensor properties are equal (a la torch.cat)
+    # Every other combination is banned as the semantics are not well defined
+
     self = args[0]
     src = args[1]
-    assert isinstance(self, Float8Tensor) or isinstance(src, Float8Tensor)
 
-    self_data = self
-    if isinstance(self, Float8Tensor):
-        self_data = self._data
-
-    src_data = src
-    if isinstance(src, Float8Tensor):
-        src_data = src._data
-
-    fp8_out = aten_op(self_data, src_data, *args[2:], **kwargs)
-    if isinstance(self, Float8Tensor):
+    if not isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
+        src_hp = src.to_original_precision()
+        return aten_op(self, src_hp, *args[2:], **kwargs)
+    elif isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
+        assert (
+            self._orig_dtype == src._orig_dtype
+        ), "Expecting both Float8Tensors to be of the same dtype"
+        assert (
+            self._scale is src._scale
+        ), "Expecting both Float8Tensors to have thee same scale"
+        assert (
+            self._mm_config is src._mm_config
+        ), "Expecting both Float8Tensors to have thee same mm config"
+        assert (
+            self._data.dtype == src._data.dtype
+        ), "Expecting both Float8Tensors to be of the same dtypet"
+        fp8_out = aten_op(self._data, src._data, *args[2:], **kwargs)
         return Float8Tensor(fp8_out, self._scale, self._orig_dtype, self._mm_config)
-    return fp8_out
+    else:
+        raise RuntimeError("Unsupported semantics for copy_ in Float8Tensor")

@@ -99,6 +99,26 @@ class TestFloat8Tensor(unittest.TestCase):
             fp8_b_bad[index] = fp8_a
         fp8_b[index] = fp8_a
 
+    def test_copy_(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        b = torch.empty(16, dtype=torch.bfloat16)
+        b.copy_(fp8_a)  # Should work
+        torch.testing.assert_close(b, fp8_a.to_original_precision())
+        with self.assertRaises(RuntimeError):
+            fp8_a.copy_(b)  # Should fail
+
+        fp8_b = Float8Tensor(
+            torch.empty(16, dtype=torch.float8_e4m3fn),
+            scale_a,
+            torch.bfloat16,
+            fp8_a._mm_config,
+        )
+        fp8_b.copy_(fp8_a)
+        torch.testing.assert_close(fp8_a._data, fp8_b._data)
+
 
 class TestFloat8Linear:
     def _test_linear_impl(
