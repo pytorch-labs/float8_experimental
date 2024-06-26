@@ -42,6 +42,9 @@ def implements(aten_ops):
         aten.as_strided.default,
         aten.clone.default,
         aten.detach.default,
+        aten.slice.Tensor,
+        aten.transpose.int,
+        aten.fill_.Scalar,
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
@@ -263,3 +266,55 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
     return Float8Tensor(
         fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
     )
+
+
+@implements([aten.index_put_.default])
+def index_put_fp8(aten_op, args, kwargs=None):
+    fp8_self = args[0]
+    fp8_values = args[2]
+    assert isinstance(fp8_self, Float8Tensor)
+    assert isinstance(fp8_values, Float8Tensor)
+    assert fp8_self._scale == fp8_values._scale
+    assert fp8_self.dtype == fp8_values.dtype
+    assert fp8_self._orig_dtype == fp8_values._orig_dtype
+
+    fp8_data = fp8_self._data
+    fp8_values_data = fp8_values._data
+    fp8_out = aten_op(fp8_data, args[1], fp8_values_data, *args[3:], **kwargs)
+    return Float8Tensor(
+        fp8_out, fp8_self._scale, fp8_self._orig_dtype, fp8_self._mm_config
+    )
+
+
+@implements([aten.copy_.default])
+def copy_fp8(aten_op, args, kwargs=None):
+    # For a copy op with Float8Tensors involved, only the following combinations are allowed:
+    # 1. self is a high precision (hp) tensor, src is a Float8Tensor:
+    #    in this case src is upcasted and unscaled to go into the hp tensor
+    # 2. self and src are Float8Tensors:
+    #    the copy is only allowed if all the Float8Tensor properties are equal (a la torch.cat)
+    # Every other combination is banned as the semantics are not well defined
+
+    self = args[0]
+    src = args[1]
+
+    if not isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
+        src_hp = src.to_original_precision()
+        return aten_op(self, src_hp, *args[2:], **kwargs)
+    elif isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
+        assert (
+            self._orig_dtype == src._orig_dtype
+        ), "Expecting both Float8Tensors to be of the same dtype"
+        assert (
+            self._scale == src._scale
+        ), "Expecting both Float8Tensors to have thee same scale"
+        assert (
+            self._mm_config == src._mm_config
+        ), "Expecting both Float8Tensors to have thee same mm config"
+        assert (
+            self._data.dtype == src._data.dtype
+        ), "Expecting both Float8Tensors to be of the same dtypet"
+        fp8_out = aten_op(self._data, src._data, *args[2:], **kwargs)
+        return Float8Tensor(fp8_out, self._scale, self._orig_dtype, self._mm_config)
+    else:
+        raise RuntimeError("Unsupported semantics for copy_ in Float8Tensor")

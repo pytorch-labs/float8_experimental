@@ -83,6 +83,44 @@ class TestFloat8Tensor(unittest.TestCase):
         catted = torch.cat(splits, dim=0)
         assert bitwise_identical(fp8_a, catted)
 
+    def test_index_put(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        index = torch.randint(0, 15, (16,), dtype=torch.long)
+
+        b = torch.rand(16, 16, dtype=torch.bfloat16)
+        scale_b = tensor_to_scale(b, torch.float8_e4m3fn)
+        fp8_b = Float8Tensor.to_float8(b, scale_a, torch.float8_e4m3fn)
+        fp8_b_bad = Float8Tensor.to_float8(b, scale_b, torch.float8_e4m3fn)
+
+        with self.assertRaises(AssertionError):
+            b[index] = fp8_a
+            fp8_b[index] = a
+            fp8_b_bad[index] = fp8_a
+        fp8_b[index] = fp8_a
+
+    def test_copy_(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        b = torch.empty(16, dtype=torch.bfloat16)
+        b.copy_(fp8_a)  # Should work
+        torch.testing.assert_close(b, fp8_a.to_original_precision())
+        with self.assertRaises(RuntimeError):
+            fp8_a.copy_(b)  # Should fail
+
+        fp8_b = Float8Tensor(
+            torch.empty(16, dtype=torch.float8_e4m3fn),
+            scale_a,
+            torch.bfloat16,
+            fp8_a._mm_config,
+        )
+        fp8_b.copy_(fp8_a)
+        torch.testing.assert_close(fp8_a._data, fp8_b._data)
+
 
 class TestFloat8Linear:
     def _test_linear_impl(
