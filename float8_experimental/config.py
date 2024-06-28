@@ -19,3 +19,13 @@ enable_pre_and_post_forward = True
 # implements pre/post-all-gather methods to do fp8 all-gather with FSDP2.
 # Only dynamic scaling is supported for now.
 enable_fsdp_fp8_all_gather = False
+
+# If True, use 'fnuz' float8 types for calculations.
+# Currently, ROCm only supports fnuz variants.
+use_fnuz_dtype = False
+
+# If True, then prior to performing the fp8 scaled mamtmul we will pad the
+# inner dimension of a (dim 1) and b (dim 2) with 0s. This is needed for matmuls
+# _scaled_mm since it has the strong constraint that for M,N,K  N, K must be a multiple of 16.
+# This can cause a memory spike however so we keep this off by default.
+pad_inner_dim = False
