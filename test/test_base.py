@@ -14,7 +14,7 @@ import pytest
 import torch
 import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     filter_out_small_unaligned_layers,
     get_float8_linear,
@@ -129,10 +129,22 @@ class TestFloat8Linear:
         m_ref,
         linear_type: LinearType,
         emulate: bool,
+        scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
+        scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
+        scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
     ):
-        m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
+        m_fp8 = get_float8_linear(
+            linear_type,
+            m_ref,
+            emulate,
+            scaling_type_x,
+            scaling_type_w,
+            scaling_type_dL_dY,
+        )
         for _ in range(2):
-            if linear_requires_sync(linear_type):
+            if linear_requires_sync(
+                linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
+            ):
                 sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)
             y_fp8.sum().backward()
@@ -150,12 +162,29 @@ class TestFloat8Linear:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        if linear_requires_sync(linear_type):
-            amax_buffer_names = [
-                "fp8_amax_x",
-                "fp8_amax_w",
-                "fp8_amax_dL_dY",
-            ]
+        if linear_requires_sync(
+            linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
+        ):
+
+            # only check buffers that are actually used, based on per-tensor
+            # scaling settings
+            amax_buffer_names = []
+            amax_history_buffer_names = []
+            scale_buffer_names = []
+            if scaling_type_x is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_x")
+                amax_history_buffer_names.append("fp8_amax_history_x")
+                scale_buffer_names.append("fp8_scale_x")
+            if scaling_type_w is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_w")
+                amax_history_buffer_names.append("fp8_amax_history_w")
+                scale_buffer_names.append("fp8_scale_w")
+            if scaling_type_dL_dY is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_dL_dY")
+                amax_history_buffer_names.append("fp8_amax_history_dL_dY")
+                scale_buffer_names.append("fp8_scale_dL_dY")
+
+            # verify all of the amax buffers got updated
             max_float8_pos = {torch.finfo(dtype).max for dtype in FP8_TYPES}
             for buffer_name in amax_buffer_names:
                 buffer_value = getattr(m_fp8, buffer_name)
@@ -165,21 +194,11 @@ class TestFloat8Linear:
                     ), f"{buffer_name} not filled, current value {buffer_value}"
 
             # verify all of the amax history buffers got updated
-            amax_history_buffer_names = [
-                "fp8_amax_history_x",
-                "fp8_amax_history_w",
-                "fp8_amax_history_dL_dY",
-            ]
             for buffer_name in amax_history_buffer_names:
                 buffer_value = getattr(m_fp8, buffer_name)
                 assert torch.max(buffer_value) > 0.0, f"{buffer_name} not filled"
 
             # verify all of the scale buffers got updated
-            scale_buffer_names = [
-                "fp8_scale_x",
-                "fp8_scale_w",
-                "fp8_scale_dL_dY",
-            ]
             for buffer_name in scale_buffer_names:
                 buffer_value = getattr(m_fp8, buffer_name)
                 assert torch.ne(
@@ -192,12 +211,24 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+    @pytest.mark.parametrize(
+        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
+    @pytest.mark.parametrize(
+        "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
+    @pytest.mark.parametrize(
+        "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_linear_nobias(
         self,
         x_shape,
         linear_type: LinearType,
         emulate: bool,
+        scaling_type_x: TensorScalingType,
+        scaling_type_w: TensorScalingType,
+        scaling_type_dL_dY: TensorScalingType,
     ):
         if not emulate:
             if not torch.cuda.is_available():
@@ -208,14 +239,43 @@ class TestFloat8Linear:
                     f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
                 )
                 pytest.skip()
+        if linear_type is LinearType.DYNAMIC:
+            # Only test one combination of scaling types, as they are a no-op
+            # for Float8DynamicLinear. It would be cleaner to split into two
+            # tests, but IMO not worth it since Float8DynamicLinear will be
+            # deleted soon
+            is_all_dynamic = (
+                scaling_type_x is TensorScalingType.DYNAMIC
+                and scaling_type_w is TensorScalingType.DYNAMIC
+                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
+            )
+            if not is_all_dynamic:
+                pytest.skip()
 
         x = torch.randn(*x_shape, device="cuda")
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
-        self._test_linear_impl(x, m_ref, linear_type, emulate)
+        self._test_linear_impl(
+            x,
+            m_ref,
+            linear_type,
+            emulate,
+            scaling_type_x,
+            scaling_type_w,
+            scaling_type_dL_dY,
+        )
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+    @pytest.mark.parametrize(
+        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
+    @pytest.mark.parametrize(
+        "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
+    @pytest.mark.parametrize(
+        "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    )
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
@@ -224,6 +284,9 @@ class TestFloat8Linear:
         self,
         x_shape,
         linear_type: LinearType,
+        scaling_type_x: TensorScalingType,
+        scaling_type_w: TensorScalingType,
+        scaling_type_dL_dY: TensorScalingType,
         emulate: bool,
         linear_dtype: torch.dtype,
     ):
@@ -236,10 +299,30 @@ class TestFloat8Linear:
                     f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
                 )
                 pytest.skip()
+        if linear_type is LinearType.DYNAMIC:
+            # Only test one combination of scaling types, as they are a no-op
+            # for Float8DynamicLinear. It would be cleaner to split into two
+            # tests, but IMO not worth it since Float8DynamicLinear will be
+            # deleted soon
+            is_all_dynamic = (
+                scaling_type_x is TensorScalingType.DYNAMIC
+                and scaling_type_w is TensorScalingType.DYNAMIC
+                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
+            )
+            if not is_all_dynamic:
+                pytest.skip()
 
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
-        self._test_linear_impl(x, m_ref, linear_type, emulate)
+        self._test_linear_impl(
+            x,
+            m_ref,
+            linear_type,
+            emulate,
+            scaling_type_x,
+            scaling_type_w,
+            scaling_type_dL_dY,
+        )
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
@@ -341,6 +424,19 @@ class TestFloat8Linear:
         assert (
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
+
+    def test_repr(self):
+        m = nn.Linear(32, 16)
+        m = get_float8_linear(
+            LinearType.DELAYED,
+            m,
+            emulate=True,
+            scaling_type_x=TensorScalingType.DYNAMIC,
+            scaling_type_w=TensorScalingType.DELAYED,
+            scaling_type_dL_dY=TensorScalingType.DYNAMIC,
+        )
+        s = m.__repr__()
+        assert "x:dyn,w:del,dldy:dyn" in s
 
 
 class TestScaledMM:
