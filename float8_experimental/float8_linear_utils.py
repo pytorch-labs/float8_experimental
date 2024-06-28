@@ -114,6 +114,8 @@ def filter_out_small_unaligned_layers(size_limit: int) -> Callable[[nn.Linear], 
     )
 
 
+# TODO(future PR): probably create a per-linear config which contains
+# all of the options (emulate, scaling, etc)
 def swap_linear_with_float8_linear(
     module: nn.Module,
     module_cls: Type[nn.Module],
@@ -121,6 +123,9 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
+    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
 ) -> nn.Module:
     """
     Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
@@ -134,6 +139,9 @@ def swap_linear_with_float8_linear(
         emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
         linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
             that pass the filter function will be swapped.
+        scaling_type_x (TensorScalingType): scaling type for `x`
+        scaling_type_w (TensorScalingType): scaling type for `w`
+        scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
     """
     module_names_to_skip = set(skip_fqn_list or [])
     if isinstance(module, nn.Linear) and (
@@ -167,7 +175,16 @@ def swap_linear_with_float8_linear(
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            float8linear_module = module_cls.from_float(module, emulate=emulate)
+            if module_cls is Float8DynamicLinear:
+                float8linear_module = module_cls.from_float(module, emulate=emulate)
+            else:
+                float8linear_module = module_cls.from_float(
+                    module,
+                    emulate=emulate,
+                    scaling_type_x=scaling_type_x,
+                    scaling_type_w=scaling_type_w,
+                    scaling_type_dL_dY=scaling_type_dL_dY,
+                )
             setattr(parent_module, module_name, float8linear_module)
 
     post_order_traversal(root_module, "", None)
