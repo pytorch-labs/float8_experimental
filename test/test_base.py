@@ -127,7 +127,7 @@ class TestFloat8Tensor(unittest.TestCase):
         )
         fp8_b.copy_(fp8_a)
         torch.testing.assert_close(fp8_a._data, fp8_b._data)
-    
+
     def test_weights_only_load(self):
         module = nn.Linear(16, 16)
         # Save model state dict

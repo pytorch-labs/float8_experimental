@@ -80,8 +80,12 @@ class Float8DynamicLinear(torch.nn.Linear):
             return cls(in_features=in_features, out_features=out_features, bias=False)
 
     def set_mm_configs(self, emulate: bool) -> "Float8DynamicLinear":
-        self.forward_config = ScaledMMConfig(emulate, not emulate, pad_inner_dim=config.pad_inner_dim)
-        self.backward_config = ScaledMMConfig(emulate, False, pad_inner_dim=config.pad_inner_dim)
+        self.forward_config = ScaledMMConfig(
+            emulate, not emulate, pad_inner_dim=config.pad_inner_dim
+        )
+        self.backward_config = ScaledMMConfig(
+            emulate, False, pad_inner_dim=config.pad_inner_dim
+        )
         return self
 
     def set_weight_and_bias(

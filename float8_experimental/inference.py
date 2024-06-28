@@ -6,6 +6,7 @@
 """
 Defines an nn module designed to be used during inference
 """
+
 from dataclasses import dataclass
 
 from enum import auto, Enum
