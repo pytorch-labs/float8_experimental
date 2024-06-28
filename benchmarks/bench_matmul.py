@@ -101,7 +101,11 @@ def run(n_limit: Optional[int] = None):
         B = torch.zeros(K, N, device=device, dtype=d2).t().contiguous().t()
 
         def do_matmul(A, B):
-            return torch._scaled_mm(A, B, out_dtype=d3, use_fast_accum=False)
+            scale_a = torch.tensor([1], device=device)
+            scale_b = torch.tensor([1], device=device)
+            return torch._scaled_mm(
+                A, B, scale_a, scale_b, out_dtype=d3, use_fast_accum=False
+            )
 
         fp8_time_sec, fp8_tops_sec, fp8_pct_top_peak = do_benchmarks(
             tops, dtype_to_peak_tops[d1], do_matmul, A, B
