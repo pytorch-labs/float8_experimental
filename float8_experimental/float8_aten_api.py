@@ -10,7 +10,6 @@ are emulated. In the future, they should be calling NVIDIA's float8 kernels.
 
 import torch
 
-from float8_experimental.float8_utils import tensor_to_amax
 from torch.library import Library
 
 
@@ -26,7 +25,7 @@ def mm_float8_emulated(
     m2_fp32 = m2.float() / s2
     m3_fp32 = torch.mm(m1_fp32, m2_fp32)
 
-    return m3_fp32.to(dtype3), tensor_to_amax(m3_fp32)
+    return m3_fp32.to(dtype3)
 
 
 #
@@ -38,7 +37,7 @@ def mm_float8_emulated(
 lib = Library("aten", "FRAGMENT")
 
 lib.define(
-    "mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, ScalarType dtype3) -> (Tensor, Tensor)"
+    "mm_float8_emulated(Tensor m1, Tensor s1, Tensor m2, Tensor s2, ScalarType dtype3) -> Tensor"
 )
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CPU")
 lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
@@ -47,4 +46,4 @@ lib.impl("mm_float8_emulated", mm_float8_emulated, "CUDA")
 @torch.library.impl(lib, "mm_float8_emulated", "Meta")
 def _mm_float8_emulated_meta(m1, s1, m2, s2, dtype3):
     out = torch.mm(m1.float(), m2.float()).to(dtype3)
-    return out, torch.empty(1, device="meta")
+    return out

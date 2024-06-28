@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 import itertools
 import random
+import re
 import unittest
 import warnings
 
@@ -29,8 +30,9 @@ from float8_experimental.float8_tensor import (
     ScaledMMConfig,
 )
 from float8_experimental.float8_utils import (
-    amax_to_scale,
     compute_error,
+    e4m3_dtype,
+    e5m2_dtype,
     fp8_tensor_statistics,
     FP8_TYPES,
     tensor_to_scale,
@@ -52,7 +54,7 @@ class TestFloat8Tensor(unittest.TestCase):
     def test_preserves_dtype(self) -> None:
         # hp means high precision, lp means low precision
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
-        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        lp_dtypes = FP8_TYPES
         for hp_dtype, lp_dtype in itertools.product(hp_dtypes, lp_dtypes):
             x1_hp = torch.randn(4, 4, dtype=hp_dtype)
             x1_s = tensor_to_scale(x1_hp, lp_dtype)
@@ -61,7 +63,7 @@ class TestFloat8Tensor(unittest.TestCase):
             self.assertTrue(x3_hp.dtype == hp_dtype)
 
     def test_differentiable_casts(self) -> None:
-        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        lp_dtypes = (e4m3_dtype, e5m2_dtype)
         for f8_dtype in lp_dtypes:
             x = torch.randn(1).requires_grad_()
             grad = torch.randn(1)
@@ -74,12 +76,50 @@ class TestFloat8Tensor(unittest.TestCase):
 
     def test_split_cat(self):
         a = torch.rand(16, 16, dtype=torch.bfloat16)
-        scale = tensor_to_scale(a, torch.float8_e4m3fn)
-        fp8_a = Float8Tensor.to_float8(a, scale, torch.float8_e4m3fn)
+        scale = tensor_to_scale(a, e4m3_dtype)
+        fp8_a = Float8Tensor.to_float8(a, scale, e4m3_dtype)
 
         splits = torch.split(fp8_a, 16)
         catted = torch.cat(splits, dim=0)
         assert bitwise_identical(fp8_a, catted)
+
+    def test_index_put(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        index = torch.randint(0, 15, (16,), dtype=torch.long)
+
+        b = torch.rand(16, 16, dtype=torch.bfloat16)
+        scale_b = tensor_to_scale(b, torch.float8_e4m3fn)
+        fp8_b = Float8Tensor.to_float8(b, scale_a, torch.float8_e4m3fn)
+        fp8_b_bad = Float8Tensor.to_float8(b, scale_b, torch.float8_e4m3fn)
+
+        with self.assertRaises(AssertionError):
+            b[index] = fp8_a
+            fp8_b[index] = a
+            fp8_b_bad[index] = fp8_a
+        fp8_b[index] = fp8_a
+
+    def test_copy_(self):
+        a = torch.rand(16, dtype=torch.bfloat16)
+        scale_a = tensor_to_scale(a, torch.float8_e4m3fn)
+        fp8_a = Float8Tensor.to_float8(a, scale_a, torch.float8_e4m3fn)
+
+        b = torch.empty(16, dtype=torch.bfloat16)
+        b.copy_(fp8_a)  # Should work
+        torch.testing.assert_close(b, fp8_a.to_original_precision())
+        with self.assertRaises(RuntimeError):
+            fp8_a.copy_(b)  # Should fail
+
+        fp8_b = Float8Tensor(
+            torch.empty(16, dtype=torch.float8_e4m3fn),
+            scale_a,
+            torch.bfloat16,
+            fp8_a._mm_config,
+        )
+        fp8_b.copy_(fp8_a)
+        torch.testing.assert_close(fp8_a._data, fp8_b._data)
 
 
 class TestFloat8Linear:
@@ -314,7 +354,7 @@ class TestScaledMM:
     @pytest.mark.parametrize("use_fast_accum", [True, False])
     def test_scaled_mm_vs_emulated(self, base_dtype, use_fast_accum):
         torch.manual_seed(42)
-        input_dtype = torch.float8_e4m3fn
+        input_dtype = e4m3_dtype
         output_dtype = base_dtype
         compare_type = torch.float32
 
@@ -327,7 +367,7 @@ class TestScaledMM:
         a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
         b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
 
-        out_scaled_mm, output_amax_scaled = addmm_float8_unwrapped(
+        out_scaled_mm = addmm_float8_unwrapped(
             a_fp8._data,
             a_fp8._scale,
             b_fp8._data,
@@ -335,20 +375,13 @@ class TestScaledMM:
             output_dtype=output_dtype,
             use_fast_accum=use_fast_accum,
         )
-        out_emulated, output_amax_emulated = torch.ops.aten.mm_float8_emulated(
+        out_emulated = torch.ops.aten.mm_float8_emulated(
             a_fp8._data, a_fp8._scale, b_fp8._data, b_fp8._scale, output_dtype
         )
 
         if output_dtype != base_dtype:
             out_scaled_mm = out_scaled_mm.to(compare_type)
             out_emulated = out_emulated.to(compare_type)
-
-            out_scaled_mm = out_scaled_mm / amax_to_scale(
-                output_amax_scaled, input_dtype
-            )
-            out_emulated = out_emulated / amax_to_scale(
-                output_amax_emulated, input_dtype
-            )
 
         if base_dtype in {torch.bfloat16, torch.float16}:
             atol, rtol = 7e-2, 7e-2
@@ -360,7 +393,7 @@ class TestScaledMM:
     def test_different_configs_error(self):
         x_fp32 = torch.randn(16, 16, device="cuda")
         x_scale = torch.tensor(1.0, device="cuda")
-        fp8_dtype = torch.float8_e4m3fn
+        fp8_dtype = e4m3_dtype
         a = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
         b = Float8Tensor.to_float8(
             x_fp32, x_scale, fp8_dtype, mm_config=ScaledMMConfig(True)
@@ -393,9 +426,70 @@ class TestScaledMM:
         assert c.use_fast_accum is True
         assert c.fp8_output is False
 
+    @unittest.skipIf(
+        not is_H100,
+        "CUDA not available",
+    )
+    @pytest.mark.parametrize(
+        "base_dtype", [torch.float16, torch.bfloat16, torch.float32]
+    )
+    @pytest.mark.parametrize("use_fast_accum", [True, False])
+    def test_pad_inner_dim(self, base_dtype, use_fast_accum):
+        torch.manual_seed(42)
+        input_dtype = torch.float8_e4m3fn
+        compare_type = torch.float32
+
+        a = torch.randn(16, 41, device="cuda", dtype=base_dtype)
+        b = torch.randn(41, 128, device="cuda", dtype=base_dtype)
+
+        a_scale = tensor_to_scale(a, input_dtype).float()
+        b_scale = tensor_to_scale(b, input_dtype).float()
+
+        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
+        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
+
+        with pytest.raises(
+            RuntimeError,
+            match=re.escape(
+                "Expected trailing dimension of mat1 to be divisible by 16 but got mat1 shape: (16x41."
+            ),
+        ):
+            a_fp8 @ b_fp8
+
+        pad_config = ScaledMMConfig(False, use_fast_accum, False, True)
+
+        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype, mm_config=pad_config)
+        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype, mm_config=pad_config)
+        out_padded = a_fp8 @ b_fp8
+        out_padded.to(compare_type)
+
+        emulated_conifg = ScaledMMConfig(True, use_fast_accum, False, False)
+        a_fp8 = Float8Tensor.to_float8(
+            a, a_scale, input_dtype, mm_config=emulated_conifg
+        )
+        b_fp8 = Float8Tensor.to_float8(
+            b, b_scale, input_dtype, mm_config=emulated_conifg
+        )
+        out_emualted = a_fp8 @ b_fp8
+        out_emualted.to(compare_type)
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+        torch.testing.assert_close(out_padded, out_emualted, atol=atol, rtol=rtol)
+
 
 class TestNumerics:
-    @pytest.mark.parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @pytest.mark.parametrize(
+        "float8_dtype",
+        [
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ],
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_small_amax_float16(self, float8_dtype):
         # If we calculate scale naively with FP8_MAX_POS / amax,
@@ -516,7 +610,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
 
     def test_fp8_tensor_statistics(self):
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
-        lp_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        lp_dtypes = (e4m3_dtype, e5m2_dtype)
         for hp_dtype, lp_dtype in itertools.product(hp_dtypes, lp_dtypes):
             x1_hp = torch.ones(4, 4, dtype=hp_dtype)
             tensor_len = x1_hp.numel()

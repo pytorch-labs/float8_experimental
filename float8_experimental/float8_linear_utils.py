@@ -14,7 +14,11 @@ import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
-from float8_experimental.float8_utils import amax_history_to_scale_stack
+from float8_experimental.float8_utils import (
+    amax_history_to_scale_stack,
+    e4m3_dtype,
+    e5m2_dtype,
+)
 from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
@@ -298,13 +302,13 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
 
         # Calculate the new scales from the updated history stacks
         new_x_scales = amax_history_to_scale_stack(
-            fp8_x_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+            fp8_x_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
         )
         new_w_scales = amax_history_to_scale_stack(
-            fp8_w_amax_history_stack, torch.float8_e4m3fn, x_dtype, scale_fn_recipe
+            fp8_w_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
         )
         new_dL_dY_scales = amax_history_to_scale_stack(
-            fp8_dL_dY_amax_history_stack, torch.float8_e5m2, x_dtype, scale_fn_recipe
+            fp8_dL_dY_amax_history_stack, e5m2_dtype, x_dtype, scale_fn_recipe
         )
 
         # Iterate through the layers and update the scales
