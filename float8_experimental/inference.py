@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import List, Optional
 
+import float8_experimental.config as config
+
 import torch
 import torch.nn as nn
 from float8_experimental.float8_linear_utils import swap_linear_layers
@@ -66,8 +68,20 @@ class Float8LinearInference(torch.nn.Linear):
         - FP8 inference with fp8 matmul and static weight casting
     """
 
-    def __init__(self, **super_kwargs):
-        super().__init__(**super_kwargs)
+    def __init__(
+        self,
+        quant_config: QuantConfig,
+        forward_config: ScaledMMConfig,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        # Construct the superclass this will create dummy weights and biases
+        super().__init__(in_features, out_features, bias, device, dtype)
+        self.set_quantization_config(quant_config)
+        self.forward_config = forward_config
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.activation_casting == ActivationCasting.WEIGHT_ONLY:
@@ -105,59 +119,50 @@ class Float8LinearInference(torch.nn.Linear):
         self.weight = nn.Parameter(quantized_weight)
         self.weight.requires_grad = False
 
-    @classmethod
-    def create_meta_class(
-        cls, in_features: int, out_features: int
-    ) -> "Float8LinearInference":
-        with torch.device("meta"):
-            return cls(in_features=in_features, out_features=out_features, bias=False)
-
-    def set_mm_config(self, use_fast_accum: bool = True) -> "Float8LinearInference":
-        """TODO Hardcode for now but we could/should likely add this to the constructor"""
-        self.forward_config: ScaledMMConfig = ScaledMMConfig(False, use_fast_accum)
-        return self
-
     def set_weight_and_bias(
         self, weight: torch.nn.Parameter, bias: Optional[torch.nn.Parameter]
-    ) -> "Float8LinearInference":
+    ):
         self.weight = weight
         self.bias = bias
-        return self
 
     def set_quantization_config(
         self,
         quant_config: QuantConfig,
-    ) -> "Float8LinearInference":
+    ):
         # We destructure the quant_config into the individual fields
         # If an activation config is passed in we want to register that as a buffer
         self.activation_casting: ActivationCasting = quant_config.activation_casting
-        self.quantize_weight()
 
         if self.activation_casting == ActivationCasting.STATIC:
             self.register_buffer("activation_scale", quant_config.activation_scale)
         else:
             self.activation_scale = None
-        return self
 
     @classmethod
     def from_float(
-        cls,
-        module: nn.Module,
-        quant_config: QuantConfig,
+        cls, module: nn.Module, quant_config: QuantConfig, use_fast_accum: bool
     ) -> "Float8LinearInference":
         """
-        Create an nn.Linear with fp8 compute from a regular nn.Linear
+        Create an nn.Linear with fp8 compute from another nn.Linear
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             quant_config (QuantConfig): Configuration for the weight and activation casting
         """
-        return (
-            cls.create_meta_class(module.in_features, module.out_features)
-            .set_weight_and_bias(module.weight, module.bias)
-            .set_mm_config()
-            .set_quantization_config(quant_config)
+        forward_config = ScaledMMConfig(
+            False, use_fast_accum, pad_inner_dim=config.pad_inner_dim
         )
+        linear = cls(
+            quant_config,
+            forward_config,
+            module.in_features,
+            module.out_features,
+            False,
+            device=torch.device("meta"),
+        )
+        linear.set_weight_and_bias(module.weight, module.bias)
+        linear.quantize_weight()
+        return linear
 
 
 def cast_to_float8_e4m3fn(
@@ -195,6 +200,7 @@ def quantize_to_float8(
     quant_config: QuantConfig,
     *,
     skip_fqn_list: Optional[List[str]] = None,
+    use_fast_accum: bool = True,
 ) -> nn.Module:
     """
     Converts torch.nn.Linear layers in the given module to Float8LinearInference.
@@ -207,6 +213,7 @@ def quantize_to_float8(
         module (nn.Module): The module to modify.
         quant_config (QuantConfig): Quantization configuration for Float8 conversion.
         skip_fqn_list (List[str], optional): List of module FQNs to skip during conversion.
+        use_fast_accum : Whether to enable fast accumulation for the Float8LinearInference. Defaults to True.
 
     Returns:
         nn.Module: The modified module with applicable Linear layers converted to Float8.
@@ -216,6 +223,6 @@ def quantize_to_float8(
     """
     return swap_linear_layers(
         module,
-        lambda m: Float8LinearInference.from_float(m, quant_config),
+        lambda m: Float8LinearInference.from_float(m, quant_config, use_fast_accum),
         skip_fqn_list=skip_fqn_list,
     )
