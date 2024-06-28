@@ -135,8 +135,7 @@ class TestFloat8Tensor(unittest.TestCase):
         fp8_module = quantize_to_float8(
             module,
             QuantConfig(
-                ActivationCasting.STATIC,
-                torch.tensor([1.0], device="cuda", dtype=torch.float32),
+                ActivationCasting.DYNAMIC,
             ),
         )
 

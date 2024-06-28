@@ -105,7 +105,9 @@ class TestHPTrainToFP8LinearInference:
         static_fp8_mlp = copy.deepcopy(original_mlp)
         quant_config = QuantConfig(
             ActivationCasting.STATIC,
-            activation_scale=torch.tensor([1.0], device="cuda", dtype=torch.float32),
+            static_quantization_scale=torch.tensor(
+                [1.0], device="cuda", dtype=torch.float32
+            ),
         )
         quantize_to_float8(static_fp8_mlp, quant_config)
 

@@ -46,16 +46,16 @@ class QuantConfig:
 
     Args:
         activation_casting: The type of quantization to perform on the activations
-        activation_scale: The scale of the input to this linear module, used for static quantization only
+        static_quantization_scale: The scale of the input to this linear module, used for static quantization only
     """
 
     activation_casting: ActivationCasting
-    activation_scale: Optional[torch.Tensor] = None
+    static_quantization_scale: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         if self.activation_casting == ActivationCasting.STATIC:
             assert isinstance(
-                self.activation_scale, torch.Tensor
+                self.static_quantization_scale, torch.Tensor
             ), "When activation_casting is 'static', activation_scale must be a tensor."
 
 
@@ -90,7 +90,9 @@ class Float8LinearInference(torch.nn.Linear):
             )
 
         x_fp8 = cast_to_float8_e4m3fn(
-            input, self.forward_config, activation_scale=self.activation_scale
+            input,
+            self.forward_config,
+            static_quantization_scale=self.static_quantization_scale,
         )
         return torch.nn.functional.linear(x_fp8, self.weight, self.bias)
 
@@ -134,9 +136,11 @@ class Float8LinearInference(torch.nn.Linear):
         self.activation_casting: ActivationCasting = quant_config.activation_casting
 
         if self.activation_casting == ActivationCasting.STATIC:
-            self.register_buffer("activation_scale", quant_config.activation_scale)
+            self.register_buffer(
+                "static_quantization_scale", quant_config.static_quantization_scale
+            )
         else:
-            self.activation_scale = None
+            self.static_quantization_scale = None
 
     @classmethod
     def from_float(
@@ -169,7 +173,7 @@ def cast_to_float8_e4m3fn(
     inpt_tensor: torch.Tensor,
     mm_config: ScaledMMConfig,
     reduce_amax: bool = False,
-    activation_scale: Optional[torch.Tensor] = None,
+    static_quantization_scale: Optional[torch.Tensor] = None,
 ) -> Float8Tensor:
     """Casts an input tensor to the Float8 (e4m3fn) format for efficient computation.
 
@@ -177,7 +181,7 @@ def cast_to_float8_e4m3fn(
         inpt_tensor: The input tensor to be cast.
         mm_config: Configuration settings for the matrix multiplication
         reduce_amax: Whether to reduce the amax (absolute maximum) among the local distributed group.
-        activation_scale: Optional tensor specifying the scale for activation. Default is None.
+        static_quantization_scale: Optional tensor specifying the scale for activation. Default is None.
 
     Returns:
         Float8Tensor: The input tensor cast to Float8 (e4m3fn) format.
@@ -188,8 +192,8 @@ def cast_to_float8_e4m3fn(
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
     scale = (
-        activation_scale
-        if activation_scale is not None
+        static_quantization_scale
+        if static_quantization_scale is not None
         else tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
     )
     return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
