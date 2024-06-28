@@ -22,6 +22,7 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_utils import e4m3_dtype
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -116,7 +117,7 @@ class TestGraphBreaks(DynamoTestCase):
             x_fp8 = Float8Tensor.to_float8(
                 x,
                 self.fp8_scale_x,
-                torch.float8_e4m3fn,
+                e4m3_dtype,
                 self.fp8_amax_x,
                 ScaledMMConfig(),
             )

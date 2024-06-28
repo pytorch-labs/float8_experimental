@@ -4,7 +4,9 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Literal, Tuple
+from typing import Iterable, Literal, Tuple, Union
+
+import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
@@ -16,13 +18,18 @@ import torch.distributed as dist
 # TODO: align this value with NVIDIA's assumptions (current value is a guess)
 EPS = 1e-12
 
-IS_AMD = torch.cuda.is_available() and torch.version.hip is not None
+IS_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 FP8_TYPES = {
     torch.float8_e4m3fn,
     torch.float8_e5m2,
     torch.float8_e4m3fnuz,
     torch.float8_e5m2fnuz,
 }
+
+
+# User defined type for using the individual F8 type based on config
+e4m3_dtype = torch.float8_e4m3fn if not config.use_fnuz_dtype else torch.float8_e4m3fnuz
+e5m2_dtype = torch.float8_e5m2 if not config.use_fnuz_dtype else torch.float8_e5m2fnuz
 
 
 @torch.no_grad()
@@ -148,7 +155,7 @@ def compute_error(x: torch.Tensor, y: torch.Tensor):
 
 
 def fp8_tensor_statistics(
-    tensor: torch.Tensor, float8_dtype=torch.float8_e4m3fn
+    tensor: torch.Tensor, float8_dtype=e4m3_dtype
 ) -> Tuple[int, ...]:
     """Calculate FP8 tensor stats
 
@@ -172,3 +179,69 @@ def fp8_tensor_statistics(
 def is_row_major(stride):
     assert len(stride) == 2, "is_row_major only supports 2D tensors"
     return stride[0] > stride[1] and stride[1] == 1
+
+
+def _get_min_alignment(size: int, alignment_value: int) -> int:
+    """
+    Returns the minimum alignment value that is greater than or equal to the given size.
+
+    Args:
+        size: The size of the data to be aligned.
+        alignment_value: The alignment value to be used.
+
+    Returns:
+        int: The minimum alignment value that is greater than or equal to the given size.
+
+    Usage:
+    ```
+        >>> _get_min_alignment(10, 8)
+        16
+    ```
+    """
+    if size % alignment_value == 0:
+        return size
+    return (1 + (size // alignment_value)) * alignment_value
+
+
+def pad_tensor_for_matmul(
+    tensor: torch.Tensor, dims: Union[int, Iterable[int]]
+) -> torch.Tensor:
+    """
+    Pads a 2D tensor with zeros to ensure that its dimensions are multiples of 16, which is required `torch._scaled_mm`
+
+    Args:
+        tensor: The tensor to pad.
+        both: Whether to pad both dimensions or just the second dimension.
+
+    Returns:
+        torch.Tensor: The padded tensor.
+
+    Usage:
+    ```
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=0).shape
+        torch.Size([16, 10])
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=1).shape
+        torch.Size([10, 16])
+        >>> pad_tensor_for_matmul(torch.randn((10, 10)), dims=(0, 1)).shape
+        torch.Size([16, 16])
+    ```
+    """
+    assert tensor.dim() == 2
+    dim1, dim2 = tensor.shape
+
+    if isinstance(dims, int):
+        dims = (dims,)
+
+    # Calculate aligned dimensions based on the specified dims
+    dim1_aligned = _get_min_alignment(dim1, 16) if 0 in dims else dim1
+    dim2_aligned = _get_min_alignment(dim2, 16) if 1 in dims else dim2
+
+    # Check if padding is needed for either dimension
+    if dim1 == dim1_aligned and dim2 == dim2_aligned:
+        return tensor
+
+    # Calculate padding values for both dimensions
+    pad_dim1 = dim1_aligned - dim1
+    pad_dim2 = dim2_aligned - dim2
+
+    return torch.nn.functional.pad(tensor, (0, pad_dim2, 0, pad_dim1))
