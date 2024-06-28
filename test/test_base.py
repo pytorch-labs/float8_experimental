@@ -165,7 +165,6 @@ class TestFloat8Linear:
         if linear_requires_sync(
             linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
         ):
-
             # only check buffers that are actually used, based on per-tensor
             # scaling settings
             amax_buffer_names = []
