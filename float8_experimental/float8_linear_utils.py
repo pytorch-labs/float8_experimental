@@ -6,7 +6,7 @@
 import copy
 import logging
 from enum import auto, Enum
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -169,7 +169,7 @@ def swap_linear_layers(
 
 def swap_linear_with_float8_linear(
     module: nn.Module,
-    module_cls: Union[Float8Linear, Float8DynamicLinear],
+    module_cls: Union[Type[Float8Linear], Type[Float8DynamicLinear]],
     *,
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
