@@ -73,39 +73,7 @@ class Float8DynamicLinear(torch.nn.Linear):
         return y
 
     @classmethod
-    def create_meta_class(
-        cls, in_features: int, out_features: int
-    ) -> "Float8DynamicLinear":
-        with torch.device("meta"):
-            return cls(in_features=in_features, out_features=out_features, bias=False)
-
-    def set_mm_configs(self, emulate: bool) -> "Float8DynamicLinear":
-        self.forward_config = ScaledMMConfig(
-            emulate, not emulate, pad_inner_dim=config.pad_inner_dim
-        )
-        self.backward_config = ScaledMMConfig(
-            emulate, False, pad_inner_dim=config.pad_inner_dim
-        )
-        return self
-
-    def set_weight_and_bias(
-        self, weight: torch.nn.Parameter, bias: Optional[torch.nn.Parameter]
-    ) -> "Float8DynamicLinear":
-        if config.enable_fsdp_fp8_all_gather:
-            self.weight = nn.Parameter(
-                WeightWithDynamicFloat8CastTensor(weight, self.forward_config)
-            )
-        else:
-            self.weight = weight
-        self.bias = bias
-        return self
-
-    @classmethod
-    def from_float(
-        cls,
-        mod,
-        emulate: bool = False,
-    ) -> "Float8DynamicLinear":
+    def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
@@ -113,31 +81,39 @@ class Float8DynamicLinear(torch.nn.Linear):
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
         """
-        return (
-            cls.create_meta_class(mod.in_features, mod.out_features)
-            .set_mm_configs(emulate)
-            .set_weight_and_bias(mod.weight, mod.bias)
+        with torch.device("meta"):
+            super_kwargs = {
+                "in_features": mod.in_features,
+                "out_features": mod.out_features,
+                "bias": False,
+            }
+            new_mod = cls(**super_kwargs)
+
+        new_mod.forward_config = ScaledMMConfig(
+            emulate=emulate,
+            use_fast_accum=not bool(emulate),
+            fp8_output=False,
+            pad_inner_dim=config.pad_inner_dim,
         )
+        new_mod.backward_config = ScaledMMConfig(
+            emulate=emulate,
+            use_fast_accum=False,
+            fp8_output=False,
+            pad_inner_dim=config.pad_inner_dim,
+        )
+        if config.enable_fsdp_fp8_all_gather:
+            new_mod.weight = nn.Parameter(
+                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
+            )
+        else:
+            new_mod.weight = mod.weight
+        new_mod.bias = mod.bias
+        return new_mod
 
 
 def cast_to_float8_e4m3fn(
-    inpt_tensor: torch.Tensor,
-    mm_config: ScaledMMConfig,
-    reduce_amax: bool = False,
+    inpt_tensor: torch.Tensor, mm_config: ScaledMMConfig, reduce_amax: bool = False
 ) -> Float8Tensor:
-    """Casts an input tensor to the Float8 (e4m3fn) format for efficient computation.
-
-    Args:
-        inpt_tensor: The input tensor to be cast.
-        mm_config: Configuration settings for the matrix multiplication
-        reduce_amax: Whether to reduce the amax (absolute maximum) among the local distributed group.
-
-    Returns:
-        Float8Tensor: The input tensor cast to Float8 (e4m3fn) format.
-
-    Note:
-        If the input tensor is already in Float8 format, it is returned as is without re-casting.
-    """
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
     scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
