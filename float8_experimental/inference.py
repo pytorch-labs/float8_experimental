@@ -35,6 +35,7 @@ class ActivationCasting(Enum):
     DYNAMIC: Activation is quantized during forward pass with a dynamic scale calculated from the input activation
     """
 
+    # TODO: A better name would be NONE, we should unify this with torchao
     WEIGHT_ONLY = auto()
     DYNAMIC = auto()
     STATIC = auto()
@@ -59,19 +60,21 @@ class QuantConfig:
             ), "When activation_casting is 'static', activation_scale must be a tensor."
 
 
-class Float8LinearInference(torch.nn.Linear):
+class Float8InferenceLinear(torch.nn.Linear):
     """
     This is a wrapper around torch.nn.Linear that supports FP8 inference
-    Supported forms of infernce:
-        - FP8 inference with fp32 matmul - weight only
+    Supported forms of inference:
+        - FP8 inference with high precision matmul - weight only
         - FP8 inference with fp8 matmul and dynamic weight casting
         - FP8 inference with fp8 matmul and static weight casting
     """
 
     def __init__(
         self,
+        # FP8 specific arguments
         quant_config: QuantConfig,
         forward_config: ScaledMMConfig,
+        # nn.Linear arguments
         in_features: int,
         out_features: int,
         bias: bool = True,
@@ -80,8 +83,14 @@ class Float8LinearInference(torch.nn.Linear):
     ) -> None:
         # Construct the superclass this will create dummy weights and biases
         super().__init__(in_features, out_features, bias, device, dtype)
-        self.set_quantization_config(quant_config)
         self.forward_config = forward_config
+        self.activation_casting = quant_config.activation_casting
+        if self.activation_casting == ActivationCasting.STATIC:
+            self.register_buffer(
+                "static_quantization_scale", quant_config.static_quantization_scale
+            )
+        else:
+            self.static_quantization_scale = None
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.activation_casting == ActivationCasting.WEIGHT_ONLY:
@@ -89,7 +98,7 @@ class Float8LinearInference(torch.nn.Linear):
                 input, self.weight.to_original_precision()
             )
 
-        x_fp8 = cast_to_float8_e4m3fn(
+        x_fp8 = cast_to_float8_e4m3_inference(
             input,
             self.forward_config,
             static_quantization_scale=self.static_quantization_scale,
@@ -127,25 +136,10 @@ class Float8LinearInference(torch.nn.Linear):
         self.weight = weight
         self.bias = bias
 
-    def set_quantization_config(
-        self,
-        quant_config: QuantConfig,
-    ):
-        # We destructure the quant_config into the individual fields
-        # If an activation config is passed in we want to register that as a buffer
-        self.activation_casting: ActivationCasting = quant_config.activation_casting
-
-        if self.activation_casting == ActivationCasting.STATIC:
-            self.register_buffer(
-                "static_quantization_scale", quant_config.static_quantization_scale
-            )
-        else:
-            self.static_quantization_scale = None
-
     @classmethod
     def from_float(
         cls, module: nn.Module, quant_config: QuantConfig, use_fast_accum: bool
-    ) -> "Float8LinearInference":
+    ) -> "Float8InferenceLinear":
         """
         Create an nn.Linear with fp8 compute from another nn.Linear
 
@@ -169,13 +163,13 @@ class Float8LinearInference(torch.nn.Linear):
         return linear
 
 
-def cast_to_float8_e4m3fn(
+def cast_to_float8_e4m3_inference(
     inpt_tensor: torch.Tensor,
     mm_config: ScaledMMConfig,
     reduce_amax: bool = False,
     static_quantization_scale: Optional[torch.Tensor] = None,
 ) -> Float8Tensor:
-    """Casts an input tensor to the Float8 (e4m3fn) format for efficient computation.
+    """Casts an input tensor to the Float8 (e4m3fn*)
 
     Args:
         inpt_tensor: The input tensor to be cast.
@@ -205,9 +199,9 @@ def quantize_to_float8(
     *,
     skip_fqn_list: Optional[List[str]] = None,
     use_fast_accum: bool = True,
-) -> nn.Module:
+) -> Optional[nn.Module]:
     """
-    Converts torch.nn.Linear layers in the given module to Float8LinearInference.
+    Converts torch.nn.Linear layers in the given module to Float8InferenceLinear.
 
     Note:
         If applied to a root-level nn.Linear, the module will not be modified in place
@@ -217,7 +211,7 @@ def quantize_to_float8(
         module (nn.Module): The module to modify.
         quant_config (QuantConfig): Quantization configuration for Float8 conversion.
         skip_fqn_list (List[str], optional): List of module FQNs to skip during conversion.
-        use_fast_accum : Whether to enable fast accumulation for the Float8LinearInference. Defaults to True.
+        use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
 
     Returns:
         nn.Module: The modified module with applicable Linear layers converted to Float8.
@@ -227,6 +221,6 @@ def quantize_to_float8(
     """
     return swap_linear_layers(
         module,
-        lambda m: Float8LinearInference.from_float(m, quant_config, use_fast_accum),
+        lambda m: Float8InferenceLinear.from_float(m, quant_config, use_fast_accum),
         skip_fqn_list=skip_fqn_list,
     )

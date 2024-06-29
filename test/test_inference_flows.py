@@ -19,7 +19,7 @@ from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error
 from float8_experimental.inference import (
     ActivationCasting,
-    Float8LinearInference,
+    Float8InferenceLinear,
     QuantConfig,
     quantize_to_float8,
 )
@@ -228,7 +228,7 @@ class TestFP8TrainToFP8LinearInference:
 
         fp8_mod_count = 0
         for module in new_fp8_mlp.modules():
-            if isinstance(module, Float8LinearInference):
+            if isinstance(module, Float8InferenceLinear):
                 assert isinstance(module.weight, Float8Tensor)
                 assert module.weight.requires_grad is False
                 fp8_mod_count += 1

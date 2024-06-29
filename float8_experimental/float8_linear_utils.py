@@ -103,7 +103,7 @@ def swap_linear_layers(
     *,
     skip_fqn_list: Optional[List[str]] = None,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
-) -> nn.Module:
+) -> Optional[nn.Module]:
     """
     Generic function to swap linear layers in a module with a new type of linear layer.
 
@@ -174,7 +174,7 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
-) -> nn.Module:
+) -> Optional[nn.Module]:
     return swap_linear_layers(
         module,
         lambda m: module_cls.from_float(m, emulate=emulate),
