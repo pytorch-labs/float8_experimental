@@ -3,6 +3,17 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
+import os
+
+
+def get_bool_env(var_name: str, default) -> bool:
+    value = os.environ.get(var_name, "").lower()
+    if value in ("true", "1", "yes"):
+        return True
+    elif value in ("false", "0", "no"):
+        return False
+    return default
+
 
 # If True, on the first iteration of Float8Linear the amaxes will be
 # initialized with the incoming data. As of 2023-12-30, this doesn't work
@@ -22,7 +33,7 @@ enable_fsdp_fp8_all_gather = False
 
 # If True, use 'fnuz' float8 types for calculations.
 # Currently, ROCm only supports fnuz variants.
-use_fnuz_dtype = False
+use_fnuz_dtype = get_bool_env("USE_FNUZ_DTYPE", False)
 
 # If True, then prior to performing the fp8 scaled mamtmul we will pad the
 # inner dimension of a (dim 1) and b (dim 2) with 0s. This is needed for matmuls
