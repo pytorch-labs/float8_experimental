@@ -266,6 +266,7 @@ class Float8Tensor(torch.Tensor):
             scale: the scale to use to convert the tensor
             float8_dtype: the float8 dtype to use
             amax_buffer: a buffer to store the amax value in prior to conversion
+            mm_config: Defines the configuration for the scaled_mm
 
         Returns:
             Float8Tensor: a float8 tensor
