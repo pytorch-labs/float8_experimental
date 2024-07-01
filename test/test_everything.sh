@@ -7,6 +7,7 @@ IS_ROCM=$(rocm-smi --version || true)
 pytest test/test_base.py
 pytest test/test_sam.py
 pytest test/test_compile.py
+pytest test/test_inference_flows.py
 
 # These tests do not work on ROCm yet
 if [ -z "$IS_ROCM" ]
