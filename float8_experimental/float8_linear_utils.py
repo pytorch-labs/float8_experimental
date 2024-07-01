@@ -6,7 +6,7 @@
 import copy
 import logging
 from enum import auto, Enum
-from typing import Callable, List, Optional, Type
+from typing import Callable, List, Optional, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -114,36 +114,33 @@ def filter_out_small_unaligned_layers(size_limit: int) -> Callable[[nn.Linear], 
     )
 
 
-# TODO(future PR): probably create a per-linear config which contains
-# all of the options (emulate, scaling, etc)
-def swap_linear_with_float8_linear(
+def swap_linear_layers(
     module: nn.Module,
-    module_cls: Type[nn.Module],
+    from_float_func: Callable[[nn.Linear], nn.Linear],
     *,
     skip_fqn_list: Optional[List[str]] = None,
-    emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
-    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
-) -> nn.Module:
+) -> Optional[nn.Module]:
     """
-    Replaces all instances of ``torch.nn.Linear`` in ``module`` with instances
-    of ``module_cls`` (either ``Float8Linear`` or ``Float8DynamicLinear``).
+    Generic function to swap linear layers in a module with a new type of linear layer.
+
+    Note:
+        If applied to a root-level nn.Linear, the module will not be modified in place
+        and returned instead
 
     Args:
-        module (torch.nn.Module): Module to modify.
-        module_cls (Union[Type[Float8Linear], Type[Float8DynamicLinear]]): Float8 linear class for the swap.
-        skip_fqn_list (List[str], optional): If specified, a list of module FQNs to skip.
-            Linear submodules of these skipped modules will also be skipped.
-        emulate (bool): Whether to emulate the fp8 matmul logic in fp32.
-        linear_layer_filter (Optional[Callable[[nn.Linear], bool]]): If specified, only the linear layers
+        module: Module to modify.
+        from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
+        skip_fqn_list: If specified, a list of module FQNs to skip.
+        linear_layer_filter: If specified, only the linear layers
             that pass the filter function will be swapped.
-        scaling_type_x (TensorScalingType): scaling type for `x`
-        scaling_type_w (TensorScalingType): scaling type for `w`
-        scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
+        from_float_kwargs: Additional keyword arguments for from_float_func.
+
+    Returns:
+     nn.Module: The modified module with swapped linear layers.
     """
     module_names_to_skip = set(skip_fqn_list or [])
+
     if isinstance(module, nn.Linear) and (
         linear_layer_filter is None or linear_layer_filter(module)
     ):
@@ -151,16 +148,17 @@ def swap_linear_with_float8_linear(
             raise AssertionError(
                 f"Does not support a root nn.Linear with children: {module}"
             )
-        return module_cls.from_float(module, emulate=emulate)
+        return from_float_func(
+            module,
+        )
 
-    # Mark all modules to skip as visited
     root_module = module
     visited_modules = {root_module}
+
     for module_name, module in root_module.named_modules():
         if module_name in module_names_to_skip:
             visited_modules.add(module)
 
-    # Run a post-order traversal to swap linears
     def post_order_traversal(
         module: nn.Module, module_name: str, parent_module: Optional[nn.Module]
     ):
@@ -169,29 +167,68 @@ def swap_linear_with_float8_linear(
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
                 post_order_traversal(child_module, child_module_name, module)
+
         if isinstance(module, nn.Linear) and (
             linear_layer_filter is None or linear_layer_filter(module)
         ):
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
-            if module_cls is Float8DynamicLinear:
-                float8linear_module = module_cls.from_float(module, emulate=emulate)
-            else:
-                float8linear_module = module_cls.from_float(
-                    module,
-                    emulate=emulate,
-                    scaling_type_x=scaling_type_x,
-                    scaling_type_w=scaling_type_w,
-                    scaling_type_dL_dY=scaling_type_dL_dY,
-                )
-            setattr(parent_module, module_name, float8linear_module)
+            new_linear_module = from_float_func(module)
+            setattr(parent_module, module_name, new_linear_module)
 
     post_order_traversal(root_module, "", None)
     # Without this explicit `del`, this set only gets deleted upon an explicit
     # garbage collection (not from when its refcount hits zero)
     del visited_modules
     return root_module
+
+
+def swap_linear_with_float8_linear(
+    module: nn.Module,
+    module_cls: Union[Type[Float8Linear], Type[Float8DynamicLinear]],
+    *,
+    skip_fqn_list: Optional[List[str]] = None,
+    emulate: bool = False,
+    linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
+    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+) -> Optional[nn.Module]:
+    """
+    Swaps `torch.nn.Linear` in `module` with `Float8Linear` or `Float8DynamicLinear`.
+
+    Args:
+        module: Module to modify.
+        module_cls: `Float8Linear` or `Float8DynamicLinear`.
+        from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
+        skip_fqn_list: If specified, a list of module FQNs to skip.
+        emulate: If True, emulation is used instead of hardware accelerated gemm
+        linear_layer_filter: If specified, only the linear layers
+            that pass the filter function will be swapped.
+        scaling_type_x (TensorScalingType): scaling type for `x`
+        scaling_type_w (TensorScalingType): scaling type for `w`
+        scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
+
+    Returns:
+     nn.Module: The modified module with swapped linear layers.
+    """
+    if module_cls is Float8DynamicLinear:
+        from_float = lambda m: module_cls.from_float(m, emulate=emulate)
+    else:
+        from_float = lambda m: module_cls.from_float(
+            m,
+            emulate=emulate,
+            scaling_type_x=scaling_type_x,
+            scaling_type_w=scaling_type_w,
+            scaling_type_dL_dY=scaling_type_dL_dY,
+        )
+    return swap_linear_layers(
+        module,
+        from_float,
+        skip_fqn_list=skip_fqn_list,
+        linear_layer_filter=linear_layer_filter,
+    )
 
 
 def get_float8_layers(model: torch.nn.Module):

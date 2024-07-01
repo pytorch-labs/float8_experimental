@@ -85,7 +85,7 @@ def fsdp_main(rank, world_size, args):
     model = get_model(K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype).to(
         rank
     )
-    model.load_state_dict(torch.load(sd_in_fname))
+    model.load_state_dict(torch.load(sd_in_fname, weights_only=True))
     # To compile FSDP, we need use_orig_params to True
     model = FSDP(model, use_orig_params=True)
     # TODO: The following line doesn't work. We should fix it.
@@ -95,7 +95,7 @@ def fsdp_main(rank, world_size, args):
     # optimizer update
     optimizer = torch.optim.SGD(model.parameters(), lr=lr * world_size)
 
-    ref_input_global = torch.load(input_fname).to(base_dtype)
+    ref_input_global = torch.load(input_fname, weights_only=True).to(base_dtype)
 
     # basic distributed data sampling
     assert B % world_size == 0
@@ -175,11 +175,11 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         torch.save(model.state_dict(), sd_in_fname)
 
     elif mode == "single_gpu":
-        ref_input = torch.load(input_fname).to(base_dtype)
+        ref_input = torch.load(input_fname, weights_only=True).to(base_dtype)
         model = get_model(
             K, N, is_fp8=is_fp8, emulate=emulate, base_dtype=base_dtype
         ).cuda()
-        model.load_state_dict(torch.load(sd_in_fname))
+        model.load_state_dict(torch.load(sd_in_fname, weights_only=True))
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         def forward_backward():
@@ -203,8 +203,8 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         mp.spawn(fsdp_main, args=(WORLD_SIZE, args), nprocs=WORLD_SIZE, join=True)
 
     elif mode == "analyze":
-        y_single_gpu = torch.load(output_single_gpu_fname).cpu()
-        y_fsdp = torch.load(output_fsdp_fname).cpu()
+        y_single_gpu = torch.load(output_single_gpu_fname, weights_only=True).cpu()
+        y_fsdp = torch.load(output_fsdp_fname, weights_only=True).cpu()
         if is_fp8 and not emulate:
             atol, rtol = 2e-2, 2e-2
         else:
@@ -212,8 +212,8 @@ def run(mode: str, is_fp8: bool, compile_fsdp: bool = False, fullgraph: bool = F
         torch.testing.assert_close(y_single_gpu, y_fsdp, atol=atol, rtol=rtol)
         print("output testing single_gpu vs FSDP success")
 
-        sd_out_single_gpu = torch.load(sd_out_single_gpu_fname)
-        sd_out_fsdp = torch.load(sd_out_fsdp_fname)
+        sd_out_single_gpu = torch.load(sd_out_single_gpu_fname, weights_only=True)
+        sd_out_fsdp = torch.load(sd_out_fsdp_fname, weights_only=True)
         for k, v1 in sd_out_single_gpu.items():
             if compile_fsdp:
                 # The state-dict for compiled fsdp has a `_orig_mod` prefix
