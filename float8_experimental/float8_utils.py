@@ -139,7 +139,7 @@ def to_fp8_saturated(x: torch.Tensor, float8_dtype: torch.dtype):
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
 
-def compute_error(x: torch.Tensor, y: torch.Tensor):
+def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Computes the error between two tensors in dB.
 
     For more details see:

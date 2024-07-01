@@ -375,11 +375,11 @@ class Float8Linear(torch.nn.Linear):
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
-    def forward(self, x):
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         if self.has_any_delayed_scaling:
-            self.float8_pre_forward(x)
+            self.float8_pre_forward(input)
 
-        x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
+        x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         y = torch.matmul(x_fp8, w_fp8.t())

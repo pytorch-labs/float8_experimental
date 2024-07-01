@@ -3,6 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
+import io
 import itertools
 import random
 import re
@@ -13,6 +14,7 @@ import pytest
 
 import torch
 import torch.nn as nn
+
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
@@ -36,6 +38,11 @@ from float8_experimental.float8_utils import (
     fp8_tensor_statistics,
     FP8_TYPES,
     tensor_to_scale,
+)
+from float8_experimental.inference import (
+    ActivationCasting,
+    QuantConfig,
+    quantize_to_float8,
 )
 
 random.seed(0)
@@ -120,6 +127,21 @@ class TestFloat8Tensor(unittest.TestCase):
         )
         fp8_b.copy_(fp8_a)
         torch.testing.assert_close(fp8_a._data, fp8_b._data)
+
+    def test_weights_only_load(self):
+        module = nn.Linear(16, 16)
+        # Save model state dict
+        buffer = io.BytesIO()
+        fp8_module = quantize_to_float8(
+            module,
+            QuantConfig(
+                ActivationCasting.DYNAMIC,
+            ),
+        )
+
+        torch.save(fp8_module.state_dict(), buffer)
+        buffer.seek(0)
+        _ = torch.load(buffer, weights_only=True)
 
 
 class TestFloat8Linear:
