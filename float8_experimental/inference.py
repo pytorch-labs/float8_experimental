@@ -10,13 +10,12 @@ Defines an nn module designed to be used during inference
 from dataclasses import dataclass
 
 from enum import auto, Enum
-from typing import List, Optional
+from typing import Optional
 
 import float8_experimental.config as config
 
 import torch
 import torch.nn as nn
-from float8_experimental.float8_linear_utils import swap_linear_layers
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
@@ -191,36 +190,3 @@ def cast_to_float8_e4m3_inference(
         else tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
     )
     return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
-
-
-def quantize_to_float8(
-    module: nn.Module,
-    quant_config: QuantConfig,
-    *,
-    skip_fqn_list: Optional[List[str]] = None,
-    use_fast_accum: bool = True,
-) -> Optional[nn.Module]:
-    """
-    Converts torch.nn.Linear layers in the given module to Float8InferenceLinear.
-
-    Note:
-        If applied to a root-level nn.Linear, the module will not be modified in place
-        and returned instead
-
-    Args:
-        module (nn.Module): The module to modify.
-        quant_config (QuantConfig): Quantization configuration for Float8 conversion.
-        skip_fqn_list (List[str], optional): List of module FQNs to skip during conversion.
-        use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
-
-    Returns:
-        nn.Module: The modified module with applicable Linear layers converted to Float8.
-
-    Raises:
-        AssertionError: If a root-level nn.Linear with children is encountered.
-    """
-    return swap_linear_layers(
-        module,
-        lambda m: Float8InferenceLinear.from_float(m, quant_config, use_fast_accum),
-        skip_fqn_list=skip_fqn_list,
-    )

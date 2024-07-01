@@ -5,29 +5,34 @@
 # LICENSE file in the root directory of this source tree.
 import copy
 import io
+import os
 import random
 import unittest
 
 import pytest
 
 import torch
+
+import torch._inductor
 import torch.nn as nn
 import torch.nn.functional as F
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import (
+    quantize_to_float8,
+    swap_linear_with_float8_linear,
+    unwrap_tensor_subclass,
+)
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error
 from float8_experimental.inference import (
     ActivationCasting,
     Float8InferenceLinear,
     QuantConfig,
-    quantize_to_float8,
 )
-
+from torch.export._trace import _export as _export_private
 
 random.seed(0)
 torch.manual_seed(0)
-
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
 
 
@@ -240,6 +245,58 @@ class TestFP8TrainToFP8LinearInference:
 
         # Assert exact equality
         assert torch.all(og_out == new_out).item()
+
+
+class TestFP8Export:
+    @unittest.skipIf(
+        not torch.cuda.is_available() or not is_H100,
+        "CUDA not available or on non H100 machine",
+    )
+    def test_fp8_export(self):
+        export_model = FeedForward().to("cuda")
+        quant_config = QuantConfig(ActivationCasting.DYNAMIC)
+        quantize_to_float8(export_model, quant_config)
+        batch_size = 4
+        num_tokens = 1024
+        embedding_dim = 4096
+
+        inp = torch.randn(
+            batch_size, num_tokens, embedding_dim, device="cuda", dtype=torch.float32
+        )
+        example_args = (inp,)
+
+        fp8_compile_model = copy.deepcopy(export_model)
+        fp8_compile_model = torch.compile(fp8_compile_model)
+        fp8_compile_out = fp8_compile_model(*example_args)
+
+        # Export model with subclass weights
+
+        export_model = unwrap_tensor_subclass(export_model)
+
+        # Export the model
+        exported_model = _export_private(
+            export_model,
+            example_args,
+            strict=False,
+            pre_dispatch=False,
+        )
+
+        so_path = None
+        try:
+            # Compile the exported program to a .so using AOTInductor
+            with torch.no_grad():
+                so_path = torch._inductor.aot_compile(
+                    exported_model.module(), example_args
+                )
+
+            # Load and run the .so file in Python
+            res = torch._export.aot_load(so_path, device="cuda")(example_args)
+            torch.testing.assert_close(fp8_compile_out, res)
+
+        finally:
+            # Cleanup: remove the .so file
+            if so_path and os.path.exists(so_path):
+                os.remove(so_path)
 
 
 if __name__ == "__main__":
