@@ -22,6 +22,7 @@ from float8_experimental.float8_linear_utils import (
     get_float8_linear,
     linear_requires_sync,
     LinearType,
+    quantize_to_float8,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -39,11 +40,7 @@ from float8_experimental.float8_utils import (
     FP8_TYPES,
     tensor_to_scale,
 )
-from float8_experimental.inference import (
-    ActivationCasting,
-    QuantConfig,
-    quantize_to_float8,
-)
+from float8_experimental.inference import ActivationCasting, QuantConfig
 
 random.seed(0)
 torch.manual_seed(0)

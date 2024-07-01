@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Type, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.utils.parametrize as parametrize
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 
@@ -19,6 +20,7 @@ from float8_experimental.float8_utils import (
     e4m3_dtype,
     e5m2_dtype,
 )
+from float8_experimental.inference import Float8InferenceLinear, QuantConfig
 from torch.distributed._functional_collectives import all_reduce, AsyncCollectiveTensor
 
 log = logging.getLogger(__name__)
@@ -175,11 +177,57 @@ def swap_linear_with_float8_linear(
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
 ) -> Optional[nn.Module]:
+    """Entrypoint for swapping linear layers with float8 for an existing nn.Module
+
+    Note:
+        If applied to a root-level nn.Linear, the module will not be modified in place
+        and returned instead
+
+    Args:
+        module: The root-level nn.Module to modify
+        module_cls: The class to swap the linear layers with
+        skip_fqn_list: List of module FQNs to skip during conversion.
+        emulate: Whether to enable float8 emulation.
+        linear_layer_filter: If specified, only the linear layers that pass the filter function will be swapped.
+    """
     return swap_linear_layers(
         module,
         lambda m: module_cls.from_float(m, emulate=emulate),
         skip_fqn_list=skip_fqn_list,
         linear_layer_filter=linear_layer_filter,
+    )
+
+
+def quantize_to_float8(
+    module: nn.Module,
+    quant_config: QuantConfig,
+    *,
+    skip_fqn_list: Optional[List[str]] = None,
+    use_fast_accum: bool = True,
+) -> Optional[nn.Module]:
+    """
+    Converts torch.nn.Linear layers in the given module to Float8InferenceLinear.
+
+    Note:
+        If applied to a root-level nn.Linear, the module will not be modified in place
+        and returned instead
+
+    Args:
+        module: The module to modify.
+        quant_config: Quantization configuration for Float8 conversion.
+        skip_fqn_list: List of module FQNs to skip during conversion.
+        use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
+
+    Returns:
+        nn.Module: The modified module with applicable Linear layers converted to Float8.
+
+    Raises:
+        AssertionError: If a root-level nn.Linear with children is encountered.
+    """
+    return swap_linear_layers(
+        module,
+        lambda m: Float8InferenceLinear.from_float(m, quant_config, use_fast_accum),
+        skip_fqn_list=skip_fqn_list,
     )
 
 
@@ -347,3 +395,54 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
     for child in fp8_layers:
         # Set a flag to signal amaxes/scales are ready
         child.amax_and_scale_synced = True
+
+
+# TODO: Remove me when export utils landing upstream
+class UnwrapTensorSubclass(torch.nn.Module):
+    def forward(self, *tensors):
+        todo = list(tensors)
+        for tp, meta, inner_tensors in reversed(self.rebuild_stack):
+            nb_tensor = len(inner_tensors)
+            inner_tensors = {a: b for a, b in zip(inner_tensors, todo[-nb_tensor:])}
+            todo = todo[nb_tensor:]
+            rebuilt = tp.__tensor_unflatten__(inner_tensors, meta, None, None)
+            todo.append(rebuilt)
+
+        assert len(todo) == 1
+        return todo[0]
+
+    def right_inverse(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+        assert type(tensor) is not torch.Tensor, "Expected a wrapper tensor subclass!"
+        rebuild_stack = []
+        plain_tensors = []
+        todo = [tensor]
+        while todo:
+            obj = todo.pop()
+            inner_tensors, metadata = obj.__tensor_flatten__()
+            rebuild_stack.append((type(obj), metadata, inner_tensors))
+            for attr_name in inner_tensors:
+                val = getattr(obj, attr_name)
+                if type(val) is torch.Tensor:
+                    plain_tensors.append(val)
+                else:
+                    assert isinstance(val, torch.Tensor)
+                    todo.append(val)
+
+        self.rebuild_stack = rebuild_stack
+
+        return plain_tensors
+
+
+def unwrap_tensor_subclass(model, filter_fn=None) -> nn.Module:
+    for _, child in model.named_children():
+        if (
+            isinstance(child, Float8InferenceLinear)
+            and hasattr(child, "weight")
+            and type(child.weight) is not torch.Tensor
+            and isinstance(child.weight, torch.Tensor)
+        ):
+            parametrize.register_parametrization(
+                child, "weight", UnwrapTensorSubclass()
+            )
+        unwrap_tensor_subclass(child)
+    return model
