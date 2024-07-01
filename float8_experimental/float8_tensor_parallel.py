@@ -20,11 +20,12 @@ from torch.distributed.tensor.parallel import (
 # here is that in input/output handling we do casting after
 # creating the DTensor.
 
-# NOTE: This only works and tested with the DynamicLinear
+# NOTE: This only works and tested with the dynamic scaling 
+# (Float8DynamicLinear and Float8Linear with dynamic scaling for all tensors)
 
 
 def _float8_linear_supports_float8_allgather(m):
-    # TODO(future PR): add support for delayed scaling for activations
+    # TODO(future): add support for delayed scaling for activations
     # and gradients
     return (
         m.scaling_type_x == TensorScalingType.DYNAMIC
