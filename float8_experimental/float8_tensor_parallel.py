@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from float8_experimental.float8_dynamic_linear import (
-    cast_to_float8_e4m3fn,
-    cast_to_float8_e5m2_bw,
+    cast_to_float8_e4m3_dynamic,
+    cast_to_float8_e5m2_dynamic_bw,
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
@@ -34,7 +34,7 @@ class Float8ColwiseParallel(ColwiseParallel):
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
 
-        input_tensor = cast_to_float8_e4m3fn(
+        input_tensor = cast_to_float8_e4m3_dynamic(
             input_tensor, mod.forward_config
         )  # DTensor(Float8Tensor)
 
@@ -54,7 +54,7 @@ class Float8ColwiseParallel(ColwiseParallel):
             )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
 
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
@@ -81,7 +81,7 @@ class Float8RowwiseParallel(RowwiseParallel):
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
 
-        input_tensor = cast_to_float8_e4m3fn(
+        input_tensor = cast_to_float8_e4m3_dynamic(
             input_tensor, mod.forward_config
         )  # DTensor(Float8Tensor)
 
@@ -100,7 +100,7 @@ class Float8RowwiseParallel(RowwiseParallel):
             outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
 
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
@@ -172,7 +172,7 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                     input, mesh, (input_layout,), run_check=False
                 )
 
-            dt_inp = cast_to_float8_e4m3fn(
+            dt_inp = cast_to_float8_e4m3_dynamic(
                 dt_inp, self.fwd_linear_config
             )  # DTensor(Float8Tensor)
             if desired_layout is not None and input_layout != desired_layout:
