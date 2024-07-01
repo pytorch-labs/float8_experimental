@@ -62,8 +62,8 @@ class Float8DynamicLinear(torch.nn.Linear):
     def __init__(self, **super_kwargs):
         super().__init__(**super_kwargs)
 
-    def forward(self, x):
-        x_fp8 = cast_to_float8_e4m3fn(x, self.forward_config)
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x_fp8 = cast_to_float8_e4m3fn(input, self.forward_config)
         if isinstance(self.weight, Float8Tensor):  # cast by FSDP
             w_fp8 = self.weight
         else:

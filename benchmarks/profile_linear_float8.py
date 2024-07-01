@@ -21,7 +21,6 @@ import torch.nn.functional as F
 from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
-    get_float8_linear,
     linear_requires_sync,
     LinearType,
     swap_linear_with_float8_linear,
