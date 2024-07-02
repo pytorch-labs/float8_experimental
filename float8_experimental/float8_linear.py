@@ -400,14 +400,13 @@ class Float8Linear(torch.nn.Linear):
             self.float8_post_forward()
         return y
 
-    def extra_repr(self):
-        # example: in_features=32, out_features=16, bias=True
-        s = super().extra_repr()
+    def scaling_repr(self):
         # add scaling settings without using too many characters
-        scaling = f"x:{self.scaling_type_x.short_str()},w:{self.scaling_type_w.short_str()},dldy:{self.scaling_type_dL_dY.short_str()}"
+        # example: "x:del,w:del,dldy:dyn"
+        return f"x:{self.scaling_type_x.short_str()},w:{self.scaling_type_w.short_str()},dldy:{self.scaling_type_dL_dY.short_str()}"
 
-        s = f'{s}, scaling="{scaling}"'
-        # example: in_features=32, out_features=16, bias=True, scaling="x:del,w:del,dldy:dyn"
+    def extra_repr(self):
+        s = f'{super().extra_repr()}, scaling="{self.scaling_repr()}"'
         return s
 
     @classmethod
