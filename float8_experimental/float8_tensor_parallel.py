@@ -20,7 +20,7 @@ from torch.distributed.tensor.parallel import (
 # here is that in input/output handling we do casting after
 # creating the DTensor.
 
-# NOTE: This only works and tested with the dynamic scaling 
+# NOTE: This only works and tested with the dynamic scaling
 # (Float8DynamicLinear and Float8Linear with dynamic scaling for all tensors)
 
 
