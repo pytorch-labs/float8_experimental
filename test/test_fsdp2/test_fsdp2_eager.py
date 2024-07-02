@@ -79,20 +79,6 @@ class TestFloat8Common:
     def swap_linear_with_dynamic(
         self, module: nn.Module, use_float8_linear=False, **kwargs: Any
     ) -> nn.Module:
-        skip_fqn_list = [
-            "output",
-        ]
-        for layer in range(3):
-            skip_fqn_list.append(f"layers.{layer}.attention.wq")
-            skip_fqn_list.append(f"layers.{layer}.attention.wk")
-            skip_fqn_list.append(f"layers.{layer}.attention.wv")
-            skip_fqn_list.append(f"layers.{layer}.attention.wo")
-            skip_fqn_list.append(f"layers.{layer}.feed_forward.w1")
-            # if layer > 0:
-            # skip_fqn_list.append(f"layers.{layer}.feed_forward.w2")
-            # Note: with 3 layers, even a single linear leads to divergence
-            # with 1 layer, reproes for any layer
-        # kwargs["skip_fqn_list"] = skip_fqn_list
         if use_float8_linear:
             kwargs["scaling_type_x"] = TensorScalingType.DYNAMIC
             kwargs["scaling_type_w"] = TensorScalingType.DYNAMIC
