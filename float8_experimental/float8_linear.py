@@ -19,6 +19,7 @@ import torch
 from float8_experimental.float8_dynamic_linear import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
+    WeightWithDynamicFloat8CastTensor,
 )
 
 from float8_experimental.float8_tensor import (
@@ -163,6 +164,7 @@ class Float8Linear(torch.nn.Linear):
         )
         # Amax scales should always be kept as float32.
         self.always_float32_buffers = set()
+        emulate = kwargs.pop("emulate", False)
         scaling_type_x = kwargs.pop("scaling_type_x", TensorScalingType.DELAYED)
         scaling_type_w = kwargs.pop("scaling_type_w", TensorScalingType.DELAYED)
         scaling_type_dL_dY = kwargs.pop("scaling_type_dL_dY", TensorScalingType.DELAYED)
@@ -187,8 +189,12 @@ class Float8Linear(torch.nn.Linear):
         self.create_buffers()
 
         # Defines the behavior of the matmul in the forward and backward pass
-        self.forward_config = ScaledMMConfig()
-        self.backward_config = ScaledMMConfig()
+        self.forward_config = ScaledMMConfig(
+            emulate, True if not emulate else False, False, config.pad_inner_dim
+        )
+        self.backward_config = ScaledMMConfig(
+            emulate, False, False, config.pad_inner_dim
+        )
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -428,19 +434,20 @@ class Float8Linear(torch.nn.Linear):
                 scaling_type_x=scaling_type_x,
                 scaling_type_w=scaling_type_w,
                 scaling_type_dL_dY=scaling_type_dL_dY,
+                emulate=emulate,
             )
-        new_mod.weight = mod.weight
+        if (
+            scaling_type_w == TensorScalingType.DYNAMIC
+            and config.enable_fsdp_fp8_all_gather
+        ):
+            new_mod.weight = torch.nn.Parameter(
+                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
+            )
+        else:
+            assert not config.enable_fsdp_fp8_all_gather, "unsupported"
+            new_mod.weight = mod.weight
         new_mod.bias = mod.bias
         # need to create buffers again when moving from meta device to
         # real device
         new_mod.create_buffers()
-        # Defines the behavior of the matmul in the forward and backward
-        # Forward we use fast_accum, backwards we do not
-        # TODO(future PR): move below to the constructor
-        new_mod.forward_config = ScaledMMConfig(
-            emulate, True if not emulate else False, False, config.pad_inner_dim
-        )
-        new_mod.backward_config = ScaledMMConfig(
-            emulate, False, False, config.pad_inner_dim
-        )
         return new_mod
