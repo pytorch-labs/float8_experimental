@@ -191,9 +191,9 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
-    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_x: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
 ) -> Optional[nn.Module]:
     """
     Swaps `torch.nn.Linear` in `module` with `Float8Linear` or `Float8DynamicLinear`.
