@@ -14,8 +14,10 @@ import pandas as pd
 
 import torch
 import torch.utils.benchmark as benchmark
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     get_float8_linear,
+    linear_requires_sync,
     LinearType,
     sync_float8_amax_and_scale_history,
 )
@@ -68,6 +70,7 @@ class Experiment:
     compiled: bool
     use_fast_accum: bool
     linear_type: str
+    scaling_repr: str
 
     # 3 Times since we are calculating forward backward
     @property
@@ -96,9 +99,16 @@ def main(
     fast_accum_filter: Optional[bool] = None,
     shape_name_filter: Optional[str] = None,
     linear_type_filter: Optional[str] = None,
+    scaling_type_x: str = "delayed",
+    scaling_type_w: str = "delayed",
+    scaling_type_dL_dY: str = "delayed",
 ):
     device = "cuda"
     print(f"Compile is set to             | {compile}")
+
+    scaling_type_x = TensorScalingType(scaling_type_x)
+    scaling_type_w = TensorScalingType(scaling_type_w)
+    scaling_type_dL_dY = TensorScalingType(scaling_type_dL_dY)
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
@@ -134,9 +144,24 @@ def main(
             LinearType.DELAYED if linear_type == "delayed" else LinearType.DYNAMIC
         )
 
-        linear_float8 = get_float8_linear(
-            linear_type_enum, copy.deepcopy(linear_ref), emulate=False
-        )
+        if linear_type == "delayed":
+            linear_float8 = get_float8_linear(
+                linear_type_enum,
+                copy.deepcopy(linear_ref),
+                emulate=False,
+                scaling_type_x=scaling_type_x,
+                scaling_type_w=scaling_type_w,
+                scaling_type_dL_dY=scaling_type_dL_dY,
+            )
+            scaling_repr = linear_float8.scaling_repr()
+        else:
+            linear_float8 = get_float8_linear(
+                linear_type_enum,
+                copy.deepcopy(linear_ref),
+                emulate=False,
+            )
+            scaling_repr = None
+
         if fast_accum:
             linear_float8.forward_config = ScaledMMConfig(False, True, False)
         else:
@@ -150,7 +175,10 @@ def main(
         if linear_type_enum == LinearType.DELAYED:
 
             def float8_forw_backward():
-                sync_float8_amax_and_scale_history(linear_float8)
+                if linear_requires_sync(
+                    linear_type_enum, scaling_type_x, scaling_type_w, scaling_type_dL_dY
+                ):
+                    sync_float8_amax_and_scale_history(linear_float8)
                 linear_float8(input_tensor).sum().backward()
 
         else:
@@ -197,6 +225,7 @@ def main(
             compile,
             use_fast_accum=fast_accum,
             linear_type=linear_type,
+            scaling_repr=scaling_repr,
         )
         print(experiment)
         print("float8 speedup", experiment.ref_time_sec / experiment.float8_time_sec)
@@ -209,6 +238,7 @@ def main(
         "K",
         "N",
         "linear_type",
+        "scaling_repr",
         "ref_dtype",
         "compiled",
         "use_fast_accum",
@@ -228,6 +258,7 @@ def main(
                 experiment.shape[1],
                 experiment.shape[2],
                 experiment.linear_type,
+                experiment.scaling_repr,
                 experiment.dtype,
                 experiment.compiled,
                 experiment.use_fast_accum,
@@ -257,6 +288,7 @@ def main(
             "name",
             "shape",
             "linear_type",
+            "scaling_repr",
             "compiled",
             "use_fast_accum",
             "ref_time_sec",
@@ -280,8 +312,18 @@ def invoke_main() -> None:
     parser.add_argument("--fast_accum_filter", type=bool, required=False)
     parser.add_argument("--shape_name_filter", type=str, required=False)
     parser.add_argument("--linear_type_filter", type=str, required=False)
+    parser.add_argument("--scaling_type_x", type=str, required=False)
+    parser.add_argument("--scaling_type_w", type=str, required=False)
+    parser.add_argument("--scaling_type_dL_dY", type=str, required=False)
     args = parser.parse_args()
     output_path = Path(args.output_path) if args.output_path is not None else None
+    kwargs = {}
+    if args.scaling_type_x is not None:
+        kwargs["scaling_type_x"] = args.scaling_type_x
+    if args.scaling_type_w is not None:
+        kwargs["scaling_type_w"] = args.scaling_type_w
+    if args.scaling_type_dL_dY is not None:
+        kwargs["scaling_type_dL_dY"] = args.scaling_type_dL_dY
     main(
         output_path,
         args.compile,
@@ -289,6 +331,7 @@ def invoke_main() -> None:
         args.fast_accum_filter,
         args.shape_name_filter,
         args.linear_type_filter,
+        **kwargs,
     )
 
 

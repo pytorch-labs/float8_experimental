@@ -21,7 +21,7 @@ from float8_experimental.float8_linear_utils import swap_linear_layers
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     ScaledMMConfig,
-    ScalingStrategy,
+    ScalingGranularity,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
@@ -75,7 +75,7 @@ class Float8InferenceLinear(torch.nn.Linear):
         # FP8 specific arguments
         quant_config: QuantConfig,
         forward_config: ScaledMMConfig,
-        scaling_strategy: ScalingStrategy,
+        scaling_granularity: ScalingGranularity,
         # nn.Linear arguments
         in_features: int,
         out_features: int,
@@ -86,7 +86,7 @@ class Float8InferenceLinear(torch.nn.Linear):
         # Construct the superclass this will create dummy weights and biases
         super().__init__(in_features, out_features, bias, device, dtype)
         self.forward_config = forward_config
-        self.scaling_strategy = scaling_strategy
+        self.scaling_granularity = scaling_granularity
         self.activation_casting = quant_config.activation_casting
         if self.activation_casting == ActivationCasting.STATIC:
             self.register_buffer(
@@ -105,7 +105,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             input,
             self.forward_config,
             static_quantization_scale=self.static_quantization_scale,
-            scaling_strategy=self.scaling_strategy,
+            scaling_granularity=self.scaling_granularity,
         )
         return torch.nn.functional.linear(x_fp8, self.weight, self.bias)
 
@@ -124,9 +124,9 @@ class Float8InferenceLinear(torch.nn.Linear):
         assert not isinstance(
             self.weight, Float8Tensor
         ), "Weight has already been quantized, cannot quantize again."
-        scale = tensor_to_scale(self.weight, dtype)
+        scale = tensor_to_scale(self.weight, dtype, self.scaling_granularity)
         quantized_weight = to_fp8_no_autograd(
-            self.weight, scale, dtype, self.forward_config, self.scaling_strategy
+            self.weight, scale, dtype, self.forward_config
         )
         self.weight = nn.Parameter(quantized_weight)
         self.weight.requires_grad = False
@@ -155,11 +155,11 @@ class Float8InferenceLinear(torch.nn.Linear):
             False, use_fast_accum, pad_inner_dim=config.pad_inner_dim
         )
         # TODO: For now hardcode TensorWise scaling
-        scaling_strategy = ScalingStrategy.TensorWise
+        scaling_granularity = ScalingGranularity.TensorWise
         linear = cls(
             quant_config,
             forward_config,
-            scaling_strategy,
+            scaling_granularity,
             module.in_features,
             module.out_features,
             False,
@@ -173,7 +173,7 @@ class Float8InferenceLinear(torch.nn.Linear):
 def cast_to_float8_e4m3_inference(
     inpt_tensor: torch.Tensor,
     mm_config: ScaledMMConfig,
-    scaling_strategy: ScalingStrategy,
+    scaling_granularity: ScalingGranularity,
     reduce_amax: bool = False,
     static_quantization_scale: Optional[torch.Tensor] = None,
 ) -> Float8Tensor:
@@ -182,7 +182,7 @@ def cast_to_float8_e4m3_inference(
     Args:
         inpt_tensor: The input tensor to be cast.
         mm_config: Configuration settings for the matrix multiplication
-        scaling_strategy: The strategy to use for the scale.
+        scaling_granularity: For more details see ScalingGranularity
         reduce_amax: Whether to reduce the amax (absolute maximum) among the local distributed group.
         static_quantization_scale: Optional tensor specifying the scale for activation. Default is None.
 
@@ -197,14 +197,15 @@ def cast_to_float8_e4m3_inference(
     scale = (
         static_quantization_scale
         if static_quantization_scale is not None
-        else tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
+        else tensor_to_scale(
+            inpt_tensor, e4m3_dtype, scaling_granularity, reduce_amax=reduce_amax
+        )
     )
     return Float8Tensor.to_float8(
         inpt_tensor,
         scale,
         e4m3_dtype,
         mm_config=mm_config,
-        scaling_strategy=scaling_strategy,
     )
 
 
