@@ -20,7 +20,11 @@ from float8_experimental.float8_dynamic_linear import (
 )
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    ScaledMMConfig,
+    ScalingGranularity,
+)
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
@@ -67,6 +71,8 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
     device = mesh.device_type
     fp8_dtype = e4m3_dtype
     world_size = mesh.size()
+    # TODO: For now hardcode TensorWise scaling
+    scaling_granularity = ScalingGranularity.TensorWise
 
     x_fp32 = torch.rand(size, size, device=device)
     y_fp32 = torch.eye(size, device=device).t()
@@ -82,8 +88,8 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         (size, size),
     )
     for idx, (lhs_placement, rhs_placement) in enumerate(placement_combs):
-        x_scale = tensor_to_scale(x_fp32, fp8_dtype).float()
-        y_scale = tensor_to_scale(y_fp32, fp8_dtype).float()
+        x_scale = tensor_to_scale(x_fp32, fp8_dtype, scaling_granularity).float()
+        y_scale = tensor_to_scale(y_fp32, fp8_dtype, scaling_granularity).float()
 
         x_fp8 = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
         y_fp8 = Float8Tensor.to_float8(y_fp32, y_scale, fp8_dtype)
@@ -106,10 +112,12 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     device = mesh.device_type
     fp8_dtype = e4m3_dtype
     world_size = mesh.size()
+    # TODO: For now hardcode TensorWise scaling
+    scaling_granularity = ScalingGranularity.TensorWise
 
     x_fp32 = torch.rand(size, size, device=device)
 
-    x_scale = tensor_to_scale(x_fp32, fp8_dtype).float()
+    x_scale = tensor_to_scale(x_fp32, fp8_dtype, scaling_granularity).float()
 
     x_fp8 = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
 
@@ -132,11 +140,13 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
 def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
     device = mesh.device_type
     fp8_dtype = e4m3_dtype
+    # TODO: For now hardcode TensorWise scaling
+    scaling_granularity = ScalingGranularity.TensorWise
 
     x_fp32 = torch.rand(size, size, device=device)
     dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
 
-    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
+    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype, scaling_granularity).float()
     assert isinstance(dist_x_scale, DTensor)
 
     dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
@@ -146,16 +156,20 @@ def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
 def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     device = mesh.device_type
     fp8_dtype = e4m3_dtype
+    # TODO: For now hardcode TensorWise scaling
+    scaling_granularity = ScalingGranularity.TensorWise
 
     x_fp32 = torch.rand(size, size, device=device, requires_grad=True)
     local_weight = torch.rand(2 * size, size, device=device, requires_grad=True)
     target = torch.rand(size, 2 * size, device=device)
 
     dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
-    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
+    dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype, scaling_granularity).float()
 
     dist_wight_fp32 = distribute_tensor(local_weight, mesh, [Shard(0)])
-    dist_weight_scale = tensor_to_scale(dist_wight_fp32, fp8_dtype).float()
+    dist_weight_scale = tensor_to_scale(
+        dist_wight_fp32, fp8_dtype, scaling_granularity
+    ).float()
     dist_target = distribute_tensor(target, mesh, [Shard(0)])
 
     dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
@@ -164,7 +178,9 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     )
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
-    out = NoopFwToFloat8E5M2Bw.apply(out, ScaledMMConfig())
+    out = NoopFwToFloat8E5M2Bw.apply(
+        out, ScaledMMConfig(), ScalingGranularity.TensorWise
+    )
     assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
     loss = torch.sum(torch.abs(out - dist_target))
     loss.backward()

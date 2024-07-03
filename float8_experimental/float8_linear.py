@@ -25,6 +25,7 @@ from float8_experimental.float8_dynamic_linear import (
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     ScaledMMConfig,
+    ScalingGranularity,
     to_fp8_no_autograd,
 )
 
@@ -45,6 +46,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
     float8_dtype,
     is_initialized,
     reduce_amax,
+    scaling_granularity: ScalingGranularity,
 ):
     """
     If x is about to be cast to `float8` and the amax buffers are not initialized,
@@ -56,7 +58,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
         # Note: we need to enable distributed reduction here in order
         # to match numerics between single GPU and multi GPU code for
         # activations and gradients
-        new_amax = tensor_to_amax(x, reduce_amax=reduce_amax)
+        new_amax = tensor_to_amax(x, scaling_granularity, reduce_amax=reduce_amax)
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
         new_scale = amax_history_to_scale(
@@ -82,11 +84,13 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         scale_fn_name,
         is_amax_initialized,
         mm_config: ScaledMMConfig,
+        scaling_granularity: ScalingGranularity,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
         ctx.mm_config = mm_config
+        ctx.scaling_granularity = scaling_granularity
         return tensor
 
     @staticmethod
@@ -104,14 +108,18 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             e5m2_dtype,
             is_amax_initialized,
             reduce_amax=True,
+            scaling_granularity=ctx.scaling_granularity,
         )
 
-        fp8_amax_dL_dY.fill_(tensor_to_amax(go))
+        fp8_amax_dL_dY.fill_(tensor_to_amax(go, ctx.scaling_granularity))
 
         res = to_fp8_no_autograd(
-            go, fp8_scale_dL_dY, e5m2_dtype, mm_config=ctx.mm_config
+            go,
+            fp8_scale_dL_dY,
+            e5m2_dtype,
+            mm_config=ctx.mm_config,
         )
-        empty_grads = None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None
         return res, *empty_grads
 
 
@@ -195,6 +203,10 @@ class Float8Linear(torch.nn.Linear):
         self.backward_config = ScaledMMConfig(
             emulate, False, False, config.pad_inner_dim
         )
+
+        # Defines the scaling granularity for the forward and backwards pass
+        # TODO: For now hardcode TensorWise scaling
+        self.scaling_granularity = ScalingGranularity.TensorWise
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -298,6 +310,7 @@ class Float8Linear(torch.nn.Linear):
                 e4m3_dtype,
                 is_amax_initialized,
                 reduce_amax=True,
+                scaling_granularity=self.scaling_granularity,
             )
             x_fp8 = Float8Tensor.to_float8(
                 x,
@@ -308,7 +321,9 @@ class Float8Linear(torch.nn.Linear):
             )
         else:
             assert self.scaling_type_x is TensorScalingType.DYNAMIC
-            x_fp8 = cast_to_float8_e4m3_dynamic(x, self.forward_config)
+            x_fp8 = cast_to_float8_e4m3_dynamic(
+                x, self.forward_config, self.scaling_granularity
+            )
         return x_fp8
 
     def cast_w_to_float8(
@@ -325,6 +340,7 @@ class Float8Linear(torch.nn.Linear):
                 e4m3_dtype,
                 is_amax_initialized,
                 reduce_amax=False,
+                scaling_granularity=self.scaling_granularity,
             )
 
             w_fp8 = Float8Tensor.to_float8(
@@ -340,7 +356,9 @@ class Float8Linear(torch.nn.Linear):
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 w_fp8 = self.weight
             else:
-                w_fp8 = cast_to_float8_e4m3_dynamic(self.weight, self.forward_config)
+                w_fp8 = cast_to_float8_e4m3_dynamic(
+                    self.weight, self.forward_config, self.scaling_granularity
+                )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
@@ -354,10 +372,13 @@ class Float8Linear(torch.nn.Linear):
                 scale_fn_name,
                 self.is_amax_initialized,
                 self.backward_config,
+                self.scaling_granularity,
             )
         else:
             assert self.scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            y = cast_to_float8_e5m2_dynamic_bw(y, self.backward_config)
+            y = cast_to_float8_e5m2_dynamic_bw(
+                y, self.backward_config, self.scaling_granularity
+            )
         return y
 
     def float8_pre_forward(self, x):
@@ -440,7 +461,9 @@ class Float8Linear(torch.nn.Linear):
             and config.enable_fsdp_fp8_all_gather
         ):
             new_mod.weight = torch.nn.Parameter(
-                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
+                WeightWithDynamicFloat8CastTensor(
+                    mod.weight, new_mod.forward_config, new_mod.scaling_granularity
+                )
             )
         else:
             assert not config.enable_fsdp_fp8_all_gather, "unsupported"
