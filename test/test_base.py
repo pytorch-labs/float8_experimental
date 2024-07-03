@@ -10,6 +10,7 @@ import re
 import unittest
 import warnings
 from itertools import product
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -53,14 +54,19 @@ torch.manual_seed(0)
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
 
 
-def filtered_parametrize(param_list, filter_func=None):
+def filtered_parametrize(
+    param_list: List[Tuple[str, List[Any]]],
+    filter_func: Optional[Callable[[Dict[str, Any]], bool]] = None,
+):
     """
     A decorator that works like pytest.mark.parametrize but filters out
     unwanted parameter combinations.
 
-    :param param_list: A list of tuples, each containing (arg_name, [arg_values])
-    :param filter_func: A function that takes a dictionary of parameter names and values,
-                        and returns True for valid combinations, False otherwise
+    Args:
+        param_list: A list of tuples, each containing (arg_name, [arg_values])
+        filter_func: A function that takes a dictionary of parameter names and values,
+                     and returns True for valid combinations, False otherwise
+
     """
 
     def decorator(func):
