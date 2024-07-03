@@ -51,7 +51,6 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     )
     swap_linear_with_float8_linear(
         m,
-        Float8Linear,
         emulate=emulate,
         scaling_type_x=TensorScalingType.DELAYED,
         scaling_type_w=TensorScalingType.DELAYED,

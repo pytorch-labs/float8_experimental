@@ -53,64 +53,6 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         return fp8_tensor, None
 
 
-class Float8DynamicLinear(torch.nn.Linear):
-    """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute. By on the fly
-    conversion to fp8 of the input and weight tensors.
-    """
-
-    def __init__(self, **super_kwargs):
-        super().__init__(**super_kwargs)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
-        x_fp8 = cast_to_float8_e4m3_dynamic(input, self.forward_config)
-        if isinstance(self.weight, Float8Tensor):  # cast by FSDP
-            w_fp8 = self.weight
-        else:
-            w_fp8 = cast_to_float8_e4m3_dynamic(self.weight, self.forward_config)
-        y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
-        y = cast_to_float8_e5m2_dynamic_bw(y, self.backward_config)
-        return y
-
-    @classmethod
-    def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
-        """
-        Create an nn.Linear with fp8 compute from a regular nn.Linear
-
-        Args:
-            mod (torch.nn.Linear): nn.Linear to convert
-            emulate (bool): whether to emulate fp8 matmul logic in float32
-        """
-        with torch.device("meta"):
-            super_kwargs = {
-                "in_features": mod.in_features,
-                "out_features": mod.out_features,
-                "bias": False,
-            }
-            new_mod = cls(**super_kwargs)
-
-        new_mod.forward_config = ScaledMMConfig(
-            emulate=emulate,
-            use_fast_accum=not bool(emulate),
-            fp8_output=False,
-            pad_inner_dim=config.pad_inner_dim,
-        )
-        new_mod.backward_config = ScaledMMConfig(
-            emulate=emulate,
-            use_fast_accum=False,
-            fp8_output=False,
-            pad_inner_dim=config.pad_inner_dim,
-        )
-        if config.enable_fsdp_fp8_all_gather:
-            new_mod.weight = nn.Parameter(
-                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
-            )
-        else:
-            new_mod.weight = mod.weight
-        new_mod.bias = mod.bias
-        return new_mod
-
-
 def cast_to_float8_e4m3_dynamic(
     inpt_tensor: torch.Tensor, mm_config: ScaledMMConfig, reduce_amax: bool = False
 ) -> Float8Tensor:

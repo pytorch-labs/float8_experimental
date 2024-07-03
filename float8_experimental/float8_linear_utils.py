@@ -11,7 +11,6 @@ from typing import Callable, List, Optional, Type, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 
 from float8_experimental.float8_utils import (
@@ -25,51 +24,13 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 
-class LinearType(Enum):
-    DELAYED = auto()
-    DYNAMIC = auto()
-
-
-def get_float8_linear(
-    linear_type: LinearType,
-    linear_ref: torch.nn.Linear,
-    emulate: bool = False,
-    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
-):
-    """Returns a Float8Linear module of the given type, initialized from linear_ref.
-    Args:
-        linear_type: The type of Float8Linear to return.
-        linear_ref: The linear module to initialize from.
-        emulate: Whether to emulate the fp8 matmul logic in float32.
-        scaling_type_x: delayed vs dynamic scaling for `x`.
-        scaling_type_w: delayed vs dynamic scaling for `w`.
-        scaling_type_dL_dY: delayed vs dynamic scaling for `dL_dY`.
-    """
-    if linear_type is LinearType.DYNAMIC:
-        return Float8DynamicLinear.from_float(
-            copy.deepcopy(linear_ref), emulate=emulate
-        )
-    else:
-        assert linear_type is LinearType.DELAYED
-        return Float8Linear.from_float(
-            copy.deepcopy(linear_ref),
-            emulate=emulate,
-            scaling_type_x=scaling_type_x,
-            scaling_type_w=scaling_type_w,
-            scaling_type_dL_dY=scaling_type_dL_dY,
-        )
-
-
 def linear_requires_sync(
-    linear_type: LinearType,
     scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
     scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
     scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
 ):
     """Returns whether the given linear_type requires sync before forward."""
-    return linear_type is LinearType.DELAYED and any(
+    return any(
         [
             scaling_type_x is TensorScalingType.DELAYED,
             scaling_type_w is TensorScalingType.DELAYED,
@@ -186,7 +147,6 @@ def swap_linear_layers(
 
 def swap_linear_with_float8_linear(
     module: nn.Module,
-    module_cls: Union[Type[Float8Linear], Type[Float8DynamicLinear]],
     *,
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
@@ -196,12 +156,10 @@ def swap_linear_with_float8_linear(
     scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
 ) -> Optional[nn.Module]:
     """
-    Swaps `torch.nn.Linear` in `module` with `Float8Linear` or `Float8DynamicLinear`.
+    Swaps `torch.nn.Linear` in `module` with `Float8Linear`.
 
     Args:
         module: Module to modify.
-        module_cls: `Float8Linear` or `Float8DynamicLinear`.
-        from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
         skip_fqn_list: If specified, a list of module FQNs to skip.
         emulate: If True, emulation is used instead of hardware accelerated gemm
         linear_layer_filter: If specified, only the linear layers
@@ -213,16 +171,13 @@ def swap_linear_with_float8_linear(
     Returns:
      nn.Module: The modified module with swapped linear layers.
     """
-    if module_cls is Float8DynamicLinear:
-        from_float = lambda m: module_cls.from_float(m, emulate=emulate)
-    else:
-        from_float = lambda m: module_cls.from_float(
-            m,
-            emulate=emulate,
-            scaling_type_x=scaling_type_x,
-            scaling_type_w=scaling_type_w,
-            scaling_type_dL_dY=scaling_type_dL_dY,
-        )
+    from_float = lambda m: Float8Linear.from_float(
+        m,
+        emulate=emulate,
+        scaling_type_x=scaling_type_x,
+        scaling_type_w=scaling_type_w,
+        scaling_type_dL_dY=scaling_type_dL_dY,
+    )
     return swap_linear_layers(
         module,
         from_float,

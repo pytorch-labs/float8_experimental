@@ -16,7 +16,7 @@ import float8_experimental.config as config
 
 import torch
 
-from float8_experimental.float8_dynamic_linear import (
+from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
     WeightWithDynamicFloat8CastTensor,
@@ -402,8 +402,8 @@ class Float8Linear(torch.nn.Linear):
 
     def scaling_repr(self):
         # add scaling settings without using too many characters
-        # example: "x:del,w:del,dldy:dyn"
-        return f"x:{self.scaling_type_x.short_str()},w:{self.scaling_type_w.short_str()},dldy:{self.scaling_type_dL_dY.short_str()}"
+        # example: "x_del_w_del_dldy_dyn"
+        return f"x_{self.scaling_type_x.short_str()}_w_{self.scaling_type_w.short_str()}_dldy_{self.scaling_type_dL_dY.short_str()}"
 
     def extra_repr(self):
         s = f'{super().extra_repr()}, scaling="{self.scaling_repr()}"'

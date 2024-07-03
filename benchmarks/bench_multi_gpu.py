@@ -14,7 +14,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.utils.benchmark as benchmark
-from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
@@ -65,7 +65,13 @@ def get_model(K, N, is_fp8, base_dtype=torch.float32):
         modules.append(nn.ReLU())
     m = nn.Sequential(*modules)
     if is_fp8:
-        swap_linear_with_float8_linear(m, Float8Linear, emulate=False)
+        swap_linear_with_float8_linear(
+            m,
+            emulate=False,
+            scaling_type_x=TensorScalingType.DELAYED,
+            scaling_type_w=TensorScalingType.DELAYED,
+            scaling_type_dL_dY=TensorScalingType.DELAYED,
+        )
     return m
 
 
