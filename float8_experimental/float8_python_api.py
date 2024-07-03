@@ -55,7 +55,7 @@ def addmm_float8_unwrapped(
         a_data,
         b_data,
         scale_a=a_inverse_scale,
-        scale_b=b_inverse_scale,
+        scale_b=b_inverse_scale.T,
         bias=bias,
         scale_result=output_scale,
         out_dtype=output_dtype,

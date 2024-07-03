@@ -25,7 +25,13 @@ from float8_experimental.float8_tensor import (
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
-from float8_experimental.float8_utils import e4m3_dtype, tensor_to_scale
+from float8_experimental.float8_utils import (
+    e4m3_dtype,
+    get_supported_granularity,
+    tensor_to_scale,
+)
+
+SUPPORTED_GRANULARITY = get_supported_granularity()
 
 
 class ActivationCasting(Enum):
@@ -75,7 +81,7 @@ class Float8InferenceLinear(torch.nn.Linear):
         # FP8 specific arguments
         quant_config: QuantConfig,
         forward_config: ScaledMMConfig,
-        scaling_granularity: ScalingGranularity,
+        scaling_granularity: Optional[ScalingGranularity],
         # nn.Linear arguments
         in_features: int,
         out_features: int,
@@ -86,7 +92,26 @@ class Float8InferenceLinear(torch.nn.Linear):
         # Construct the superclass this will create dummy weights and biases
         super().__init__(in_features, out_features, bias, device, dtype)
         self.forward_config = forward_config
-        self.scaling_granularity = scaling_granularity
+        if scaling_granularity is None:
+            self.scaling_granularity = (
+                ScalingGranularity.AxisWise
+                if dtype == torch.bfloat16
+                and quant_config.static_quantization_scale is None
+                else ScalingGranularity.TensorWise
+            )
+        else:
+            assert (
+                scaling_granularity in SUPPORTED_GRANULARITY
+            ), f"scaling_granularity must be in {SUPPORTED_GRANULARITY} but got {scaling_granularity}"
+            if (
+                scaling_granularity == ScalingGranularity.AxisWise
+                and dtype != torch.bfloat16
+            ):
+                raise ValueError(
+                    "AxisWise scaling granularity is only supported for bfloat16."
+                )
+            self.scaling_granularity = scaling_granularity
+
         self.activation_casting = quant_config.activation_casting
         if self.activation_casting == ActivationCasting.STATIC:
             self.register_buffer(
@@ -101,13 +126,19 @@ class Float8InferenceLinear(torch.nn.Linear):
                 input, self.weight.to_original_precision()
             )
 
+        # TODO we arent folding leading dims yet, but need it to calculate the proper scale.. this sucks
+        original_m = input.shape[:-1]
+        input = input.view(-1, input.shape[-1])
+
         x_fp8 = cast_to_float8_e4m3_inference(
             input,
             self.forward_config,
             static_quantization_scale=self.static_quantization_scale,
             scaling_granularity=self.scaling_granularity,
         )
-        return torch.nn.functional.linear(x_fp8, self.weight, self.bias)
+        return torch.nn.functional.linear(x_fp8, self.weight, self.bias).view(
+            *original_m, -1
+        )
 
     # Builder functions for Float8LinearInference
     def quantize_weight(self, dtype: torch.dtype = e4m3_dtype) -> None:
@@ -124,7 +155,12 @@ class Float8InferenceLinear(torch.nn.Linear):
         assert not isinstance(
             self.weight, Float8Tensor
         ), "Weight has already been quantized, cannot quantize again."
-        scale = tensor_to_scale(self.weight, dtype, self.scaling_granularity)
+
+        # For weight tensors + AxisWise we calculate scales along columns
+        dim = None
+        if self.scaling_granularity == ScalingGranularity.AxisWise:
+            dim = 1
+        scale = tensor_to_scale(self.weight, dtype, self.scaling_granularity, dim=dim)
         quantized_weight = to_fp8_no_autograd(
             self.weight, scale, dtype, self.forward_config
         )
@@ -143,6 +179,7 @@ class Float8InferenceLinear(torch.nn.Linear):
         module: nn.Module,
         quant_config: QuantConfig,
         use_fast_accum: bool,
+        scaling_granularity: Optional[ScalingGranularity],
     ) -> "Float8InferenceLinear":
         """
         Create an nn.Linear with fp8 compute from another nn.Linear
@@ -150,12 +187,12 @@ class Float8InferenceLinear(torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             quant_config (QuantConfig): Configuration for the weight and activation casting
+            use_fast_accum (bool): Whether to enable fast accumulation for the Float8InferenceLinear.
+            scaling_granularity: The granularity of the scale. See ScalingGranularity for more details.
         """
         forward_config = ScaledMMConfig(
             False, use_fast_accum, pad_inner_dim=config.pad_inner_dim
         )
-        # TODO: For now hardcode TensorWise scaling
-        scaling_granularity = ScalingGranularity.TensorWise
         linear = cls(
             quant_config,
             forward_config,
@@ -164,6 +201,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             module.out_features,
             False,
             device=torch.device("meta"),
+            dtype=module.weight.dtype,
         )
         linear.set_weight_and_bias(module.weight, module.bias)
         linear.quantize_weight()
@@ -194,11 +232,21 @@ def cast_to_float8_e4m3_inference(
     """
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
+
+    # For input tensors + AxisWise we calculate scales along rows
+    dim = None
+    if scaling_granularity == ScalingGranularity.AxisWise:
+        dim = 1
+
     scale = (
         static_quantization_scale
         if static_quantization_scale is not None
         else tensor_to_scale(
-            inpt_tensor, e4m3_dtype, scaling_granularity, reduce_amax=reduce_amax
+            inpt_tensor,
+            e4m3_dtype,
+            scaling_granularity,
+            dim=dim,
+            reduce_amax=reduce_amax,
         )
     )
     return Float8Tensor.to_float8(
@@ -206,6 +254,7 @@ def cast_to_float8_e4m3_inference(
         scale,
         e4m3_dtype,
         mm_config=mm_config,
+        scaling_granularity=scaling_granularity,
     )
 
 
@@ -215,6 +264,7 @@ def quantize_to_float8(
     *,
     skip_fqn_list: Optional[List[str]] = None,
     use_fast_accum: bool = True,
+    scaling_granularity: Optional[ScalingGranularity] = None,
 ) -> Optional[nn.Module]:
     """
     Converts torch.nn.Linear layers in the given module to Float8InferenceLinear.
@@ -228,6 +278,7 @@ def quantize_to_float8(
         quant_config (QuantConfig): Quantization configuration for Float8 conversion.
         skip_fqn_list (List[str], optional): List of module FQNs to skip during conversion.
         use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
+        scaling_granularity: The granularity of the scale. See ScalingGranularity for more details.
 
     Returns:
         nn.Module: The modified module with applicable Linear layers converted to Float8.
@@ -237,6 +288,8 @@ def quantize_to_float8(
     """
     return swap_linear_layers(
         module,
-        lambda m: Float8InferenceLinear.from_float(m, quant_config, use_fast_accum),
+        lambda m: Float8InferenceLinear.from_float(
+            m, quant_config, use_fast_accum, scaling_granularity
+        ),
         skip_fqn_list=skip_fqn_list,
     )

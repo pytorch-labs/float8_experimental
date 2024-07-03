@@ -109,7 +109,7 @@ def to_fp8_no_autograd(
         mm_config: Defines the configuration for the scaled_mm
     """
 
-    x_scaled = x * x_scale
+    x_scaled = x * x_scale.to(dtype=x.dtype)
     bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
 
     if isinstance(bits_fp8, DTensor):
@@ -195,7 +195,9 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, tensor):
-        return tensor._data.to(tensor._orig_dtype) / tensor._scale
+        return tensor._data.to(tensor._orig_dtype) / tensor._scale.to(
+            tensor._orig_dtype
+        )
 
     @staticmethod
     def backward(ctx, g):
@@ -253,11 +255,11 @@ class Float8Tensor(torch.Tensor):
         orig_dtype: torch.dtype,
         mm_config: Optional[ScaledMMConfig],
     ):
-        assert (
-            scale.numel() == 1
-        ), "Scale should contain a single value, but got: {} elements".format(
-            scale.numel()
-        )
+        # assert (
+        #     scale.numel() == 1
+        # ), "Scale should contain a single value, but got: {} elements".format(
+        #     scale.numel()
+        # )
 
         self._data = data
         self._scale = scale
