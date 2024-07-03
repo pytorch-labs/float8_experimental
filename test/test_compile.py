@@ -299,7 +299,13 @@ def test_sync_amax_func():
     module = torch.nn.Sequential(
         nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
     )
-    float8_mod = swap_linear_with_float8_linear(module, Float8Linear)
+    float8_mod = swap_linear_with_float8_linear(
+        module,
+        Float8Linear,
+        scaling_type_x=TensorScalingType.DELAYED,
+        scaling_type_w=TensorScalingType.DELAYED,
+        scaling_type_dL_dY=TensorScalingType.DELAYED,
+    )
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
     assert cnts.frame_count == 1, "Compiled graph should have 1 frame!"
@@ -329,7 +335,13 @@ def test_sync_amax_func_cuda_graph_success():
         my_module = nn.Sequential(
             nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
         ).to("cuda")
-        swap_linear_with_float8_linear(my_module, Float8Linear)
+        swap_linear_with_float8_linear(
+            my_module,
+            Float8Linear,
+            scaling_type_x=TensorScalingType.DELAYED,
+            scaling_type_w=TensorScalingType.DELAYED,
+            scaling_type_dL_dY=TensorScalingType.DELAYED,
+        )
         inpt = torch.randn(
             16, 16, device="cuda", dtype=torch.float32, requires_grad=True
         )
