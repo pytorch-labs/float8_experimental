@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error
@@ -193,7 +193,10 @@ class TestFP8TrainToFP8LinearInference:
         fp8_mlp.reset_parameters()
         swap_linear_with_float8_linear(
             fp8_mlp,
-            Float8DynamicLinear,
+            Float8Linear,
+            scaling_type_x=TensorScalingType.DYNAMIC,
+            scaling_type_w=TensorScalingType.DYNAMIC,
+            scaling_type_dL_dY=TensorScalingType.DYNAMIC,
         )
 
         # Train the model
@@ -210,12 +213,15 @@ class TestFP8TrainToFP8LinearInference:
         # Reset buffer position to the beginning
         buffer.seek(0)
 
-        # Later on you load the model, will be w/ Float8DynamicLinear on meta device
+        # Later on you load the model, will be w/ Float8Linear on meta device
         with torch.device("meta"):
             new_fp8_mlp = FeedForward().to(dtype=dtype)
             swap_linear_with_float8_linear(
                 new_fp8_mlp,
-                Float8DynamicLinear,
+                Float8Linear,
+                scaling_type_x=TensorScalingType.DYNAMIC,
+                scaling_type_w=TensorScalingType.DYNAMIC,
+                scaling_type_dL_dY=TensorScalingType.DYNAMIC,
             )
 
         # Load the actual data
