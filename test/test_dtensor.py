@@ -291,12 +291,12 @@ if __name__ == "__main__":
     # cases in the main func.
     device_mesh = setup_distributed()
     tests = [
-        # test_scaled_mm,
-        # test_fp8_redistribute,
-        # test_dtensor_cast_to_fp8,
-        # test_dtensor_fp8_autograd,
+        test_scaled_mm,
+        test_fp8_redistribute,
+        test_dtensor_cast_to_fp8,
+        test_dtensor_fp8_autograd,
         test_fp8_mlp_tensor_parallelism_base,
-        # test_fp8_mlp_tensor_parallelism_compile,
+        test_fp8_mlp_tensor_parallelism_compile,
     ]
 
     for test in tqdm(tests, desc="Running tests"):
