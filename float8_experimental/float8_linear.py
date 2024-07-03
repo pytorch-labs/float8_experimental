@@ -18,6 +18,7 @@ import torch
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     ScaledMMConfig,
+    ScalingStrategy,
     to_fp8_no_autograd,
 )
 
@@ -75,11 +76,13 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         scale_fn_name,
         is_amax_initialized,
         mm_config: ScaledMMConfig,
+        scaling_strategy: ScalingStrategy,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
         ctx.mm_config = mm_config
+        ctx.scaling_strategy = scaling_strategy
         return tensor
 
     @staticmethod
@@ -102,9 +105,13 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
 
         res = to_fp8_no_autograd(
-            go, fp8_scale_dL_dY, e5m2_dtype, mm_config=ctx.mm_config
+            go,
+            fp8_scale_dL_dY,
+            e5m2_dtype,
+            mm_config=ctx.mm_config,
+            scaling_strategy=ctx.scaling_strategy,
         )
-        empty_grads = None, None, None, None, None, None
+        empty_grads = None, None, None, None, None, None, None
         return res, *empty_grads
 
 
@@ -149,6 +156,9 @@ class Float8Linear(torch.nn.Linear):
         # Defines the behavior of the matmul in the forward and backward pass
         self.forward_config = ScaledMMConfig()
         self.backward_config = ScaledMMConfig()
+
+        # Defines the scaling strategy for the forward and backwards pass
+        self.scaling_strategy = ScalingStrategy.TensorWise
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -288,6 +298,7 @@ class Float8Linear(torch.nn.Linear):
             scale_fn_name,
             self.is_amax_initialized,
             self.backward_config,
+            self.scaling_strategy,
         )
         return y
 
@@ -353,4 +364,6 @@ class Float8Linear(torch.nn.Linear):
         new_mod.backward_config = ScaledMMConfig(
             emulate, False, False, config.pad_inner_dim
         )
+        # TODO: For now hardcode TensorWise scaling
+        new_mod.scaling_strategy = ScalingStrategy.TensorWise
         return new_mod

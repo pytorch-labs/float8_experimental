@@ -19,7 +19,11 @@ from float8_experimental.float8_dynamic_linear import (
     NoopFwToFloat8E5M2Bw,
 )
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    ScaledMMConfig,
+    ScalingStrategy,
+)
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
@@ -163,7 +167,7 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     )
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
-    out = NoopFwToFloat8E5M2Bw.apply(out, ScaledMMConfig())
+    out = NoopFwToFloat8E5M2Bw.apply(out, ScaledMMConfig(), ScalingStrategy.TensorWise)
     assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
     loss = torch.sum(torch.abs(out - dist_target))
     loss.backward()

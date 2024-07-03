@@ -124,6 +124,7 @@ class TestFloat8Tensor(unittest.TestCase):
             scale_a,
             torch.bfloat16,
             fp8_a._mm_config,
+            fp8_a._scaling_strategy,
         )
         fp8_b.copy_(fp8_a)
         torch.testing.assert_close(fp8_a._data, fp8_b._data)

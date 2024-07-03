@@ -19,6 +19,7 @@ from float8_experimental.float8_tensor import (
     Float8Tensor,
     merge_mm_configs,
     ScaledMMConfig,
+    ScalingStrategy,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
@@ -36,21 +37,29 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        tensor,
+        tensor: torch.Tensor,
         mm_config: ScaledMMConfig,
+        scaling_strategy: ScalingStrategy,
     ):
+        print(f"{mm_config=}")
+        print(f"{scaling_strategy=}")
         ctx.mm_config = mm_config
+        ctx.scaling_strategy = scaling_strategy
         return tensor
 
     @staticmethod
-    def backward(ctx, gradY):
+    def backward(ctx, gradY: torch.Tensor):
         if tensor_already_casted_to_fp8(gradY):
             return gradY, None
         gradY_scale = tensor_to_scale(gradY, e5m2_dtype)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, e5m2_dtype, mm_config=ctx.mm_config
+            gradY,
+            gradY_scale,
+            e5m2_dtype,
+            mm_config=ctx.mm_config,
+            scaling_strategy=ctx.scaling_strategy,
         )
-        return fp8_tensor, None
+        return fp8_tensor, None, None
 
 
 class Float8DynamicLinear(torch.nn.Linear):
@@ -63,13 +72,15 @@ class Float8DynamicLinear(torch.nn.Linear):
         super().__init__(**super_kwargs)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        x_fp8 = cast_to_float8_e4m3fn(input, self.forward_config)
+        x_fp8 = cast_to_float8_e4m3fn(input, self.forward_config, self.scaling_strategy)
         if isinstance(self.weight, Float8Tensor):  # cast by FSDP
             w_fp8 = self.weight
         else:
-            w_fp8 = cast_to_float8_e4m3fn(self.weight, self.forward_config)
+            w_fp8 = cast_to_float8_e4m3fn(
+                self.weight, self.forward_config, self.scaling_strategy
+            )
         y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
-        y = cast_to_float8_e5m2_bw(y, self.backward_config)
+        y = cast_to_float8_e5m2_bw(y, self.backward_config, self.scaling_strategy)
         return y
 
     @classmethod
@@ -101,6 +112,9 @@ class Float8DynamicLinear(torch.nn.Linear):
             fp8_output=False,
             pad_inner_dim=config.pad_inner_dim,
         )
+        # TODO: For now hardcode TensorWise scaling
+        new_mod.scaling_strategy = ScalingStrategy.TensorWise
+
         if config.enable_fsdp_fp8_all_gather:
             new_mod.weight = nn.Parameter(
                 WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
@@ -112,18 +126,27 @@ class Float8DynamicLinear(torch.nn.Linear):
 
 
 def cast_to_float8_e4m3fn(
-    inpt_tensor: torch.Tensor, mm_config: ScaledMMConfig, reduce_amax: bool = False
+    inpt_tensor: torch.Tensor,
+    mm_config: ScaledMMConfig,
+    scaling_strategy: ScalingStrategy,
+    reduce_amax: bool = False,
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
     scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
-    return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
+    return Float8Tensor.to_float8(
+        inpt_tensor,
+        scale,
+        e4m3_dtype,
+        mm_config=mm_config,
+        scaling_strategy=scaling_strategy,
+    )
 
 
 def cast_to_float8_e5m2_bw(
-    gradY: torch.Tensor, mm_config: ScaledMMConfig
+    gradY: torch.Tensor, mm_config: ScaledMMConfig, scaling_strategy: ScalingStrategy
 ) -> torch.Tensor:
-    return NoopFwToFloat8E5M2Bw.apply(gradY, mm_config)
+    return NoopFwToFloat8E5M2Bw.apply(gradY, mm_config, scaling_strategy)
 
 
 # FSDP pads its local tensor on dim-0. The subclass should be preserved such
