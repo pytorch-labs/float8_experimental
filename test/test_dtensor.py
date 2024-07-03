@@ -18,6 +18,7 @@ from float8_experimental.float8_dynamic_linear import (
     Float8DynamicLinear,
     NoopFwToFloat8E5M2Bw,
 )
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 from float8_experimental.float8_tensor_parallel import (
@@ -169,23 +170,37 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     loss.backward()
 
 
-def test_fp8_mlp_tensor_parallelism_base(
-    mesh: DeviceMesh, size=16, compile: bool = False
+def _test_fp8_mlp_tensor_parallelism_base(
+    mesh: DeviceMesh, size=16, compile: bool = False, use_float8_linear: bool = False
 ):
     device = mesh.device_type
+    # TODO(future): delete Float8DynamicLinear from this test once all the
+    # code is unified
+    float8_cls = Float8Linear if use_float8_linear else Float8DynamicLinear
+    extra_kwargs = {}
+    if use_float8_linear:
+        # For now, just use Float8Linear with dynamic scaling, which is the
+        # same behavior as Float8Linear.
+        # TODO(future): add support for float8 all-gather with delayed scaling
+        # for activations and gradients.
+        extra_kwargs = {
+            "scaling_type_x": TensorScalingType.DYNAMIC,
+            "scaling_type_w": TensorScalingType.DYNAMIC,
+            "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+        }
 
     toy_model = ToyModel().to(device)
     toy_model_fp8 = swap_linear_with_float8_linear(
-        toy_model, Float8DynamicLinear, emulate=True
+        toy_model, float8_cls, emulate=True, **extra_kwargs
     )
 
     tp_model = copy.deepcopy(toy_model)
     tp_model = swap_linear_with_float8_linear(
-        tp_model, Float8DynamicLinear, emulate=True
+        tp_model, float8_cls, emulate=True, **extra_kwargs
     )
     sp_model = copy.deepcopy(toy_model)
     sp_model = swap_linear_with_float8_linear(
-        sp_model, Float8DynamicLinear, emulate=True
+        sp_model, float8_cls, emulate=True, **extra_kwargs
     )
 
     # vanilla TP
@@ -218,7 +233,7 @@ def test_fp8_mlp_tensor_parallelism_base(
     # PrepareFloat8ModuleInput with specific submodule fqn
     sp_model2 = copy.deepcopy(toy_model)
     sp_model2 = swap_linear_with_float8_linear(
-        sp_model2, Float8DynamicLinear, emulate=True
+        sp_model2, Float8DynamicLinear, emulate=True, **extra_kwargs
     )
 
     sp_model2 = parallelize_module(
@@ -271,8 +286,28 @@ def test_fp8_mlp_tensor_parallelism_base(
     )
 
 
+def test_fp8_mlp_tensor_parallelism_eager(mesh: DeviceMesh, size=16):
+    _test_fp8_mlp_tensor_parallelism_base(
+        mesh, size, compile=False, use_float8_linear=False
+    )
+
+
+def test_fp8_mlp_tensor_parallelism_eager_float8_linear(mesh: DeviceMesh, size=16):
+    _test_fp8_mlp_tensor_parallelism_base(
+        mesh, size, compile=False, use_float8_linear=True
+    )
+
+
 def test_fp8_mlp_tensor_parallelism_compile(mesh: DeviceMesh, size=16):
-    test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
+    _test_fp8_mlp_tensor_parallelism_base(
+        mesh, size, compile=True, use_float8_linear=False
+    )
+
+
+def test_fp8_mlp_tensor_parallelism_compile_float8_linear(mesh: DeviceMesh, size=16):
+    _test_fp8_mlp_tensor_parallelism_base(
+        mesh, size, compile=True, use_float8_linear=True
+    )
 
 
 if __name__ == "__main__":
@@ -285,8 +320,10 @@ if __name__ == "__main__":
         test_fp8_redistribute,
         test_dtensor_cast_to_fp8,
         test_dtensor_fp8_autograd,
-        test_fp8_mlp_tensor_parallelism_base,
+        test_fp8_mlp_tensor_parallelism_eager,
+        test_fp8_mlp_tensor_parallelism_eager_float8_linear,
         test_fp8_mlp_tensor_parallelism_compile,
+        test_fp8_mlp_tensor_parallelism_compile_float8_linear,
     ]
 
     for test in tqdm(tests, desc="Running tests"):

@@ -4,6 +4,7 @@ from float8_experimental.float8_dynamic_linear import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
 )
+from float8_experimental.float8_linear import TensorScalingType
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
@@ -19,7 +20,17 @@ from torch.distributed.tensor.parallel import (
 # here is that in input/output handling we do casting after
 # creating the DTensor.
 
-# NOTE: This only works and tested with the DynamicLinear
+# NOTE: This only works and tested with the dynamic scaling
+# (Float8DynamicLinear and Float8Linear with dynamic scaling for all tensors)
+
+
+def _float8_linear_supports_float8_allgather(m):
+    # TODO(future): add support for delayed scaling for activations
+    # and gradients
+    return (
+        m.scaling_type_x == TensorScalingType.DYNAMIC
+        and m.scaling_type_dL_dY == TensorScalingType.DYNAMIC
+    )
 
 
 class Float8ColwiseParallel(ColwiseParallel):
@@ -61,11 +72,16 @@ class Float8ColwiseParallel(ColwiseParallel):
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+        from float8_experimental.float8_linear import Float8Linear
 
-        if not isinstance(module, Float8DynamicLinear):
+        if not isinstance(module, (Float8DynamicLinear, Float8Linear)):
             raise ValueError(
-                f"Expecting module to be Float8DynamicLinear but found {type(module)}"
+                f"Expecting module to be Float8DynamicLinear or Float8Linear but found {type(module)}"
             )
+        elif isinstance(
+            module, Float8Linear
+        ) and not _float8_linear_supports_float8_allgather(module):
+            raise AssertionError("unsupported")
 
         return super()._apply(module, device_mesh)
 
@@ -107,11 +123,16 @@ class Float8RowwiseParallel(RowwiseParallel):
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+        from float8_experimental.float8_linear import Float8Linear
 
-        if not isinstance(module, Float8DynamicLinear):
+        if not isinstance(module, (Float8DynamicLinear, Float8Linear)):
             raise ValueError(
-                f"Expecting module to be Float8DynamicLinear but found {type(module)}"
+                f"Expecting module to be Float8DynamicLinear or Float8Linear but found {type(module)}"
             )
+        elif isinstance(
+            module, Float8Linear
+        ) and not _float8_linear_supports_float8_allgather(module):
+            raise AssertionError("unsupported")
 
         return super()._apply(module, device_mesh)
 
@@ -184,22 +205,23 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
+        from float8_experimental.float8_linear import Float8Linear
 
         fwd_linear_config = None
         if self.fwd_config_submodule_fqn is not None:
             fwd_linear = module.get_submodule(self.fwd_config_submodule_fqn)
-            assert isinstance(fwd_linear, Float8DynamicLinear)
+            assert isinstance(fwd_linear, (Float8DynamicLinear, Float8Linear))
             fwd_linear_config = fwd_linear.forward_config
         else:
             # search for ScaledMM configs for all the submodules and make sure they are the same
             for mod in module.modules():
-                if isinstance(mod, Float8DynamicLinear):
+                if isinstance(mod, (Float8DynamicLinear, Float8Linear)):
                     if fwd_linear_config is None:
                         fwd_linear_config = mod.forward_config
                     else:
                         assert (
                             fwd_linear_config == mod.forward_config
-                        ), "All the Float8DynamicLinear modules should have same forward config!"
+                        ), "All the Float8DynamicLinear and Float8Linear modules should have same forward config!"
 
         self.fwd_linear_config = fwd_linear_config
         super()._apply(module, device_mesh)
