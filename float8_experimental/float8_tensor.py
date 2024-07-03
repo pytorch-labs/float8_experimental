@@ -239,13 +239,7 @@ class Float8Tensor(torch.Tensor):
         mm_config: Optional[ScaledMMConfig],
         scaling_strategy: Optional[ScalingStrategy],
     ):
-        assert (
-            scale.numel() == 1
-        ), "Scale should contain a single value, but got: {} elements".format(
-            scale.numel()
-        )
-
-        self = torch.Tensor._make_wrapper_subclass(
+        return torch.Tensor._make_wrapper_subclass(
             cls,
             data.size(),
             strides=data.stride(),
@@ -255,6 +249,21 @@ class Float8Tensor(torch.Tensor):
             requires_grad=data.requires_grad,
             device=data.device,
         )
+
+    def __init__(
+        self,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+        orig_dtype: torch.dtype,
+        mm_config: Optional[ScaledMMConfig],
+        scaling_strategy: Optional[ScalingStrategy],
+    ):
+        assert (
+            scale.numel() == 1
+        ), "Scale should contain a single value, but got: {} elements".format(
+            scale.numel()
+        )
+
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
@@ -262,8 +271,6 @@ class Float8Tensor(torch.Tensor):
         self._scaling_strategy = (
             ScalingStrategy.TensorWise if scaling_strategy is None else scaling_strategy
         )
-
-        return self
 
     def __repr__(self):
         return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}, scaling_strategy={self._scaling_strategy}\nas_orig_prec={self.to_original_precision()}"
