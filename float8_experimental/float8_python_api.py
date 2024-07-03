@@ -51,11 +51,18 @@ def addmm_float8_unwrapped(
         )
         output += bias
         return output
+    # Weight tensors are stored in N, K format. We call tensor_to_scale(dim=0)
+    # which produces a (N, 1) Tensor. However scaled_mm syntactically expects
+    # M X K @ K X N, and scales (M, 1) and (1, N)
+    b_inverse_scale = (
+        b_inverse_scale.T if b_inverse_scale.dim() == 2 else b_inverse_scale
+    )
+
     output = torch._scaled_mm(
         a_data,
         b_data,
         scale_a=a_inverse_scale,
-        scale_b=b_inverse_scale.T,
+        scale_b=b_inverse_scale,
         bias=bias,
         scale_result=output_scale,
         out_dtype=output_dtype,
