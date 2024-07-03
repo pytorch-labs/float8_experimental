@@ -274,7 +274,7 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         fp8_layers = get_float8_layers(model)
 
     if len(fp8_layers) == 0:
-        log.warn(
+        log.warning(
             "Calling sync_float8_amax_and_scale_history on a module with no Float8Linear layers"
         )
         return

@@ -296,7 +296,7 @@ class Float8Linear(torch.nn.Linear):
         if torch.is_autocast_enabled():
             # For now, hardcode to GPU's autocast dtype
             # if we need CPU support in the future, we can add it
-            autocast_dtype = torch.get_autocast_gpu_dtype()
+            autocast_dtype = torch.get_autocast_dtype("cuda")
             x = x.to(autocast_dtype)
 
         if self.scaling_type_x is TensorScalingType.DELAYED:
