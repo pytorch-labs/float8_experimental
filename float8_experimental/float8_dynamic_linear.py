@@ -41,8 +41,6 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         mm_config: ScaledMMConfig,
         scaling_strategy: ScalingStrategy,
     ):
-        print(f"{mm_config=}")
-        print(f"{scaling_strategy=}")
         ctx.mm_config = mm_config
         ctx.scaling_strategy = scaling_strategy
         return tensor
