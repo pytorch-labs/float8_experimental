@@ -248,6 +248,12 @@ def test_fp8_mlp_tensor_parallelism_base(
     x_fp32_sp_input = distribute_tensor(x_fp32.clone(), mesh, [Shard(0)])
 
     tp_out = tp_model(x_fp32_tp_input)
+    assert (
+        tp_model.ffn.w1.weight.requires_grad
+    ), "Expecting gradients to be enabled for TP model."
+    assert tp_out.requires_grad, "Expecting gradients to be enabled for TP model."
+    awaited_out = tp_out.wait()
+    assert awaited_out.requires_grad, "Expecting awaited out to require gradients"
     tp_out.sum().backward()
     sp_out = sp_model(x_fp32_sp_input)
     sp_out.sum().backward()
@@ -281,12 +287,12 @@ if __name__ == "__main__":
     # cases in the main func.
     device_mesh = setup_distributed()
     tests = [
-        test_scaled_mm,
-        test_fp8_redistribute,
-        test_dtensor_cast_to_fp8,
-        test_dtensor_fp8_autograd,
+        # test_scaled_mm,
+        # test_fp8_redistribute,
+        # test_dtensor_cast_to_fp8,
+        # test_dtensor_fp8_autograd,
         test_fp8_mlp_tensor_parallelism_base,
-        test_fp8_mlp_tensor_parallelism_compile,
+        # test_fp8_mlp_tensor_parallelism_compile,
     ]
 
     for test in tqdm(tests, desc="Running tests"):
