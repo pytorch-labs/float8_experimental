@@ -3,6 +3,7 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
+import copy
 import io
 import itertools
 import random
@@ -15,13 +16,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     filter_out_small_unaligned_layers,
-    get_float8_linear,
     linear_requires_sync,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -149,24 +147,20 @@ class TestFloat8Linear:
         self,
         x,
         m_ref,
-        linear_type: LinearType,
         emulate: bool,
         scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
     ):
-        m_fp8 = get_float8_linear(
-            linear_type,
-            m_ref,
+        m_fp8 = Float8Linear.from_float(
+            copy.deepcopy(m_ref),
             emulate,
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
         )
         for _ in range(2):
-            if linear_requires_sync(
-                linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-            ):
+            if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
                 sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)
             y_fp8.sum().backward()
@@ -184,9 +178,7 @@ class TestFloat8Linear:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        if linear_requires_sync(
-            linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-        ):
+        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
             # only check buffers that are actually used, based on per-tensor
             # scaling settings
             amax_buffer_names = []
@@ -231,7 +223,6 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
@@ -245,7 +236,6 @@ class TestFloat8Linear:
     def test_linear_nobias(
         self,
         x_shape,
-        linear_type: LinearType,
         emulate: bool,
         scaling_type_x: TensorScalingType,
         scaling_type_w: TensorScalingType,
@@ -260,25 +250,11 @@ class TestFloat8Linear:
                     f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
                 )
                 pytest.skip()
-        if linear_type is LinearType.DYNAMIC:
-            # Only test one combination of scaling types, as they are a no-op
-            # for Float8DynamicLinear. It would be cleaner to split into two
-            # tests, but IMO not worth it since Float8DynamicLinear will be
-            # deleted soon
-            is_all_dynamic = (
-                scaling_type_x is TensorScalingType.DYNAMIC
-                and scaling_type_w is TensorScalingType.DYNAMIC
-                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            )
-            if not is_all_dynamic:
-                pytest.skip()
-
         x = torch.randn(*x_shape, device="cuda")
         m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         self._test_linear_impl(
             x,
             m_ref,
-            linear_type,
             emulate,
             scaling_type_x,
             scaling_type_w,
@@ -287,7 +263,6 @@ class TestFloat8Linear:
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
@@ -304,7 +279,6 @@ class TestFloat8Linear:
     def test_linear_bias(
         self,
         x_shape,
-        linear_type: LinearType,
         scaling_type_x: TensorScalingType,
         scaling_type_w: TensorScalingType,
         scaling_type_dL_dY: TensorScalingType,
@@ -320,25 +294,11 @@ class TestFloat8Linear:
                     f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
                 )
                 pytest.skip()
-        if linear_type is LinearType.DYNAMIC:
-            # Only test one combination of scaling types, as they are a no-op
-            # for Float8DynamicLinear. It would be cleaner to split into two
-            # tests, but IMO not worth it since Float8DynamicLinear will be
-            # deleted soon
-            is_all_dynamic = (
-                scaling_type_x is TensorScalingType.DYNAMIC
-                and scaling_type_w is TensorScalingType.DYNAMIC
-                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            )
-            if not is_all_dynamic:
-                pytest.skip()
-
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
         self._test_linear_impl(
             x,
             m_ref,
-            linear_type,
             emulate,
             scaling_type_x,
             scaling_type_w,
@@ -346,14 +306,12 @@ class TestFloat8Linear:
         )
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_autocast_outputs(
         self,
-        linear_type: LinearType,
         emulate: bool,
         linear_dtype: torch.dtype,
     ):
@@ -368,49 +326,56 @@ class TestFloat8Linear:
                 pytest.skip()
 
         m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = get_float8_linear(linear_type, m_ref, emulate)
+        kwargs = {
+            "scaling_type_x": TensorScalingType.DELAYED,
+            "scaling_type_w": TensorScalingType.DELAYED,
+            "scaling_type_dL_dY": TensorScalingType.DELAYED,
+        }
+        m = Float8Linear.from_float(copy.deepcopy(m_ref), emulate, **kwargs)
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
-        if linear_requires_sync(linear_type):
+        if linear_requires_sync(**kwargs):
             sync_float8_amax_and_scale_history(m)
         y = m(x)
         assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast("cuda"):
-            if linear_requires_sync(linear_type):
+            if linear_requires_sync(**kwargs):
                 sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            if linear_requires_sync(linear_type):
+            if linear_requires_sync(**kwargs):
                 sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert (
             y.dtype == torch.bfloat16
         ), f"y.dtype is {y.dtype}, expected {torch.bfloat16}"
 
-    @pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
     @pytest.mark.parametrize(
         "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
     )
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_type_cast(
-        self, linear_type: LinearType, linear_dtype: torch.dtype, emulate: bool
-    ):
+    def test_type_cast(self, linear_dtype: torch.dtype, emulate: bool):
         emulate = (
             not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0)
         )
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        m = get_float8_linear(linear_type, m, emulate)
+        kwargs = {
+            "scaling_type_x": TensorScalingType.DYNAMIC,
+            "scaling_type_w": TensorScalingType.DYNAMIC,
+            "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+        }
+        m = Float8Linear.from_float(copy.deepcopy(m), emulate, **kwargs)
 
         # Cast the module to dtype
         m = m.to(dtype=linear_dtype)
-        if linear_requires_sync(linear_type):
+        if linear_requires_sync(**kwargs):
             # Check amax buffer types
             for key in [
                 "fp8_amax_x",
@@ -429,18 +394,21 @@ class TestFloat8Linear:
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
-        sync_float8_amax_and_scale_history(m)
+        if linear_requires_sync(**kwargs):
+            sync_float8_amax_and_scale_history(m)
         y = m(x)
         assert y.dtype == linear_dtype, f"y.dtype is {y.dtype}, expected {linear_dtype}"
 
         # autocast on
         with torch.autocast("cuda"):
-            sync_float8_amax_and_scale_history(m)
+            if linear_requires_sync(**kwargs):
+                sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert y.dtype == torch.half, f"y.dtype is {y.dtype}, expected {torch.half}"
 
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            sync_float8_amax_and_scale_history(m)
+            if linear_requires_sync(**kwargs):
+                sync_float8_amax_and_scale_history(m)
             y = m(x)
         assert (
             y.dtype == torch.bfloat16
@@ -448,9 +416,8 @@ class TestFloat8Linear:
 
     def test_repr(self):
         m = nn.Linear(32, 16)
-        m = get_float8_linear(
-            LinearType.DELAYED,
-            m,
+        m = Float8Linear.from_float(
+            copy.deepcopy(m),
             emulate=True,
             scaling_type_x=TensorScalingType.DYNAMIC,
             scaling_type_w=TensorScalingType.DELAYED,
@@ -633,26 +600,22 @@ class TestNumerics:
 
 class TestFloat8LinearUtils(unittest.TestCase):
     def test_swap_root_linear(self):
-        for module_cls, emulate in itertools.product(
-            [Float8Linear, Float8DynamicLinear], [True, False]
-        ):
+        for emulate in [True, False]:
             module = nn.Linear(3, 3)
-            module = swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
-            self.assertIsInstance(module, module_cls)
+            module = swap_linear_with_float8_linear(module, emulate=emulate)
+            self.assertIsInstance(module, Float8Linear)
             self.assertEqual(module.forward_config.emulate, emulate)
             self.assertEqual(module.backward_config.emulate, emulate)
 
     def test_swap_root_linear_with_children_raises(self):
-        for module_cls, emulate in itertools.product(
-            [Float8Linear, Float8DynamicLinear], [True, False]
-        ):
+        for emulate in [True, False]:
             module = nn.Linear(3, 3)
             module.child = nn.Sequential(nn.Linear(3, 3))
             with self.assertRaisesRegex(
                 AssertionError,
                 "Does not support a root nn.Linear with children",
             ):
-                swap_linear_with_float8_linear(module, module_cls, emulate=emulate)
+                swap_linear_with_float8_linear(module, emulate=emulate)
 
     def test_swap_submodule_linears(self):
         class MLP(nn.Module):
@@ -661,16 +624,14 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin1 = nn.Linear(dim, 4 * dim)
                 self.lin2 = nn.Linear(4 * dim, dim)
 
-        for module_cls, emulate in itertools.product(
-            [Float8Linear, Float8DynamicLinear], [True, False]
-        ):
+        for emulate in [True, False]:
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-            model = swap_linear_with_float8_linear(model, module_cls, emulate=emulate)
-            self.assertIsInstance(model[0].lin1, module_cls)
-            self.assertIsInstance(model[0].lin2, module_cls)
-            self.assertIsInstance(model[1], module_cls)
-            self.assertIsInstance(model[2].lin1, module_cls)
-            self.assertIsInstance(model[2].lin2, module_cls)
+            model = swap_linear_with_float8_linear(model, emulate=emulate)
+            self.assertIsInstance(model[0].lin1, Float8Linear)
+            self.assertIsInstance(model[0].lin2, Float8Linear)
+            self.assertIsInstance(model[1], Float8Linear)
+            self.assertIsInstance(model[2].lin1, Float8Linear)
+            self.assertIsInstance(model[2].lin2, Float8Linear)
 
     def test_swap_linears_with_filters(self):
         class MLP(nn.Module):
@@ -679,27 +640,24 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin1 = nn.Linear(dim, 4 * dim)
                 self.lin2 = nn.Linear(4 * dim, 4 * dim)
 
-        for module_cls, emulate in itertools.product(
-            [Float8Linear, Float8DynamicLinear], [True, False]
-        ):
+        for emulate in [True, False]:
             model = nn.Sequential(MLP(8), nn.Linear(32, 32), MLP(40))
             # filter out the linear layers whose shape is smaller than 32 or non-divisible by 16.
             model = swap_linear_with_float8_linear(
                 model,
-                module_cls,
                 emulate=emulate,
                 linear_layer_filter=filter_out_small_unaligned_layers(32),
             )
             # in_features=8, out_features=32, 8 is less than 32.
-            self.assertNotIsInstance(model[0].lin1, module_cls)
+            self.assertNotIsInstance(model[0].lin1, Float8Linear)
             # in_features=32, out_features=32,
-            self.assertIsInstance(model[0].lin2, module_cls)
+            self.assertIsInstance(model[0].lin2, Float8Linear)
             # in_features=32, out_features=32,
-            self.assertIsInstance(model[1], module_cls)
+            self.assertIsInstance(model[1], Float8Linear)
             # in_features=40, out_features=160, 40 is not divisible by 16.
-            self.assertNotIsInstance(model[2].lin1, module_cls)
+            self.assertNotIsInstance(model[2].lin1, Float8Linear)
             # in_features=160, out_features=160,
-            self.assertIsInstance(model[2].lin2, module_cls)
+            self.assertIsInstance(model[2].lin2, Float8Linear)
 
     def test_swap_submodule_linears_with_skip(self):
         class MLP(nn.Module):
@@ -708,20 +666,18 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin1 = nn.Linear(dim, 4 * dim)
                 self.lin2 = nn.Linear(4 * dim, dim)
 
-        for module_cls, emulate in itertools.product(
-            [Float8Linear, Float8DynamicLinear], [True, False]
-        ):
+        for emulate in [True, False]:
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
             skip_fqn_list = ["2", "0.lin2"]
             model = swap_linear_with_float8_linear(
-                model, module_cls, emulate=emulate, skip_fqn_list=skip_fqn_list
+                model, emulate=emulate, skip_fqn_list=skip_fqn_list
             )
-            self.assertIsInstance(model[0].lin1, module_cls)
-            self.assertNotIsInstance(model[0].lin2, module_cls)
+            self.assertIsInstance(model[0].lin1, Float8Linear)
+            self.assertNotIsInstance(model[0].lin2, Float8Linear)
             self.assertIsInstance(model[0].lin2, nn.Linear)
-            self.assertIsInstance(model[1], module_cls)
-            self.assertNotIsInstance(model[2].lin2, module_cls)
-            self.assertNotIsInstance(model[2].lin2, module_cls)
+            self.assertIsInstance(model[1], Float8Linear)
+            self.assertNotIsInstance(model[2].lin2, Float8Linear)
+            self.assertNotIsInstance(model[2].lin2, Float8Linear)
             self.assertIsInstance(model[2].lin1, nn.Linear)
             self.assertIsInstance(model[2].lin2, nn.Linear)
 

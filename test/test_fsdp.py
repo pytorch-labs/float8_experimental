@@ -24,7 +24,6 @@ import torch.nn as nn
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -84,7 +83,6 @@ def fsdp_main(rank, world_size, args):
     # with weights.
     swap_linear_with_float8_linear(
         model_fp8,
-        Float8Linear,
         emulate=False,
         scaling_type_w=scaling_type_w,
     )
@@ -133,7 +131,6 @@ def fsdp_main(rank, world_size, args):
         y_local = model(ref_input_local[i])
         y_local.backward(ref_grad_local[i])
         if is_fp8 and linear_requires_sync(
-            LinearType.DELAYED,
             TensorScalingType.DYNAMIC,
             scaling_type_w,
             TensorScalingType.DYNAMIC,
