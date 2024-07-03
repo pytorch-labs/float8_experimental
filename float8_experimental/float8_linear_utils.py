@@ -191,10 +191,41 @@ def swap_linear_with_float8_linear(
     skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
     linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
+    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
 ) -> Optional[nn.Module]:
+    """
+    Swaps `torch.nn.Linear` in `module` with `Float8Linear` or `Float8DynamicLinear`.
+
+    Args:
+        module: Module to modify.
+        module_cls: `Float8Linear` or `Float8DynamicLinear`.
+        from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
+        skip_fqn_list: If specified, a list of module FQNs to skip.
+        emulate: If True, emulation is used instead of hardware accelerated gemm
+        linear_layer_filter: If specified, only the linear layers
+            that pass the filter function will be swapped.
+        scaling_type_x (TensorScalingType): scaling type for `x`
+        scaling_type_w (TensorScalingType): scaling type for `w`
+        scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
+
+    Returns:
+     nn.Module: The modified module with swapped linear layers.
+    """
+    if module_cls is Float8DynamicLinear:
+        from_float = lambda m: module_cls.from_float(m, emulate=emulate)
+    else:
+        from_float = lambda m: module_cls.from_float(
+            m,
+            emulate=emulate,
+            scaling_type_x=scaling_type_x,
+            scaling_type_w=scaling_type_w,
+            scaling_type_dL_dY=scaling_type_dL_dY,
+        )
     return swap_linear_layers(
         module,
-        lambda m: module_cls.from_float(m, emulate=emulate),
+        from_float,
         skip_fqn_list=skip_fqn_list,
         linear_layer_filter=linear_layer_filter,
     )
