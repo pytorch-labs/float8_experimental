@@ -140,6 +140,9 @@ class Float8InferenceLinear(torch.nn.Linear):
             *original_m, -1
         )
 
+    def extra_repr(self):
+        return f"{super().extra_repr()},activation_casting={self.activation_casting.name},scaling_granularity={self.scaling_granularity.name}"
+
     # Builder functions for Float8LinearInference
     def quantize_weight(self, dtype: torch.dtype = e4m3_dtype) -> None:
         """This functions converts the weight to a Float8Tensor and sets its requires_grad to False.
