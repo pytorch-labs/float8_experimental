@@ -18,11 +18,9 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -206,19 +204,25 @@ def profile_function(
 def main(
     profile_path_prefix: Path,
     compile: bool = True,
-    linear_type: str = "dynamic",
-    scaling_type_x: str = "delayed",
-    scaling_type_w: str = "delayed",
-    scaling_type_dL_dY: str = "delayed",
+    scaling_type_x: str = "dynamic",
+    scaling_type_w: str = "dynamic",
+    scaling_type_dL_dY: str = "dynamic",
     model_type: str = "linear",
     dtype_filter: str = "both",
 ):
     assert model_type in ("linear", "ln_linear", "norm_ffn_norm"), "unsupported"
     assert dtype_filter in ("both", "float8", "bfloat16")
 
-    print(f"Compile is set to          | {compile}")
-    print(f"Using Linear type:         | {linear_type}")
-    print(f"model_type is set to       | {model_type}")
+    scaling_type_x = TensorScalingType(scaling_type_x)
+    scaling_type_w = TensorScalingType(scaling_type_w)
+    scaling_type_dL_dY = TensorScalingType(scaling_type_dL_dY)
+    scaling_repr = "_".join(
+        [s.short_str() for s in (scaling_type_x, scaling_type_w, scaling_type_dL_dY)]
+    )
+
+    print(f"Compile is set to       | {compile}")
+    print(f"model_type is set to    | {model_type}")
+    print(f"scaling_repr is set to  | {scaling_repr}")
 
     device = "cuda"
     ref_dtype = torch.bfloat16
@@ -249,21 +253,14 @@ def main(
 
     m_ref = m_ref.to(device).to(ref_dtype)
 
-    linear_type = LinearType[linear_type.upper()]
-    linear_cls = (
-        Float8Linear if linear_type is LinearType.DELAYED else Float8DynamicLinear
-    )
-    extra_kwargs = {}
-    scaling_type_x = TensorScalingType(scaling_type_x)
-    scaling_type_w = TensorScalingType(scaling_type_w)
-    scaling_type_dL_dY = TensorScalingType(scaling_type_dL_dY)
-    if linear_type is LinearType.DELAYED:
-        extra_kwargs["scaling_type_x"] = scaling_type_x
-        extra_kwargs["scaling_type_w"] = scaling_type_w
-        extra_kwargs["scaling_type_dL_dY"] = scaling_type_dL_dY
+    extra_kwargs = {
+        "scaling_type_x": scaling_type_x,
+        "scaling_type_w": scaling_type_w,
+        "scaling_type_dL_dY": scaling_type_dL_dY,
+    }
 
     m_float8 = copy.deepcopy(m_ref)
-    swap_linear_with_float8_linear(m_float8, linear_cls, **extra_kwargs)
+    swap_linear_with_float8_linear(m_float8, **extra_kwargs)
 
     def ref_forw_backward(x):
         out = m_ref(x)
@@ -281,9 +278,7 @@ def main(
         # inspection of the fw+bw torch.compile without the scale
         # syncing code
         # TODO(future): make this better
-        if linear_requires_sync(
-            linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-        ):
+        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
             with record_function("scale_amax_and_scales"):
                 sync_amax_history(m_float8)
         out = float8_forw(x)
@@ -345,7 +340,9 @@ def main(
         if dtype_filter != "bfloat16":
             # Profile Float8 Model
             print("profiling float8")
-            float8_suffix = f"_{model_type}_float8_compile_{compile}_{linear_type}.json"
+            float8_suffix = (
+                f"_{model_type}_float8_compile_{compile}_{scaling_repr}.json"
+            )
             float8_path = profile_path_prefix + float8_suffix
             profile_config = ProfileConfig(
                 float8_path,
