@@ -136,8 +136,6 @@ class NoopFwToFloat8E5M2BwStatic(torch.autograd.Function):
     @staticmethod
     def backward(ctx, go):
         (static_scale_dL_dY,) = ctx.saved_tensors
-        print("STATIC SCALE", static_scale_dL_dY)
-
         res = to_fp8_no_autograd(
             go, static_scale_dL_dY, e5m2_dtype, mm_config=ctx.mm_config
         )
