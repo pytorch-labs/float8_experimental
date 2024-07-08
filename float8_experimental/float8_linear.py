@@ -135,13 +135,16 @@ class DelayedScalingRecipe:
 class TensorScalingType(enum.Enum):
     DELAYED = "delayed"
     DYNAMIC = "dynamic"
+    STATIC = "static"  # note: only supported for `x`
 
     def short_str(self):
         if self is TensorScalingType.DELAYED:
             return "del"
-        else:
-            assert self is TensorScalingType.DYNAMIC
+        elif self is TensorScalingType.DYNAMIC:
             return "dyn"
+        else:
+            assert self is TensorScalingType.STATIC
+            return "sta"
 
 
 class Float8Linear(torch.nn.Linear):
@@ -154,9 +157,10 @@ class Float8Linear(torch.nn.Linear):
         """
         Additional arguments on top of `torch.nn.Linear`'s arguments:
         * `delayed_scaling_recipe`: configuration for delayed scaling
-        * `scaling_type_x`: delayed vs dynamic scaling for `x`
-        * `scaling_type_w`: delayed vs dynamic scaling for `w`
-        * `scaling_type_dL_dY`: delayed vs dynamic scaling for `dL_dY`
+        * `scaling_type_x`: dynamic/delayed/static scaling for `x`
+        * `scaling_type_w`: dynamic/delayed scaling for `w`
+        * `scaling_type_dL_dY`: dynamic/delayed scaling for `dL_dY`
+        * `static_scale_x`: static scale for `x`, requires static scaling
         """
 
         delayed_scaling_recipe = kwargs.pop(
@@ -168,18 +172,31 @@ class Float8Linear(torch.nn.Linear):
         scaling_type_x = kwargs.pop("scaling_type_x", TensorScalingType.DELAYED)
         scaling_type_w = kwargs.pop("scaling_type_w", TensorScalingType.DELAYED)
         scaling_type_dL_dY = kwargs.pop("scaling_type_dL_dY", TensorScalingType.DELAYED)
+        static_scale_x = kwargs.pop("static_scale_x", None)
         super().__init__(*args, **kwargs)
 
         # Defines the scaling behavior of x, w, dL_dY
         self.scaling_type_x = scaling_type_x
         self.scaling_type_w = scaling_type_w
+        assert self.scaling_type_w in (
+            TensorScalingType.DELAYED,
+            TensorScalingType.DYNAMIC,
+        ), "unsupported"
         self.scaling_type_dL_dY = scaling_type_dL_dY
+        assert self.scaling_type_dL_dY in (
+            TensorScalingType.DELAYED,
+            TensorScalingType.DYNAMIC,
+        ), "unsupported"
         # Convenience flag to skip code related to delayed scaling
         self.has_any_delayed_scaling = (
             self.scaling_type_x is TensorScalingType.DELAYED
             or self.scaling_type_w is TensorScalingType.DELAYED
             or self.scaling_type_dL_dY is TensorScalingType.DELAYED
         )
+
+        if static_scale_x is not None:
+            assert self.scaling_type_x is TensorScalingType.STATIC, "unsupported"
+            self.register_always_float32_buffer("static_scale_x", static_scale_x)
 
         # TODO(future): have a unique recipe per buffer instead of one per
         # module, saving implementing that until we need it.
@@ -306,9 +323,16 @@ class Float8Linear(torch.nn.Linear):
                 self.fp8_amax_x,
                 self.forward_config,
             )
-        else:
-            assert self.scaling_type_x is TensorScalingType.DYNAMIC
+        elif self.scaling_type_x is TensorScalingType.DYNAMIC:
             x_fp8 = cast_to_float8_e4m3_dynamic(x, self.forward_config)
+        else:
+            assert self.scaling_type_x is TensorScalingType.STATIC
+            x_fp8 = Float8Tensor.to_float8(
+                x,
+                self.static_scale_x,
+                e4m3_dtype,
+                mm_config=self.forward_config,
+            )
         return x_fp8
 
     def cast_w_to_float8(
@@ -417,6 +441,7 @@ class Float8Linear(torch.nn.Linear):
         scaling_type_x=TensorScalingType.DELAYED,
         scaling_type_w=TensorScalingType.DELAYED,
         scaling_type_dL_dY=TensorScalingType.DELAYED,
+        static_scale_x=None,
     ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -434,6 +459,7 @@ class Float8Linear(torch.nn.Linear):
                 scaling_type_w=scaling_type_w,
                 scaling_type_dL_dY=scaling_type_dL_dY,
                 emulate=emulate,
+                static_scale_x=static_scale_x,
             )
         if (
             scaling_type_w == TensorScalingType.DYNAMIC

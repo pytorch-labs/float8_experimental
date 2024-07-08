@@ -45,12 +45,19 @@ def _test_compile_base(
     x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
     m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
 
+    static_scale_x = None
+    if scaling_type_x is TensorScalingType.STATIC:
+        with torch.no_grad():
+            # manually set static scale to match the input
+            static_scale_x = x.abs().max().float()
+
     m_fp8 = Float8Linear.from_float(
         copy.deepcopy(m_ref),
         emulate,
         scaling_type_x,
         scaling_type_w,
         scaling_type_dL_dY,
+        static_scale_x=static_scale_x,
     )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
@@ -68,7 +75,8 @@ def _test_compile_base(
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_x",
+    [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC, TensorScalingType.STATIC],
 )
 @pytest.mark.parametrize(
     "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
@@ -102,7 +110,8 @@ def test_eager_only(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_x",
+    [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC, TensorScalingType.STATIC],
 )
 @pytest.mark.parametrize(
     "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
@@ -135,7 +144,8 @@ def test_aot_eager(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_x",
+    [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC, TensorScalingType.STATIC],
 )
 @pytest.mark.parametrize(
     "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]

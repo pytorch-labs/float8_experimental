@@ -10,6 +10,7 @@ import random
 import re
 import unittest
 import warnings
+from typing import Optional
 
 import pytest
 
@@ -151,6 +152,7 @@ class TestFloat8Linear:
         scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+        static_scale_x: Optional[torch.Tensor] = None,
     ):
         m_fp8 = Float8Linear.from_float(
             copy.deepcopy(m_ref),
@@ -158,6 +160,7 @@ class TestFloat8Linear:
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
+            static_scale_x=static_scale_x,
         )
         for _ in range(2):
             if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
@@ -224,7 +227,12 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize(
-        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_x",
+        [
+            TensorScalingType.DELAYED,
+            TensorScalingType.DYNAMIC,
+            TensorScalingType.STATIC,
+        ],
     )
     @pytest.mark.parametrize(
         "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
@@ -255,6 +263,11 @@ class TestFloat8Linear:
                 )
                 pytest.skip()
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
+        static_scale_x = None
+        if scaling_type_x is TensorScalingType.STATIC:
+            with torch.no_grad():
+                # manually set static scale to match the input
+                static_scale_x = x.abs().max().float()
         m_ref = nn.Linear(16, 32, bias=linear_bias, device="cuda", dtype=linear_dtype)
         self._test_linear_impl(
             x,
@@ -263,6 +276,7 @@ class TestFloat8Linear:
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
+            static_scale_x,
         )
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
@@ -384,7 +398,7 @@ class TestFloat8Linear:
             scaling_type_dL_dY=TensorScalingType.DYNAMIC,
         )
         s = m.__repr__()
-        assert "x:dyn,w:del,dldy:dyn" in s
+        assert "x_dyn_w_del_dldy_dyn" in s
 
 
 class TestScaledMM:
