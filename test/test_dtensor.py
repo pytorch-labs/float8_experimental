@@ -171,8 +171,7 @@ def _test_fp8_mlp_tensor_parallelism_base(
     mesh: DeviceMesh, size=16, compile: bool = False
 ):
     device = mesh.device_type
-    # For now, just use Float8Linear with dynamic scaling, which is the
-    # same behavior as Float8Linear.
+    # For now, only supports dynamic scaling of `x` and `dL_dY`.
     # TODO(future): add support for float8 all-gather with delayed scaling
     # for activations and gradients.
     extra_kwargs = {
