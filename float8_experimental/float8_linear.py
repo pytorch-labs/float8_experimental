@@ -165,9 +165,9 @@ class Float8Linear(torch.nn.Linear):
         # Amax scales should always be kept as float32.
         self.always_float32_buffers = set()
         emulate = kwargs.pop("emulate", False)
-        scaling_type_x = kwargs.pop("scaling_type_x", TensorScalingType.DELAYED)
-        scaling_type_w = kwargs.pop("scaling_type_w", TensorScalingType.DELAYED)
-        scaling_type_dL_dY = kwargs.pop("scaling_type_dL_dY", TensorScalingType.DELAYED)
+        scaling_type_x = kwargs.pop("scaling_type_x", TensorScalingType.DYNAMIC)
+        scaling_type_w = kwargs.pop("scaling_type_w", TensorScalingType.DYNAMIC)
+        scaling_type_dL_dY = kwargs.pop("scaling_type_dL_dY", TensorScalingType.DYNAMIC)
         super().__init__(*args, **kwargs)
 
         # Defines the scaling behavior of x, w, dL_dY
@@ -402,8 +402,8 @@ class Float8Linear(torch.nn.Linear):
 
     def scaling_repr(self):
         # add scaling settings without using too many characters
-        # example: "x_del_w_del_dldy_dyn"
-        return f"x_{self.scaling_type_x.short_str()}_w_{self.scaling_type_w.short_str()}_dldy_{self.scaling_type_dL_dY.short_str()}"
+        # example: "x:del,w:del,dldy:dyn"
+        return f"x:{self.scaling_type_x.short_str()},w:{self.scaling_type_w.short_str()},dldy:{self.scaling_type_dL_dY.short_str()}"
 
     def extra_repr(self):
         s = f'{super().extra_repr()}, scaling="{self.scaling_repr()}"'
@@ -414,9 +414,9 @@ class Float8Linear(torch.nn.Linear):
         cls,
         mod,
         emulate: bool = False,
-        scaling_type_x=TensorScalingType.DELAYED,
-        scaling_type_w=TensorScalingType.DELAYED,
-        scaling_type_dL_dY=TensorScalingType.DELAYED,
+        scaling_type_x=TensorScalingType.DYNAMIC,
+        scaling_type_w=TensorScalingType.DYNAMIC,
+        scaling_type_dL_dY=TensorScalingType.DYNAMIC,
     ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
