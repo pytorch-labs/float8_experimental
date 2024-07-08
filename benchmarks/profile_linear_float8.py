@@ -149,19 +149,15 @@ class NormFFNResidualNorm(nn.Module):
         return x
 
 
-class SigmoidLinearLNSigmoid(nn.Module):
+class SigmoidLinear(nn.Module):
     def __init__(self, d1, d2):
         super().__init__()
         self.sigmoid1 = nn.Sigmoid()
         self.fc = nn.Linear(d1, d2)
-        self.ln = nn.LayerNorm(d2)
-        self.sigmoid2 = nn.Sigmoid()
 
     def forward(self, x):
         x = self.sigmoid1(x)
         x = self.fc(x)
-        x = self.ln(x)
-        x = self.sigmoid2(x)
         return x
 
 
@@ -230,7 +226,7 @@ def main(
         "linear",
         "ln_linear",
         "norm_ffn_norm",
-        "sigmoid_linear_ln_sigmoid",
+        "sigmoid_linear",
     ), "unsupported"
     assert dtype_filter in ("both", "float8", "bfloat16")
 
@@ -263,9 +259,9 @@ def main(
         input_tensor = torch.randn(
             1, 8192, 4096, device=device, dtype=ref_dtype
         ).requires_grad_()
-    elif model_type == "sigmoid_linear_ln_sigmoid":
+    elif model_type == "sigmoid_linear":
         bsz, d1, d2 = 4096, 4096, 4096
-        m_ref = SigmoidLinearLNSigmoid(d1, d2)
+        m_ref = SigmoidLinear(d1, d2)
         input_tensor = torch.randn(
             bsz, d1, device=device, dtype=ref_dtype, requires_grad=True
         )
@@ -288,12 +284,6 @@ def main(
     if scaling_type_x is TensorScalingType.STATIC:
         # for now, dummy scale
         extra_kwargs["static_scale_x"] = torch.tensor(1.0, device="cuda")
-    if scaling_type_w is TensorScalingType.STATIC:
-        # for now, dummy scale
-        extra_kwargs["static_scale_w"] = torch.tensor(1.0, device="cuda")
-    if scaling_type_dL_dY is TensorScalingType.STATIC:
-        # for now, dummy scale
-        extra_kwargs["static_scale_dL_dY"] = torch.tensor(1.0, device="cuda")
 
     m_float8 = copy.deepcopy(m_ref)
     swap_linear_with_float8_linear(m_float8, **extra_kwargs)

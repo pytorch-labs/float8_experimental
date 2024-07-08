@@ -10,6 +10,7 @@ import random
 import re
 import unittest
 import warnings
+from typing import Optional
 
 import pytest
 
@@ -151,6 +152,7 @@ class TestFloat8Linear:
         scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
         scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+        static_scale_x: Optional[torch.Tensor] = None,
     ):
         m_fp8 = Float8Linear.from_float(
             copy.deepcopy(m_ref),
@@ -158,6 +160,7 @@ class TestFloat8Linear:
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
+            static_scale_x=static_scale_x,
         )
         for _ in range(2):
             if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
@@ -224,7 +227,12 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize(
-        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_x",
+        [
+            TensorScalingType.DELAYED,
+            TensorScalingType.DYNAMIC,
+            TensorScalingType.STATIC,
+        ],
     )
     @pytest.mark.parametrize(
         "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
@@ -255,6 +263,16 @@ class TestFloat8Linear:
                 )
                 pytest.skip()
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
+        static_scale_x = None
+        if scaling_type_x is TensorScalingType.STATIC:
+            if not (
+                scaling_type_w is TensorScalingType.DYNAMIC
+                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
+            ):
+                pytest.skip("skipping combination to reduce number of tests")
+            with torch.no_grad():
+                # manually set static scale to match the input
+                static_scale_x = x.abs().max().float()
         m_ref = nn.Linear(16, 32, bias=linear_bias, device="cuda", dtype=linear_dtype)
         self._test_linear_impl(
             x,
@@ -263,67 +281,8 @@ class TestFloat8Linear:
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
+            static_scale_x,
         )
-
-    @pytest.mark.parametrize("static_scale_tensor", ["x", "w", "dL_dY"])
-    # @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
-    @pytest.mark.parametrize("emulate", [False])
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_static_scaling(self, emulate, static_scale_tensor):
-        # Static scaling is only applicable for tensors with a bounded
-        # range. For now, test it in isolation instead of unifying the code
-        # with dynamic/delayed testing and significantly increasing the test
-        # complexity.
-
-        linear_dtype = torch.bfloat16
-        x = torch.randn(16, 16, device="cuda", dtype=linear_dtype)
-
-        if static_scale_tensor == "x":
-            m_ref = nn.Sequential(nn.Sigmoid(), nn.Linear(16, 16), nn.Identity())
-            # sigmoid range is (0, 1)
-            static_scale_x = torch.tensor(1.0, device="cuda")
-            kwargs = {
-                "scaling_type_x": TensorScalingType.STATIC,
-                "static_scale_x": static_scale_x,
-            }
-        elif static_scale_tensor == "w":
-            m_ref = nn.Sequential(nn.Identity(), nn.Linear(16, 16), nn.Identity())
-            # calculate the weight scale manually, only valid until the first
-            # grad update
-            with torch.no_grad():
-                static_scale_w = m_ref[1].weight.abs().max().cuda()
-            kwargs = {
-                "scaling_type_w": TensorScalingType.STATIC,
-                "static_scale_w": static_scale_w,
-            }
-        else:
-            assert static_scale_tensor == "dL_dY"
-            m_ref = nn.Sequential(nn.Identity(), nn.Linear(16, 16), nn.Sigmoid())
-            # derivative of sigmoid has a max value of 0.5^2 = 0.25
-            static_scale_dL_dY = torch.tensor(0.25, device="cuda")
-            kwargs = {
-                "scaling_type_dL_dY": TensorScalingType.STATIC,
-                "static_scale_dL_dY": static_scale_dL_dY,
-            }
-
-        m_ref = m_ref.to(linear_dtype).cuda()
-        m_fp8 = copy.deepcopy(m_ref)
-        swap_linear_with_float8_linear(
-            m_fp8,
-            emulate=emulate,
-            **kwargs,
-        )
-
-        y_ref = m_ref(x)
-        y_ref.sum().backward()
-
-        y_fp8 = m_fp8(x)
-        y_fp8.sum().backward()
-
-        y_sqnr = compute_error(y_ref, y_fp8)
-        g_sqnr = compute_error(m_ref[1].weight.grad, m_fp8[1].weight.grad)
-        assert y_sqnr >= 20.0, f"y_sqnr {y_sqnr} too low!"
-        assert g_sqnr >= 20.0, f"g_sqnr {g_sqnr} too low!"
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize(
@@ -444,7 +403,7 @@ class TestFloat8Linear:
             scaling_type_dL_dY=TensorScalingType.DYNAMIC,
         )
         s = m.__repr__()
-        assert "x:dyn,w:del,dldy:dyn" in s
+        assert "x_dyn_w_del_dldy_dyn" in s
 
 
 class TestScaledMM:

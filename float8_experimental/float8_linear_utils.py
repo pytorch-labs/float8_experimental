@@ -155,8 +155,6 @@ def swap_linear_with_float8_linear(
     scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
     static_scale_x: Optional[float] = None,
-    static_scale_w: Optional[float] = None,
-    static_scale_dL_dY: Optional[float] = None,
 ) -> Optional[nn.Module]:
     """
     Swaps `torch.nn.Linear` in `module` with `Float8Linear`.
@@ -171,8 +169,6 @@ def swap_linear_with_float8_linear(
         scaling_type_w (TensorScalingType): scaling type for `w`
         scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
         static_scale_x: static scale for `x`
-        static_scale_w: static scale for `w`
-        static_scale_dL_dY: static scale for `dL_dY`
 
     Returns:
      nn.Module: The modified module with swapped linear layers.
@@ -184,8 +180,6 @@ def swap_linear_with_float8_linear(
         scaling_type_w=scaling_type_w,
         scaling_type_dL_dY=scaling_type_dL_dY,
         static_scale_x=static_scale_x,
-        static_scale_w=static_scale_w,
-        static_scale_dL_dY=static_scale_dL_dY,
     )
     return swap_linear_layers(
         module,
