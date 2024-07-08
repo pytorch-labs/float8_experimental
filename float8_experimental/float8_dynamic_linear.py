@@ -149,8 +149,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             dtype=tensor.dtype,
             layout=tensor.layout,
             device=tensor.device,
-            pin_memory=False,
-            # pin_memory=tensor.is_pinned(),
+            pin_memory=tensor.is_pinned(),
             requires_grad=tensor.requires_grad,
         )
 
@@ -206,7 +205,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config}, pre_computed_amax={self._pre_computed_amax})"
+        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
         if self._pre_computed_amax is not None:
