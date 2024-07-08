@@ -218,16 +218,17 @@ class Float8Linear(torch.nn.Linear):
             or self.scaling_type_dL_dY is TensorScalingType.DELAYED
         )
 
-        # TODO(future): if needed, add serializations for scalars below
         if static_scale_x is not None:
             assert self.scaling_type_x is TensorScalingType.STATIC, "unsupported"
-            self.static_scale_x_scalar = static_scale_x
+            self.register_always_float32_buffer("static_scale_x", static_scale_x)
         if static_scale_w is not None:
             assert self.scaling_type_w is TensorScalingType.STATIC, "unsupported"
-            self.static_scale_w_scalar = static_scale_w
+            self.register_always_float32_buffer("static_scale_w", static_scale_w)
         if static_scale_dL_dY is not None:
             assert self.scaling_type_dL_dY is TensorScalingType.STATIC, "unsupported"
-            self.static_scale_dL_dY_scalar = static_scale_dL_dY
+            self.register_always_float32_buffer(
+                "static_scale_dL_dY", static_scale_dL_dY
+            )
 
         # TODO(future): have a unique recipe per buffer instead of one per
         # module, saving implementing that until we need it.
@@ -306,24 +307,6 @@ class Float8Linear(torch.nn.Linear):
             )
             self.register_always_float32_buffer(
                 "fp8_scale_dL_dY", torch.tensor([1.0], device=device)
-            )
-
-        # TODO(before land): good error message if user specified static scale type
-        # but did not provide a value
-        if self.scaling_type_x is TensorScalingType.STATIC:
-            self.register_always_float32_buffer(
-                "static_scale_x",
-                torch.tensor([self.static_scale_x_scalar], device=device),
-            )
-        if self.scaling_type_w is TensorScalingType.STATIC:
-            self.register_always_float32_buffer(
-                "static_scale_w",
-                torch.tensor([self.static_scale_w_scalar], device=device),
-            )
-        if self.scaling_type_dL_dY is TensorScalingType.STATIC:
-            self.register_always_float32_buffer(
-                "static_scale_dL_dY",
-                torch.tensor([self.static_scale_dL_dY_scalar], device=device),
             )
 
     def register_always_float32_buffer(

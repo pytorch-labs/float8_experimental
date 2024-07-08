@@ -287,13 +287,13 @@ def main(
     }
     if scaling_type_x is TensorScalingType.STATIC:
         # for now, dummy scale
-        extra_kwargs["static_scale_x"] = 1.0
+        extra_kwargs["static_scale_x"] = torch.tensor(1.0, device="cuda")
     if scaling_type_w is TensorScalingType.STATIC:
         # for now, dummy scale
-        extra_kwargs["static_scale_w"] = 1.0
+        extra_kwargs["static_scale_w"] = torch.tensor(1.0, device="cuda")
     if scaling_type_dL_dY is TensorScalingType.STATIC:
         # for now, dummy scale
-        extra_kwargs["static_scale_dL_dY"] = 1.0
+        extra_kwargs["static_scale_dL_dY"] = torch.tensor(1.0, device="cuda")
 
     m_float8 = copy.deepcopy(m_ref)
     swap_linear_with_float8_linear(m_float8, **extra_kwargs)
