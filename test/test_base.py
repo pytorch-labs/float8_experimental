@@ -265,11 +265,6 @@ class TestFloat8Linear:
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         static_scale_x = None
         if scaling_type_x is TensorScalingType.STATIC:
-            if not (
-                scaling_type_w is TensorScalingType.DYNAMIC
-                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            ):
-                pytest.skip("skipping combination to reduce number of tests")
             with torch.no_grad():
                 # manually set static scale to match the input
                 static_scale_x = x.abs().max().float()
