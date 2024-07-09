@@ -114,6 +114,9 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     ):
         self._tensor = tensor
         self._mm_config = mm_config
+        # for dynamic scaling
+        # `precompute_float8_amax_for_fsdp` calculates amax
+        # for all float8 parameters after optimizer step
         self._pre_computed_amax = amax
 
     @classmethod
