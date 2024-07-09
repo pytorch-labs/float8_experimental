@@ -13,15 +13,14 @@ import pytest
 
 import torch
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     get_float8_layers,
-    get_float8_linear,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_utils import e4m3_dtype
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -33,7 +32,9 @@ def _test_compile_base(
     backend: str,
     fullgraph: bool,
     emulate: bool,
-    linear_type: LinearType,
+    scaling_type_x,
+    scaling_type_w,
+    scaling_type_dL_dY,
     dtype: torch.dtype,
 ):
     random.seed(0)
@@ -44,7 +45,13 @@ def _test_compile_base(
     x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
     m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
 
-    m_fp8 = get_float8_linear(linear_type, m_ref, emulate)
+    m_fp8 = Float8Linear.from_float(
+        copy.deepcopy(m_ref),
+        emulate,
+        scaling_type_x,
+        scaling_type_w,
+        scaling_type_dL_dY,
+    )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
     m_ref = torch.compile(m_ref, backend=backend, fullgraph=fullgraph)
@@ -60,48 +67,102 @@ def _test_compile_base(
 
 
 @pytest.mark.parametrize("fullgraph", [True])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+@pytest.mark.parametrize(
+    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_eager_only(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
+    scaling_type_x: TensorScalingType,
+    scaling_type_w: TensorScalingType,
+    scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base("eager", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "eager",
+        fullgraph,
+        emulate,
+        scaling_type_x,
+        scaling_type_w,
+        scaling_type_dL_dY,
+        dtype,
+    )
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+@pytest.mark.parametrize(
+    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_aot_eager(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
+    scaling_type_x: TensorScalingType,
+    scaling_type_w: TensorScalingType,
+    scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base("aot_eager", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "aot_eager",
+        fullgraph,
+        emulate,
+        scaling_type_x,
+        scaling_type_w,
+        scaling_type_dL_dY,
+        dtype,
+    )
 
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
+@pytest.mark.parametrize(
+    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
+@pytest.mark.parametrize(
+    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+)
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_inductor(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
+    scaling_type_x: TensorScalingType,
+    scaling_type_w: TensorScalingType,
+    scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
-    _test_compile_base("inductor", fullgraph, emulate, linear_type, dtype)
+    _test_compile_base(
+        "inductor",
+        fullgraph,
+        emulate,
+        scaling_type_x,
+        scaling_type_w,
+        scaling_type_dL_dY,
+        dtype,
+    )
 
 
 class TestGraphBreaks(DynamoTestCase):
@@ -116,7 +177,7 @@ class TestGraphBreaks(DynamoTestCase):
             x_fp8 = Float8Tensor.to_float8(
                 x,
                 self.fp8_scale_x,
-                torch.float8_e4m3fn,
+                e4m3_dtype,
                 self.fp8_amax_x,
                 ScaledMMConfig(),
             )
@@ -194,7 +255,12 @@ def test_sync_amax_func():
     module = torch.nn.Sequential(
         nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
     )
-    float8_mod = swap_linear_with_float8_linear(module, Float8Linear)
+    float8_mod = swap_linear_with_float8_linear(
+        module,
+        scaling_type_x=TensorScalingType.DELAYED,
+        scaling_type_w=TensorScalingType.DELAYED,
+        scaling_type_dL_dY=TensorScalingType.DELAYED,
+    )
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
     assert cnts.frame_count == 1, "Compiled graph should have 1 frame!"
@@ -224,7 +290,12 @@ def test_sync_amax_func_cuda_graph_success():
         my_module = nn.Sequential(
             nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
         ).to("cuda")
-        swap_linear_with_float8_linear(my_module, Float8Linear)
+        swap_linear_with_float8_linear(
+            my_module,
+            scaling_type_x=TensorScalingType.DELAYED,
+            scaling_type_w=TensorScalingType.DELAYED,
+            scaling_type_dL_dY=TensorScalingType.DELAYED,
+        )
         inpt = torch.randn(
             16, 16, device="cuda", dtype=torch.float32, requires_grad=True
         )

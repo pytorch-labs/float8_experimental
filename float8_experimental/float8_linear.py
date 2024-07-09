@@ -4,15 +4,11 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 """
-A simple manual UEX for a float8 version of `torch.nn.Linear`.
-
-Note: this UEX is not intended for real usage. It merely demonstrates
-an example of how features such as casting to and from float8 as well
-as stateful scaling can be implemented. For now, we expect framework
-owners to implement their own UEX.
+A simple module swap UX for a float8 version of `torch.nn.Linear`.
 """
 
 import dataclasses
+import enum
 
 from typing import Optional
 
@@ -20,13 +16,24 @@ import float8_experimental.config as config
 
 import torch
 
+from float8_experimental.float8_dynamic_utils import (
+    cast_to_float8_e4m3_dynamic,
+    cast_to_float8_e5m2_dynamic_bw,
+    WeightWithDynamicFloat8CastTensor,
+)
+
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     ScaledMMConfig,
     to_fp8_no_autograd,
 )
 
-from float8_experimental.float8_utils import amax_history_to_scale, tensor_to_amax
+from float8_experimental.float8_utils import (
+    amax_history_to_scale,
+    e4m3_dtype,
+    e5m2_dtype,
+    tensor_to_amax,
+)
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
@@ -37,6 +44,7 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
     scale_fn_name,
     float8_dtype,
     is_initialized,
+    reduce_amax,
 ):
     """
     If x is about to be cast to `float8` and the amax buffers are not initialized,
@@ -46,8 +54,9 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
         return
     with torch.no_grad():
         # Note: we need to enable distributed reduction here in order
-        # to match numerics between single GPU and multi GPU code
-        new_amax = tensor_to_amax(x, reduce_amax=True)
+        # to match numerics between single GPU and multi GPU code for
+        # activations and gradients
+        new_amax = tensor_to_amax(x, reduce_amax=reduce_amax)
         cur_amax.fill_(new_amax)
         amax_history[0] = new_amax
         new_scale = amax_history_to_scale(
@@ -92,14 +101,15 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             fp8_amax_history_dL_dY,
             fp8_scale_dL_dY,
             scale_fn_name,
-            torch.float8_e5m2,
+            e5m2_dtype,
             is_amax_initialized,
+            reduce_amax=True,
         )
 
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
 
         res = to_fp8_no_autograd(
-            go, fp8_scale_dL_dY, torch.float8_e5m2, mm_config=ctx.mm_config
+            go, fp8_scale_dL_dY, e5m2_dtype, mm_config=ctx.mm_config
         )
         empty_grads = None, None, None, None, None, None
         return res, *empty_grads
@@ -122,47 +132,69 @@ class DelayedScalingRecipe:
         ), f"{self.scale_fn_name} is not implemented yet. Only max is supported for now."
 
 
-class Float8LinearMixin(object):
+class TensorScalingType(enum.Enum):
+    DELAYED = "delayed"
+    DYNAMIC = "dynamic"
+
+    def short_str(self):
+        if self is TensorScalingType.DELAYED:
+            return "del"
+        else:
+            assert self is TensorScalingType.DYNAMIC
+            return "dyn"
+
+
+class Float8Linear(torch.nn.Linear):
+    """
+    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
+    scales in way friendly to delayed scaling.
+    """
+
     def __init__(self, *args, **kwargs):
+        """
+        Additional arguments on top of `torch.nn.Linear`'s arguments:
+        * `delayed_scaling_recipe`: configuration for delayed scaling
+        * `scaling_type_x`: delayed vs dynamic scaling for `x`
+        * `scaling_type_w`: delayed vs dynamic scaling for `w`
+        * `scaling_type_dL_dY`: delayed vs dynamic scaling for `dL_dY`
+        """
+
         delayed_scaling_recipe = kwargs.pop(
             "delayed_scaling_recipe", DelayedScalingRecipe()
         )
         # Amax scales should always be kept as float32.
         self.always_float32_buffers = set()
+        emulate = kwargs.pop("emulate", False)
+        scaling_type_x = kwargs.pop("scaling_type_x", TensorScalingType.DELAYED)
+        scaling_type_w = kwargs.pop("scaling_type_w", TensorScalingType.DELAYED)
+        scaling_type_dL_dY = kwargs.pop("scaling_type_dL_dY", TensorScalingType.DELAYED)
         super().__init__(*args, **kwargs)
+
+        # Defines the scaling behavior of x, w, dL_dY
+        self.scaling_type_x = scaling_type_x
+        self.scaling_type_w = scaling_type_w
+        self.scaling_type_dL_dY = scaling_type_dL_dY
+        # Convenience flag to skip code related to delayed scaling
+        self.has_any_delayed_scaling = (
+            self.scaling_type_x is TensorScalingType.DELAYED
+            or self.scaling_type_w is TensorScalingType.DELAYED
+            or self.scaling_type_dL_dY is TensorScalingType.DELAYED
+        )
 
         # TODO(future): have a unique recipe per buffer instead of one per
         # module, saving implementing that until we need it.
         # TODO(future): serialization for recipes
         self.recipe = delayed_scaling_recipe
-        history_len = self.recipe.history_len
 
-        # Default values for history buffers, see above TODO
-        default_x = torch.finfo(torch.float8_e4m3fn).max
-        default_w = torch.finfo(torch.float8_e4m3fn).max
-        default_dl_dy = torch.finfo(torch.float8_e5m2).max
-
-        self.register_always_float32_buffer("fp8_amax_x", torch.tensor([default_x]))
-        self.register_always_float32_buffer(
-            "fp8_amax_history_x", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_x", torch.tensor([1.0]))
-        self.register_always_float32_buffer("fp8_amax_w", torch.tensor([default_w]))
-        self.register_always_float32_buffer(
-            "fp8_amax_history_w", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_w", torch.tensor([1.0]))
-        self.register_always_float32_buffer(
-            "fp8_amax_dL_dY", torch.tensor([default_dl_dy])
-        )
-        self.register_always_float32_buffer(
-            "fp8_amax_history_dL_dY", torch.zeros(history_len)
-        )
-        self.register_always_float32_buffer("fp8_scale_dL_dY", torch.tensor([1.0]))
+        self.create_buffers()
 
         # Defines the behavior of the matmul in the forward and backward pass
-        self.forward_config = ScaledMMConfig()
-        self.backward_config = ScaledMMConfig()
+        self.forward_config = ScaledMMConfig(
+            emulate, True if not emulate else False, False, config.pad_inner_dim
+        )
+        self.backward_config = ScaledMMConfig(
+            emulate, False, False, config.pad_inner_dim
+        )
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -177,10 +209,6 @@ class Float8LinearMixin(object):
         # update function for torch.float16
         self.last_seen_input_dtype = None
 
-        # If true, this enables TP+SP style distributed comms in TP primitives
-        # Note: this is not used in non-TP code.
-        self.use_sequence_parallel = False
-
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
         # Note that when using `config.enable_pre_and_post_forward = False`,
@@ -188,6 +216,49 @@ class Float8LinearMixin(object):
         # Otherwise, the amax buffer would never be marked as initialized and
         # would be initialized in every iteration.
         self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
+
+    def create_buffers(self):
+        # Default values for history buffers, see above TODO
+        history_len = self.recipe.history_len
+        device = self.weight.device
+        # TODO(future PR): dtype values below don't have the other float8
+        # flavors, fix it
+        default_x = torch.finfo(torch.float8_e4m3fn).max
+        default_w = torch.finfo(torch.float8_e4m3fn).max
+        default_dl_dy = torch.finfo(torch.float8_e5m2).max
+
+        # Note: for now, create all the buffers if any are needed, to postpone
+        # the work to make the scale and amax syncing and history calculation
+        # handle a heterogeneous setup. We can do that work later if benchmarks
+        # show it is worth doing.
+        if self.has_any_delayed_scaling:
+            self.register_always_float32_buffer(
+                "fp8_amax_x", torch.tensor([default_x], device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_amax_history_x", torch.zeros(history_len, device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_scale_x", torch.tensor([1.0], device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_amax_w", torch.tensor([default_w], device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_amax_history_w", torch.zeros(history_len, device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_scale_w", torch.tensor([1.0], device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_amax_dL_dY", torch.tensor([default_dl_dy], device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_amax_history_dL_dY", torch.zeros(history_len, device=device)
+            )
+            self.register_always_float32_buffer(
+                "fp8_scale_dL_dY", torch.tensor([1.0], device=device)
+            )
 
     def register_always_float32_buffer(
         self, name: str, tensor: Optional[torch.Tensor], persistent: bool = True
@@ -216,59 +287,77 @@ class Float8LinearMixin(object):
             autocast_dtype = torch.get_autocast_gpu_dtype()
             x = x.to(autocast_dtype)
 
-        scale_fn_name = self.recipe.scale_fn_name
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            x,
-            self.fp8_amax_x,
-            self.fp8_amax_history_x,
-            self.fp8_scale_x,
-            scale_fn_name,
-            torch.float8_e4m3fn,
-            is_amax_initialized,
-        )
-        x_fp8 = Float8Tensor.to_float8(
-            x,
-            self.fp8_scale_x,
-            torch.float8_e4m3fn,
-            self.fp8_amax_x,
-            self.forward_config,
-        )
+        if self.scaling_type_x is TensorScalingType.DELAYED:
+            scale_fn_name = self.recipe.scale_fn_name
+            _maybe_initialize_amaxes_scales_for_float8_cast(
+                x,
+                self.fp8_amax_x,
+                self.fp8_amax_history_x,
+                self.fp8_scale_x,
+                scale_fn_name,
+                e4m3_dtype,
+                is_amax_initialized,
+                reduce_amax=True,
+            )
+            x_fp8 = Float8Tensor.to_float8(
+                x,
+                self.fp8_scale_x,
+                e4m3_dtype,
+                self.fp8_amax_x,
+                self.forward_config,
+            )
+        else:
+            assert self.scaling_type_x is TensorScalingType.DYNAMIC
+            x_fp8 = cast_to_float8_e4m3_dynamic(x, self.forward_config)
         return x_fp8
 
     def cast_w_to_float8(
         self, w: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
-        scale_fn_name = self.recipe.scale_fn_name
-        _maybe_initialize_amaxes_scales_for_float8_cast(
-            w,
-            self.fp8_amax_w,
-            self.fp8_amax_history_w,
-            self.fp8_scale_w,
-            scale_fn_name,
-            torch.float8_e4m3fn,
-            is_amax_initialized,
-        )
+        if self.scaling_type_w is TensorScalingType.DELAYED:
+            scale_fn_name = self.recipe.scale_fn_name
+            _maybe_initialize_amaxes_scales_for_float8_cast(
+                w,
+                self.fp8_amax_w,
+                self.fp8_amax_history_w,
+                self.fp8_scale_w,
+                scale_fn_name,
+                e4m3_dtype,
+                is_amax_initialized,
+                reduce_amax=False,
+            )
 
-        w_fp8 = Float8Tensor.to_float8(
-            w,
-            self.fp8_scale_w,
-            torch.float8_e4m3fn,
-            self.fp8_amax_w,
-            self.forward_config,
-        )
+            w_fp8 = Float8Tensor.to_float8(
+                w,
+                self.fp8_scale_w,
+                e4m3_dtype,
+                self.fp8_amax_w,
+                self.forward_config,
+            )
+        else:
+            assert self.scaling_type_w is TensorScalingType.DYNAMIC
+            # TODO(future): also support FSDP integration in delayed scaling path
+            if isinstance(self.weight, Float8Tensor):  # cast by FSDP
+                w_fp8 = self.weight
+            else:
+                w_fp8 = cast_to_float8_e4m3_dynamic(self.weight, self.forward_config)
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
-        scale_fn_name = self.recipe.scale_fn_name
-        y = NoopFwToFloat8E5M2Bw.apply(
-            y,
-            self.fp8_amax_dL_dY,
-            self.fp8_amax_history_dL_dY,
-            self.fp8_scale_dL_dY,
-            scale_fn_name,
-            self.is_amax_initialized,
-            self.backward_config,
-        )
+        if self.scaling_type_dL_dY is TensorScalingType.DELAYED:
+            scale_fn_name = self.recipe.scale_fn_name
+            y = NoopFwToFloat8E5M2Bw.apply(
+                y,
+                self.fp8_amax_dL_dY,
+                self.fp8_amax_history_dL_dY,
+                self.fp8_scale_dL_dY,
+                scale_fn_name,
+                self.is_amax_initialized,
+                self.backward_config,
+            )
+        else:
+            assert self.scaling_type_dL_dY is TensorScalingType.DYNAMIC
+            y = cast_to_float8_e5m2_dynamic_bw(y, self.backward_config)
         return y
 
     def float8_pre_forward(self, x):
@@ -292,17 +381,11 @@ class Float8LinearMixin(object):
         self.is_amax_initialized = True
         self.amax_and_scale_synced = False
 
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.has_any_delayed_scaling:
+            self.float8_pre_forward(input)
 
-class Float8Linear(Float8LinearMixin, torch.nn.Linear):
-    """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
-    scales in way friendly to delayed scaling.
-    """
-
-    def forward(self, x):
-        self.float8_pre_forward(x)
-
-        x_fp8 = self.cast_x_to_float8(x, self.is_amax_initialized)
+        x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         y = torch.matmul(x_fp8, w_fp8.t())
@@ -313,11 +396,28 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
         if self.bias is not None:
             y = y + self.bias.to(y.dtype)
 
-        self.float8_post_forward()
+        if self.has_any_delayed_scaling:
+            self.float8_post_forward()
         return y
 
+    def scaling_repr(self):
+        # add scaling settings without using too many characters
+        # example: "x_del_w_del_dldy_dyn"
+        return f"x_{self.scaling_type_x.short_str()}_w_{self.scaling_type_w.short_str()}_dldy_{self.scaling_type_dL_dY.short_str()}"
+
+    def extra_repr(self):
+        s = f'{super().extra_repr()}, scaling="{self.scaling_repr()}"'
+        return s
+
     @classmethod
-    def from_float(cls, mod, emulate: bool = False):
+    def from_float(
+        cls,
+        mod,
+        emulate: bool = False,
+        scaling_type_x=TensorScalingType.DELAYED,
+        scaling_type_w=TensorScalingType.DELAYED,
+        scaling_type_dL_dY=TensorScalingType.DELAYED,
+    ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
 
@@ -325,18 +425,28 @@ class Float8Linear(Float8LinearMixin, torch.nn.Linear):
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
         """
-        # TODO Follow up! This is a great idea but we need the mixin base to create real
-        # Tensors and the Linear base to create empty params
-        # with torch.device("meta"):
-        new_mod = cls(mod.in_features, mod.out_features, bias=False)
-        new_mod.weight = mod.weight
+        with torch.device("meta"):
+            new_mod = cls(
+                mod.in_features,
+                mod.out_features,
+                bias=False,
+                scaling_type_x=scaling_type_x,
+                scaling_type_w=scaling_type_w,
+                scaling_type_dL_dY=scaling_type_dL_dY,
+                emulate=emulate,
+            )
+        if (
+            scaling_type_w == TensorScalingType.DYNAMIC
+            and config.enable_fsdp_fp8_all_gather
+        ):
+            new_mod.weight = torch.nn.Parameter(
+                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
+            )
+        else:
+            assert not config.enable_fsdp_fp8_all_gather, "unsupported"
+            new_mod.weight = mod.weight
         new_mod.bias = mod.bias
-
-        # Defines the behavior of the matmul in the forward and backward
-        # Forward we use fast_accum, backwards we do not
-        new_mod.forward_config = ScaledMMConfig(emulate, True if not emulate else False)
-        new_mod.backward_config = ScaledMMConfig(emulate, False)
-
-        # I think its okay to send all params and buffers to device
-        new_mod.to(mod.weight.device)
+        # need to create buffers again when moving from meta device to
+        # real device
+        new_mod.create_buffers()
         return new_mod

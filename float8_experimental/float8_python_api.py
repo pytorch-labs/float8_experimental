@@ -9,8 +9,7 @@ of class `Float8Tensor`. This is a thin wrapper on top of the aten API
 to simplify the product code.
 """
 
-
-from typing import Optional, Tuple
+from typing import Optional
 
 import float8_experimental.float8_aten_api  # noqa
 
@@ -31,7 +30,7 @@ def addmm_float8_unwrapped(
     output_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
     use_fast_accum: bool = False,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     This is the unwrapped version of addmm_float8, which does not take in Float8Tensors
     as inputs. This is used to standardize the logic between subclassed and non subclassed
@@ -41,25 +40,25 @@ def addmm_float8_unwrapped(
     b_inverse_scale = b_scale.reciprocal()
     if output_dtype == torch.float32 and bias is not None:
         # Bias is not supported by _scaled_mm when output is fp32
-        output, output_amax = torch._scaled_mm(
+        output = torch._scaled_mm(
             a_data,
             b_data,
-            out_dtype=output_dtype,
             scale_a=a_inverse_scale,
             scale_b=b_inverse_scale,
             scale_result=output_scale,
+            out_dtype=output_dtype,
             use_fast_accum=use_fast_accum,
         )
         output += bias
-        return output, output_amax
-    output, output_amax = torch._scaled_mm(
+        return output
+    output = torch._scaled_mm(
         a_data,
         b_data,
-        bias=bias,
-        out_dtype=output_dtype,
         scale_a=a_inverse_scale,
         scale_b=b_inverse_scale,
+        bias=bias,
         scale_result=output_scale,
+        out_dtype=output_dtype,
         use_fast_accum=use_fast_accum,
     )
-    return output, output_amax
+    return output

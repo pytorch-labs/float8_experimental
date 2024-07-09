@@ -9,7 +9,11 @@ from typing import Dict, Optional
 import torch
 
 import torch.distributed._functional_collectives as funcol
-from float8_experimental.float8_utils import tensor_to_amax, to_fp8_saturated
+from float8_experimental.float8_utils import (
+    e4m3_dtype,
+    tensor_to_amax,
+    to_fp8_saturated,
+)
 from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
@@ -19,10 +23,11 @@ aten = torch.ops.aten
 # emulate: whether to emulate the matmuls in fp32
 # use_fast_accum: whether to use the fast-accumulation option for scaled_mm
 # fp8_output: whether to output the result of the scaled_mm in fp8
+# pad_inner_dim: whether to pad the inner dimension of a and b with 0s. This is needed for matmuls not aligned to 16.
 ScaledMMConfig = namedtuple(
     "ScaledMMConfig",
-    ["emulate", "use_fast_accum", "fp8_output"],
-    defaults=[False, False, False],
+    ["emulate", "use_fast_accum", "fp8_output", "pad_inner_dim"],
+    defaults=[False, False, False, False],
 )
 
 
@@ -44,6 +49,7 @@ def merge_mm_configs(
         emulate=a_mm_config.emulate,
         use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
         fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
+        pad_inner_dim=a_mm_config.pad_inner_dim and b_mm_config.pad_inner_dim,
     )
 
 
@@ -125,7 +131,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         ctx,
         tensor: torch.Tensor,
         scale: torch.Tensor,
-        float8_dtype=torch.float8_e4m3fn,
+        float8_dtype=e4m3_dtype,
         amax_buffer: Optional[torch.Tensor] = None,
         mm_config: Optional[ScaledMMConfig] = None,
     ):
@@ -260,6 +266,7 @@ class Float8Tensor(torch.Tensor):
             scale: the scale to use to convert the tensor
             float8_dtype: the float8 dtype to use
             amax_buffer: a buffer to store the amax value in prior to conversion
+            mm_config: Defines the configuration for the scaled_mm
 
         Returns:
             Float8Tensor: a float8 tensor

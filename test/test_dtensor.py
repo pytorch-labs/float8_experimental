@@ -12,18 +12,18 @@ import os
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from float8_experimental.float8_dynamic_linear import (
-    Float8DynamicLinear,
-    NoopFwToFloat8E5M2Bw,
-)
+from float8_experimental.float8_dynamic_utils import NoopFwToFloat8E5M2Bw
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
+    PrepareFloat8ModuleInput,
 )
-from float8_experimental.float8_utils import tensor_to_scale
+from float8_experimental.float8_utils import e4m3_dtype, tensor_to_scale
 from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor.parallel import parallelize_module
@@ -38,22 +38,31 @@ def setup_distributed():
     return device_mesh
 
 
-class ToyModel(nn.Module):
+class FeedForward(nn.Module):
     """MLP based model"""
 
     def __init__(self):
-        super(ToyModel, self).__init__()
-        self.in_proj = nn.Linear(16, 32)
-        self.relu = nn.ReLU()
-        self.out_proj = nn.Linear(32, 16)
+        super(FeedForward, self).__init__()
+        self.w1 = nn.Linear(16, 32, bias=False)
+        self.w2 = nn.Linear(16, 32, bias=False)
+        self.out_proj = nn.Linear(32, 16, bias=False)
 
     def forward(self, x):
-        return self.out_proj(self.relu(self.in_proj(x)))
+        return self.out_proj(F.silu(self.w1(x)) * self.w2(x))
+
+
+class ToyModel(nn.Module):
+    def __init__(self):
+        super(ToyModel, self).__init__()
+        self.ffn = FeedForward()
+
+    def forward(self, x):
+        return self.ffn(x)
 
 
 def test_scaled_mm(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
     world_size = mesh.size()
 
     x_fp32 = torch.rand(size, size, device=device)
@@ -92,7 +101,7 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
 
 def test_fp8_redistribute(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
     world_size = mesh.size()
 
     x_fp32 = torch.rand(size, size, device=device)
@@ -119,7 +128,7 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
 
 def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
 
     x_fp32 = torch.rand(size, size, device=device)
     dist_x_fp32 = distribute_tensor(x_fp32, mesh, [Shard(0)])
@@ -133,7 +142,7 @@ def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
 
 def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     device = mesh.device_type
-    fp8_dtype = torch.float8_e4m3fn
+    fp8_dtype = e4m3_dtype
 
     x_fp32 = torch.rand(size, size, device=device, requires_grad=True)
     local_weight = torch.rand(2 * size, size, device=device, requires_grad=True)
@@ -158,32 +167,38 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     loss.backward()
 
 
-def test_fp8_mlp_tensor_parallelism_base(
+def _test_fp8_mlp_tensor_parallelism_base(
     mesh: DeviceMesh, size=16, compile: bool = False
 ):
     device = mesh.device_type
+    # For now, just use Float8Linear with dynamic scaling, which is the
+    # same behavior as Float8Linear.
+    # TODO(future): add support for float8 all-gather with delayed scaling
+    # for activations and gradients.
+    extra_kwargs = {
+        "scaling_type_x": TensorScalingType.DYNAMIC,
+        "scaling_type_w": TensorScalingType.DYNAMIC,
+        "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+    }
 
     toy_model = ToyModel().to(device)
     toy_model_fp8 = swap_linear_with_float8_linear(
-        toy_model, Float8DynamicLinear, emulate=True
+        toy_model, emulate=True, **extra_kwargs
     )
 
     tp_model = copy.deepcopy(toy_model)
-    tp_model = swap_linear_with_float8_linear(
-        tp_model, Float8DynamicLinear, emulate=True
-    )
+    tp_model = swap_linear_with_float8_linear(tp_model, emulate=True, **extra_kwargs)
     sp_model = copy.deepcopy(toy_model)
-    sp_model = swap_linear_with_float8_linear(
-        sp_model, Float8DynamicLinear, emulate=True
-    )
+    sp_model = swap_linear_with_float8_linear(sp_model, emulate=True, **extra_kwargs)
 
     # vanilla TP
     tp_model = parallelize_module(
         tp_model,
         mesh,
         {
-            "in_proj": Float8ColwiseParallel(),
-            "out_proj": Float8RowwiseParallel(),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(),
         },
     )
 
@@ -192,17 +207,44 @@ def test_fp8_mlp_tensor_parallelism_base(
         sp_model,
         mesh,
         {
-            "in_proj": Float8ColwiseParallel(input_layouts=Shard(0)),
-            "out_proj": Float8RowwiseParallel(
-                output_layouts=Shard(0), use_local_output=False
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1), desired_input_layouts=Replicate()
+            ),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(1), use_local_output=False
+            ),
+        },
+    )
+
+    # PrepareFloat8ModuleInput with specific submodule fqn
+    sp_model2 = copy.deepcopy(toy_model)
+    sp_model2 = swap_linear_with_float8_linear(sp_model2, emulate=True, **extra_kwargs)
+
+    sp_model2 = parallelize_module(
+        sp_model2,
+        mesh,
+        {
+            "ffn": PrepareFloat8ModuleInput(
+                input_layouts=Shard(1),
+                desired_input_layouts=Replicate(),
+                fwd_config_submodule_fqn="w2",
+            ),
+            "ffn.w1": Float8ColwiseParallel(),
+            "ffn.w2": Float8ColwiseParallel(),
+            "ffn.out_proj": Float8RowwiseParallel(
+                output_layouts=Shard(1), use_local_output=False
             ),
         },
     )
 
     if compile:
         tp_model = torch.compile(tp_model)
+        sp_model = torch.compile(sp_model)
+        sp_model2 = torch.compile(sp_model2)
 
-    x_fp32 = torch.rand(size * 2, size, device=device, requires_grad=False)
+    x_fp32 = torch.rand(size, size * 2, size, device=device, requires_grad=False)
     x_fp32_tp_input = x_fp32.clone()
     x_fp32_sp_input = distribute_tensor(x_fp32.clone(), mesh, [Shard(0)])
 
@@ -214,16 +256,28 @@ def test_fp8_mlp_tensor_parallelism_base(
     global_out.sum().backward()
     torch.testing.assert_close(tp_out, global_out)
     torch.testing.assert_close(sp_out.full_tensor(), global_out)
+    torch.testing.assert_close(tp_model.ffn.w1.weight.grad, sp_model.ffn.w1.weight.grad)
     torch.testing.assert_close(
-        tp_model.in_proj.weight.grad, sp_model.in_proj.weight.grad
+        tp_model.ffn.out_proj.weight.grad, sp_model.ffn.out_proj.weight.grad
+    )
+
+    sp_out2 = sp_model2(x_fp32_sp_input)
+    sp_out2.sum().backward()
+    torch.testing.assert_close(sp_out2.full_tensor(), global_out)
+    torch.testing.assert_close(
+        tp_model.ffn.w1.weight.grad, sp_model2.ffn.w1.weight.grad
     )
     torch.testing.assert_close(
-        tp_model.out_proj.weight.grad, sp_model.out_proj.weight.grad
+        tp_model.ffn.out_proj.weight.grad, sp_model2.ffn.out_proj.weight.grad
     )
+
+
+def test_fp8_mlp_tensor_parallelism_eager(mesh: DeviceMesh, size=16):
+    _test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=False)
 
 
 def test_fp8_mlp_tensor_parallelism_compile(mesh: DeviceMesh, size=16):
-    test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
+    _test_fp8_mlp_tensor_parallelism_base(mesh, size, compile=True)
 
 
 if __name__ == "__main__":
@@ -236,7 +290,7 @@ if __name__ == "__main__":
         test_fp8_redistribute,
         test_dtensor_cast_to_fp8,
         test_dtensor_fp8_autograd,
-        test_fp8_mlp_tensor_parallelism_base,
+        test_fp8_mlp_tensor_parallelism_eager,
         test_fp8_mlp_tensor_parallelism_compile,
     ]
 

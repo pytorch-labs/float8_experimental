@@ -9,10 +9,7 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 
 from typing import Any, Optional, Tuple
 
-import float8_experimental.config as config
-
 import torch
-import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from float8_experimental.float8_tensor import (
@@ -22,7 +19,12 @@ from float8_experimental.float8_tensor import (
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
 )
-from float8_experimental.float8_utils import amax_to_scale, tensor_to_scale
+from float8_experimental.float8_utils import (
+    amax_to_scale,
+    e4m3_dtype,
+    e5m2_dtype,
+    tensor_to_scale,
+)
 from torch._prims_common import suggest_memory_format
 
 
@@ -46,72 +48,23 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
     def backward(ctx, gradY):
         if tensor_already_casted_to_fp8(gradY):
             return gradY, None
-        gradY_scale = tensor_to_scale(gradY, torch.float8_e5m2)
+        gradY_scale = tensor_to_scale(gradY, e5m2_dtype)
         fp8_tensor = to_fp8_no_autograd(
-            gradY, gradY_scale, torch.float8_e5m2, mm_config=ctx.mm_config
+            gradY, gradY_scale, e5m2_dtype, mm_config=ctx.mm_config
         )
         return fp8_tensor, None
 
 
-class Float8DynamicLinear(torch.nn.Linear):
-    """
-    A wrapper around a `torch.nn.Linear` module which does fp8 compute. By on the fly
-    conversion to fp8 of the input and weight tensors.
-    """
-
-    def __init__(self, **super_kwargs):
-        super().__init__(**super_kwargs)
-
-    def forward(self, x):
-        x_fp8 = cast_to_float8_e4m3fn(x, self.forward_config)
-        if isinstance(self.weight, Float8Tensor):  # cast by FSDP
-            w_fp8 = self.weight
-        else:
-            w_fp8 = cast_to_float8_e4m3fn(self.weight, self.forward_config)
-        y = torch.nn.functional.linear(x_fp8, w_fp8, self.bias)
-        y = cast_to_float8_e5m2_bw(y, self.backward_config)
-        return y
-
-    @classmethod
-    def from_float(cls, mod, emulate: bool = False) -> "Float8DynamicLinear":
-        """
-        Create an nn.Linear with fp8 compute from a regular nn.Linear
-
-        Args:
-            mod (torch.nn.Linear): nn.Linear to convert
-            emulate (bool): whether to emulate fp8 matmul logic in float32
-        """
-        with torch.device("meta"):
-            super_kwargs = {
-                "in_features": mod.in_features,
-                "out_features": mod.out_features,
-                "bias": False,
-            }
-            new_mod = cls(**super_kwargs)
-        new_mod.forward_config = ScaledMMConfig(emulate, not bool(emulate))
-        new_mod.backward_config = ScaledMMConfig(emulate, False)
-        if config.enable_fsdp_fp8_all_gather:
-            new_mod.weight = nn.Parameter(
-                WeightWithDynamicFloat8CastTensor(mod.weight, new_mod.forward_config)
-            )
-        else:
-            new_mod.weight = mod.weight
-        new_mod.bias = mod.bias
-        return new_mod
-
-
-def cast_to_float8_e4m3fn(
+def cast_to_float8_e4m3_dynamic(
     inpt_tensor: torch.Tensor, mm_config: ScaledMMConfig, reduce_amax: bool = False
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
-    scale = tensor_to_scale(inpt_tensor, torch.float8_e4m3fn, reduce_amax)
-    return Float8Tensor.to_float8(
-        inpt_tensor, scale, torch.float8_e4m3fn, mm_config=mm_config
-    )
+    scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
+    return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
 
 
-def cast_to_float8_e5m2_bw(
+def cast_to_float8_e5m2_dynamic_bw(
     gradY: torch.Tensor, mm_config: ScaledMMConfig
 ) -> torch.Tensor:
     return NoopFwToFloat8E5M2Bw.apply(gradY, mm_config)
@@ -219,7 +172,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 self._tensor, scale, torch.float8_e4m3fn, mm_config=self._mm_config
             )
         else:
-            float8_tensor = cast_to_float8_e4m3fn(
+            float8_tensor = cast_to_float8_e4m3_dynamic(
                 self._tensor, self._mm_config, reduce_amax=True
             )
         return (float8_tensor._data,), (float8_tensor._scale,)

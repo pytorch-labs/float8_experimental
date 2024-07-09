@@ -1,17 +1,12 @@
 import contextlib
-from typing import List, Type
+from typing import List
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import (
-    precompute_float8_amax,
-    sync_float8_amax_and_scale_history,
-)
+from float8_experimental.float8_linear_utils import precompute_float8_amax
 
 
 def check_parity_no_mp(
@@ -21,7 +16,6 @@ def check_parity_no_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
-    module_cls: Type,
     pre_compute: bool = False,
 ):
     for iter_idx in range(10):
@@ -34,14 +28,9 @@ def check_parity_no_mp(
                 for param in model.parameters():
                     dist.all_reduce(param.grad)
                     param.grad.div_(dist.get_world_size())
-            if module_cls is Float8Linear:
-                sync_float8_amax_and_scale_history(model)
+            # TODO(future): add amax syncing once delayed scaling is supported
             optim.step()
-            if (
-                model is fsdp_model
-                and module_cls is Float8DynamicLinear
-                and pre_compute
-            ):
+            if model is fsdp_model and pre_compute:
                 precompute_float8_amax(model)
         test_cls.assertEqual(losses[0], losses[1])
 
@@ -54,7 +43,6 @@ def check_parity_bf16_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
-    module_cls: Type,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -73,8 +61,7 @@ def check_parity_bf16_mp(
                     param_bf16.grad.div_(dist.get_world_size())
                     param_fp32.grad = param_bf16.grad.float()
                     param_bf16.grad = None
-            if module_cls is Float8Linear:
-                sync_float8_amax_and_scale_history(model)
+            # TODO(future): add amax syncing once delayed scaling is supported
             optim.step()
             for param_fp32, param_bf16 in zip(
                 ref_model.parameters(), ref_model_bf16.parameters()

@@ -7,10 +7,8 @@ import torch
 import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_dynamic_linear import (
-    Float8DynamicLinear,
-    WeightWithDynamicFloat8CastTensor,
-)
+from float8_experimental.float8_dynamic_utils import WeightWithDynamicFloat8CastTensor
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from test_fsdp2_common import (
     check_parity_bf16_mp,
@@ -75,7 +73,10 @@ class TestFloat8Common:
         return global_inp.view(self.world_size, -1)[self.rank].view(16, 16)
 
     def swap_linear_with_dynamic(self, module: nn.Module, **kwargs: Any) -> nn.Module:
-        return swap_linear_with_float8_linear(module, Float8DynamicLinear, **kwargs)
+        kwargs["scaling_type_x"] = TensorScalingType.DYNAMIC
+        kwargs["scaling_type_w"] = TensorScalingType.DYNAMIC
+        kwargs["scaling_type_dL_dY"] = TensorScalingType.DYNAMIC
+        return swap_linear_with_float8_linear(module, **kwargs)
 
 
 class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
@@ -120,14 +121,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             0, ref_module.tok_embeddings.weight.size(0), (16, 16), device="cuda"
         )
         check_parity_no_mp(
-            self,
-            ref_module,
-            ref_optim,
-            module,
-            optim,
-            local_inp,
-            Float8DynamicLinear,
-            pre_compute,
+            self, ref_module, ref_optim, module, optim, local_inp, pre_compute
         )
 
     @skip_if_lt_x_gpu(2)
@@ -262,14 +256,19 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_weight_subclass_dynamic(self):
+        extra_kwargs = {
+            "scaling_type_x": TensorScalingType.DYNAMIC,
+            "scaling_type_w": TensorScalingType.DYNAMIC,
+            "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+        }
         tensor_cls = WeightWithDynamicFloat8CastTensor
         # Check for a single FSDP paramter group
         module_fp32 = self.init_single_module()
         with set_enable_fsdp_fp8_all_gather(True):
             module = swap_linear_with_float8_linear(
                 module_fp32,
-                Float8DynamicLinear,
                 emulate=True,
+                **extra_kwargs,
             )
         self.assertIsInstance(module.weight, tensor_cls)
         fully_shard(module)
@@ -283,8 +282,8 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         with set_enable_fsdp_fp8_all_gather(True):
             module = swap_linear_with_float8_linear(
                 module,
-                Float8DynamicLinear,
                 emulate=True,
+                **extra_kwargs,
             )
         for param_name, param in module.named_parameters():
             if "weight" in param_name:
@@ -399,7 +398,6 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 module,
                 optim,
                 local_inp,
-                Float8DynamicLinear,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -427,7 +425,6 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 module,
                 optim,
                 local_inp,
-                Float8DynamicLinear,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -444,13 +441,10 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         ref_module_bf16 = copy.deepcopy(module).to(torch.bfloat16)
         ref_module_bf16 = swap_linear_with_float8_linear(
             ref_module_bf16,
-            Float8DynamicLinear,
             emulate=True,
         )
         ref_module_fp32 = copy.deepcopy(module).cuda()
-        module = swap_linear_with_float8_linear(
-            module, Float8DynamicLinear, emulate=True
-        )
+        module = swap_linear_with_float8_linear(module, emulate=True)
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         for mlp in module:
             fully_shard(mlp, mp_policy=mp_policy)
@@ -463,7 +457,6 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             module,
             torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True),
             self.get_local_inp(torch.bfloat16),
-            Float8DynamicLinear,
         )
 
 
