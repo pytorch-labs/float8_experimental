@@ -1,12 +1,11 @@
 import contextlib
-from typing import List, Type
+from typing import List
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear
 
 
 def check_parity_no_mp(

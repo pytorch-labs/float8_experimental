@@ -1,5 +1,4 @@
 import copy
-import itertools
 import threading
 import unittest
 from typing import Any, List
@@ -9,7 +8,7 @@ import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
 from float8_experimental.float8_dynamic_utils import WeightWithDynamicFloat8CastTensor
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from test_fsdp2_common import (
     check_parity_bf16_mp,
