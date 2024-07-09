@@ -80,11 +80,17 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    def test_transformer_parity_dynamic(self):
-        for enable_fsdp_fp8_all_gather in [False, True]:
-            self._test_transformer_parity_dynamic(enable_fsdp_fp8_all_gather)
+    def test_transformer_parity(self):
+        choices = itertools.product(
+            [False, True],
+            [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
+        )
+        for enable_fsdp_fp8_all_gather, scaling_type_w in choices:
+            self._test_transformer_parity(enable_fsdp_fp8_all_gather, scaling_type_w)
 
-    def _test_transformer_parity_dynamic(self, enable_fsdp_fp8_all_gather: bool):
+    def _test_transformer_parity(
+        self, enable_fsdp_fp8_all_gather: bool, scaling_type_w: TensorScalingType
+    ):
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
@@ -92,9 +98,9 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         weight_tying = not enable_fsdp_fp8_all_gather
         module = self.init_transformer(weight_tying=weight_tying).cuda()
         ref_module = copy.deepcopy(module)
-        swap_linear_with_float8_linear(ref_module)
+        swap_linear_with_float8_linear(ref_module, scaling_type_w=scaling_type_w)
         with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-            swap_linear_with_float8_linear(module)
+            swap_linear_with_float8_linear(module, scaling_type_w=scaling_type_w)
         for submodule in module.modules():
             if isinstance(submodule, TransformerBlock):
                 fully_shard(submodule)
@@ -104,7 +110,15 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         local_inp = torch.randint(
             0, ref_module.tok_embeddings.weight.size(0), (16, 16), device="cuda"
         )
-        check_parity_no_mp(self, ref_module, ref_optim, module, optim, local_inp)
+        check_parity_no_mp(
+            self,
+            ref_module,
+            ref_optim,
+            module,
+            optim,
+            local_inp,
+            scaling_type_w=scaling_type_w,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_memory(self):
@@ -364,13 +378,21 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         Tests numeric parity for fp32 parameters with fp8 computation with a
         single module/FSDP communication group.
         """
-        for enable_fsdp_fp8_all_gather in [False, True]:
+        choices = itertools.product(
+            [False, True],
+            [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
+        )
+        for enable_fsdp_fp8_all_gather, scaling_type_w in choices:
             module_fp32 = self.init_single_module()
             ref_module = copy.deepcopy(module_fp32)
-            ref_module = swap_linear_with_float8_linear(ref_module)
+            ref_module = swap_linear_with_float8_linear(
+                ref_module, scaling_type_w=scaling_type_w
+            )
             ref_module = ref_module.cuda()
             with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-                module = swap_linear_with_float8_linear(module_fp32)
+                module = swap_linear_with_float8_linear(
+                    module_fp32, scaling_type_w=scaling_type_w
+                )
             fully_shard(module)
             ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
@@ -382,6 +404,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 module,
                 optim,
                 local_inp,
+                scaling_type_w=scaling_type_w,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -390,12 +413,20 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         Tests numeric parity for fp32 parameters with fp8 computation with
         multiple modules/FSDP communication groups.
         """
-        for enable_fsdp_fp8_all_gather in [False, True]:
+        choices = itertools.product(
+            [False, True],
+            [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
+        )
+        for enable_fsdp_fp8_all_gather, scaling_type_w in choices:
             module = self.init_multi_module().cuda()
             ref_module = copy.deepcopy(module)
-            ref_module = swap_linear_with_float8_linear(ref_module)
+            ref_module = swap_linear_with_float8_linear(
+                ref_module, scaling_type_w=scaling_type_w
+            )
             with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-                module = swap_linear_with_float8_linear(module)
+                module = swap_linear_with_float8_linear(
+                    module, scaling_type_w=scaling_type_w
+                )
             for submodule in module:
                 fully_shard(submodule)
             fully_shard(module)
@@ -409,6 +440,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 module,
                 optim,
                 local_inp,
+                scaling_type_w=scaling_type_w,
             )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -442,6 +474,23 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True),
             self.get_local_inp(torch.bfloat16),
         )
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_delayed_scaling_inplace_update(self):
+        """
+        Verify that `WeightWithDelayedFloat8CastTensor` updates buffers inplace
+        """
+        module = self.init_single_module()
+        with set_enable_fsdp_fp8_all_gather(True):
+            m_fp8 = swap_linear_with_float8_linear(
+                module,
+                scaling_type_w=TensorScalingType.DELAYED,
+            )
+
+        fp8_amax_w_old = m_fp8.fp8_amax_w.clone().detach()
+        dummy_mesh = None
+        data, scale = m_fp8.weight.fsdp_pre_all_gather(dummy_mesh)
+        self.assertNotEqual(fp8_amax_w_old.item(), m_fp8.fp8_amax_w.item())
 
 
 if __name__ == "__main__":

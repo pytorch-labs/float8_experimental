@@ -6,7 +6,11 @@ import float8_experimental.config as config
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear_utils import (
+    linear_requires_sync,
+    sync_float8_amax_and_scale_history,
+)
 
 
 def check_parity_no_mp(
@@ -16,6 +20,7 @@ def check_parity_no_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
+    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -27,8 +32,12 @@ def check_parity_no_mp(
                 for param in model.parameters():
                     dist.all_reduce(param.grad)
                     param.grad.div_(dist.get_world_size())
-            # TODO(future): add amax syncing once delayed scaling is supported
+
+            if linear_requires_sync(scaling_type_w=scaling_type_w):
+                sync_float8_amax_and_scale_history(model)
+
             optim.step()
+
         test_cls.assertEqual(losses[0], losses[1])
 
 
