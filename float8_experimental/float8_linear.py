@@ -19,7 +19,6 @@ import torch
 from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
-    WeightWithDynamicFloat8CastTensor,
 )
 
 from float8_experimental.float8_tensor import (
@@ -34,6 +33,8 @@ from float8_experimental.float8_utils import (
     e5m2_dtype,
     tensor_to_amax,
 )
+
+from float8_experimental.fsdp_utils import WeightWithDynamicFloat8CastTensor
 
 
 def _maybe_initialize_amaxes_scales_for_float8_cast(
