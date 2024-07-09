@@ -89,7 +89,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         self.run_subtests(
             {
                 "enable_fsdp_fp8_all_gather": [False, True],
-                "pre_compute": [False, True],
+                "precompute": [False, True],
             },
             self._test_transformer_parity_dynamic,
         )
@@ -97,9 +97,9 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
     def _test_transformer_parity_dynamic(
         self,
         enable_fsdp_fp8_all_gather: bool,
-        pre_compute: bool,
+        precompute: bool,
     ):
-        if not enable_fsdp_fp8_all_gather and pre_compute:
+        if not enable_fsdp_fp8_all_gather and precompute:
             return
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
@@ -121,7 +121,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             0, ref_module.tok_embeddings.weight.size(0), (16, 16), device="cuda"
         )
         check_parity_no_mp(
-            self, ref_module, ref_optim, module, optim, local_inp, pre_compute
+            self, ref_module, ref_optim, module, optim, local_inp, precompute
         )
 
     @skip_if_lt_x_gpu(2)

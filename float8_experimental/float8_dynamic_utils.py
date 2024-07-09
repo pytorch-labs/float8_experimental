@@ -117,7 +117,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         # for dynamic scaling
         # `precompute_float8_amax_for_fsdp` calculates amax
         # for all float8 parameters after optimizer step
-        self._pre_computed_amax = amax
+        self._precomputed_amax = amax
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -146,8 +146,8 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __tensor_flatten__(self):
-        if self._pre_computed_amax:
-            return ["_tensor", "_pre_computed_amax"], self._mm_config
+        if self._precomputed_amax:
+            return ["_tensor", "_precomputed_amax"], self._mm_config
         else:
             return ["_tensor"], self._mm_config
 
@@ -157,18 +157,18 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         return WeightWithDynamicFloat8CastTensor(
             inner_tensors["_tensor"],
             mm_config,
-            getattr(inner_tensors, "_pre_computed_amax", None),
+            getattr(inner_tensors, "_precomputed_amax", None),
         )
 
     def __repr__(self):
         return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
-        if self._pre_computed_amax is not None:
+        if self._precomputed_amax is not None:
             scale = amax_to_scale(
-                self._pre_computed_amax,
+                self._precomputed_amax,
                 torch.float8_e4m3fn,
-                self._pre_computed_amax.dtype,
+                self._precomputed_amax.dtype,
                 clamp_amax=False,
             )
             float8_tensor = Float8Tensor.to_float8(

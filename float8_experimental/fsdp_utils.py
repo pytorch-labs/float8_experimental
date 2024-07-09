@@ -51,7 +51,7 @@ def precompute_float8_amax_for_fsdp(module: nn.Module) -> None:
     if weights:
         amaxes = compute_amaxes(weights)
         for amax, float8_linear in zip(amaxes, float8_linears):
-            float8_linear.weight._local_tensor._pre_computed_amax = amax._local_tensor
+            float8_linear.weight._local_tensor._precomputed_amax = amax._local_tensor
     else:
         warnings.warn(
             "Calling precompute_float8_weights without any weights using FSDP fp8 all-gather!"

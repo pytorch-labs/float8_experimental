@@ -16,7 +16,7 @@ def check_parity_no_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
-    pre_compute: bool = False,
+    precompute: bool = False,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -30,7 +30,7 @@ def check_parity_no_mp(
                     param.grad.div_(dist.get_world_size())
             # TODO(future): add amax syncing once delayed scaling is supported
             optim.step()
-            if model is fsdp_model and pre_compute:
+            if model is fsdp_model and precompute:
                 precompute_float8_amax_for_fsdp(model)
         test_cls.assertEqual(losses[0], losses[1])
 
