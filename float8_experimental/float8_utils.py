@@ -48,10 +48,8 @@ def amax_to_scale(
     """
     scale = torch.empty_like(amax, dtype=torch.float32)
     if float8_dtype in FP8_TYPES:
-        if clamp_amax:
-            res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=EPS)
-        else:
-            res = torch.finfo(float8_dtype).max / amax
+        amax = torch.clamp(amax, min=EPS) if clamp_amax else amax
+        res = torch.finfo(float8_dtype).max / amax
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 
