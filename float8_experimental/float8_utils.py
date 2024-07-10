@@ -37,19 +37,16 @@ def amax_to_scale(
     amax: torch.Tensor,
     float8_dtype: torch.dtype,
     orig_dtype: torch.dtype,
-    clamp_amax: bool = True,
 ):
     """Converts the amax value of a tensor to the fp8 scale.
     Args:
         amax: The amax value of the tensor.
         float8_dtype: The float8 dtype.
         orig_dtype: The original dtype of the tensor.
-        clamp_amax: default is True. False for FSDP fp8 all-gather since FSDP applied `torch.clamp` during pre-compute after optimizer.step
     """
     scale = torch.empty_like(amax, dtype=torch.float32)
     if float8_dtype in FP8_TYPES:
-        amax = torch.clamp(amax, min=EPS) if clamp_amax else amax
-        res = torch.finfo(float8_dtype).max / amax
+        res = torch.finfo(float8_dtype).max / torch.clamp(amax, min=EPS)
     else:
         raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
 

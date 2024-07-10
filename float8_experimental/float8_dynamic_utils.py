@@ -169,7 +169,6 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 self._precomputed_amax,
                 torch.float8_e4m3fn,
                 self._precomputed_amax.dtype,
-                clamp_amax=False,
             )
             float8_tensor = Float8Tensor.to_float8(
                 self._tensor, scale, torch.float8_e4m3fn, mm_config=self._mm_config

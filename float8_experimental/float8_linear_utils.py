@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+
 from float8_experimental.float8_utils import (
     amax_history_to_scale_stack,
     e4m3_dtype,
