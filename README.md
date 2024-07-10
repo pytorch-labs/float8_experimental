@@ -51,7 +51,18 @@ model = FSDP(model, use_orig_params=True)
 # optional: enable torch.compile for improved performance
 m = torch.compile(m)
 
-# train/finetune (not shown)
+# toy training loop
+for _ in range(N_ITER):
+    optimizer.zero_grad()
+    y = m(x)
+    y.sum().backward()
+    optimizer.step()
+
+    # specific to fsdp2 + float8 with dynamic scaling
+    # this method is optional but is highly recommended for performance
+    # it calcuclates scales for all parameters in a single all-reduce
+    precompute_float8_scale_for_fsdp(model)
+
 ```
 
 ## float8 linear with delayed scaling
