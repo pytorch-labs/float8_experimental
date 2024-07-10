@@ -343,7 +343,6 @@ class Float8Linear(torch.nn.Linear):
                 )
         else:
             assert self.scaling_type_w is TensorScalingType.DYNAMIC
-            # TODO(future): also support FSDP integration in delayed scaling path
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 w_fp8 = self.weight
             else:

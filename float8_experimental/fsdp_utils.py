@@ -222,20 +222,21 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
                 "_amax_history_buffer",
                 "_scale_buffer",
             ],
-            self._mm_config,
-            is_amax_initialized,
+            {
+                "mm_config": self._mm_config,
+                "is_amax_initialized": is_amax_initialized,
+            },
         )
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        mm_config, is_amax_initialized = flatten_spec
+    def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return WeightWithDelayedFloat8CastTensor(
             inner_tensors["_tensor"],
             inner_tensors["_amax_buffer"],
             inner_tensors["_amax_history_buffer"],
             inner_tensors["_scale_buffer"],
-            mm_config,
-            is_amax_initialized,
+            metadata["mm_config"],
+            metadata["is_amax_initialized"],
         )
 
     def __repr__(self):
