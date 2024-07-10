@@ -34,9 +34,7 @@ e5m2_dtype = torch.float8_e5m2 if not config.use_fnuz_dtype else torch.float8_e5
 
 @torch.no_grad()
 def amax_to_scale(
-    amax: torch.Tensor,
-    float8_dtype: torch.dtype,
-    orig_dtype: torch.dtype,
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
 ):
     """Converts the amax value of a tensor to the fp8 scale.
     Args:
