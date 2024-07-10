@@ -9,10 +9,7 @@ A wrapper around a `torch.nn.Linear` module which does fp8 compute.
 
 from typing import Any, Optional, Tuple
 
-import float8_experimental.config as config
-
 import torch
-import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from float8_experimental.float8_tensor import (

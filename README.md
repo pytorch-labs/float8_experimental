@@ -71,7 +71,7 @@ m = Model(...)
 # convert all `torch.nn.Linear` modules to `Float8Linear`, specifying scaling
 # type
 swap_linear_with_float8_linear(
-    m, 
+    m,
     Float8Linear,
     scaling_type_x=TensorScalingType.DELAYED,
     scaling_type_w=TensorScalingType.DELAYED,
