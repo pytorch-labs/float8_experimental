@@ -37,6 +37,7 @@ This is the most accurate recipe as every tensor is scaled dynamically.
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
 )
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 from float8_experimental.float8_linear import Float8Linear
 
 # create model
@@ -58,10 +59,10 @@ for _ in range(N_ITER):
     y.sum().backward()
     optimizer.step()
 
-    # specific to fsdp2 + float8 with dynamic scaling
+    # specific to fsdp2 + dynamic scaling, when fp8 all-gather is turned on
     # this method is optional but is highly recommended for performance
     # it calcuclates scales for all parameters in a single all-reduce
-    precompute_float8_scale_for_fsdp(model)
+    precompute_float8_dynamic_scale_for_fsdp(model)
 
 ```
 
