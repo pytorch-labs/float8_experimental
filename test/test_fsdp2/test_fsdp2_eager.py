@@ -8,7 +8,7 @@ import torch
 import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.fsdp_utils import WeightWithDynamicFloat8CastTensor
 from test_fsdp2_common import (
@@ -81,16 +81,29 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
 
     @skip_if_lt_x_gpu(2)
     def test_transformer_parity(self):
-        choices = itertools.product(
-            [False, True],
-            [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
+        self.run_subtests(
+            {
+                "enable_fsdp_fp8_all_gather": [False, True],
+                "precompute": [False, True],
+                "scaling_type_w": [
+                    TensorScalingType.DYNAMIC,
+                    TensorScalingType.DELAYED,
+                ],
+            },
+            self._test_transformer_parity,
         )
-        for enable_fsdp_fp8_all_gather, scaling_type_w in choices:
-            self._test_transformer_parity(enable_fsdp_fp8_all_gather, scaling_type_w)
 
     def _test_transformer_parity(
-        self, enable_fsdp_fp8_all_gather: bool, scaling_type_w: TensorScalingType
+        self,
+        enable_fsdp_fp8_all_gather: bool,
+        precompute: bool,
+        scaling_type_w: TensorScalingType,
     ):
+        if not enable_fsdp_fp8_all_gather and precompute:
+            return
+        elif scaling_type_w is TensorScalingType.DELAYED and precompute:
+            return
+
         # NOTE: Weight-tying does not compose with fp8 all-gather because the
         # embedding weight and output linear weight are tied but only the
         # latter uses fp8 compute. With fp8 all-gather, FSDP would pre-cast to
@@ -117,6 +130,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             module,
             optim,
             local_inp,
+            precompute,
             scaling_type_w=scaling_type_w,
         )
 

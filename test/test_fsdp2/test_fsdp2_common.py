@@ -1,5 +1,5 @@
 import contextlib
-from typing import List, Type
+from typing import List
 
 import float8_experimental.config as config
 
@@ -11,6 +11,7 @@ from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     sync_float8_amax_and_scale_history,
 )
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 
 
 def check_parity_no_mp(
@@ -20,6 +21,7 @@ def check_parity_no_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
+    precompute: bool = False,
     scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
 ):
     for iter_idx in range(10):
@@ -37,6 +39,12 @@ def check_parity_no_mp(
                 sync_float8_amax_and_scale_history(model)
 
             optim.step()
+            if (
+                model is fsdp_model
+                and precompute
+                and scaling_type_w is TensorScalingType.DYNAMIC
+            ):
+                precompute_float8_dynamic_scale_for_fsdp(model)
 
         test_cls.assertEqual(losses[0], losses[1])
 
