@@ -289,11 +289,10 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         ), "Mismatched lengths of amax tensors."
 
         if dist.is_initialized():
-            # Combine all the amax tensors into one tensor and reduce it
-            # Note: do not reduce the weight values, because FSDP already ensures
-            # the weight values on all ranks are the same after all-gather.
             all_amax_tensors = torch.cat(
-                fp8_amax_x_tensor_list + fp8_amax_dL_dY_tensor_list
+                fp8_amax_x_tensor_list
+                + fp8_amax_w_tensor_list
+                + fp8_amax_dL_dY_tensor_list
             )
             all_reduced_amax_tensor = all_reduce(
                 all_amax_tensors, "MAX", list(range(dist.get_world_size()))
@@ -302,12 +301,14 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
                 all_reduced_amax_tensor = all_reduced_amax_tensor.wait()
 
             (
-                reduced_fp8_amax_tensor,
+                reduced_fp8_amax_x_tensor,
+                reduced_fp8_amax_w_tensor,
                 reduced_fp8_amax_dL_dY_tensor,
             ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
 
             for idx, child in enumerate(fp8_layers):
-                child.fp8_amax_x.copy_(reduced_fp8_amax_tensor[idx])
+                child.fp8_amax_x.copy_(reduced_fp8_amax_x_tensor[idx])
+                child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
                 child.fp8_amax_dL_dY.copy_(reduced_fp8_amax_dL_dY_tensor[idx])
 
         # We create two stacked tensor groups, one for the amax history and one for the current scales
