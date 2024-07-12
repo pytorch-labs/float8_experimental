@@ -82,7 +82,12 @@ _ops_to_preserve_subclass = {
 
 class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, tensor: torch.Tensor, mm_config: ScaledMMConfig):
+    def __new__(
+        cls,
+        tensor: torch.Tensor,
+        mm_config: ScaledMMConfig,
+        precomputed_scale: Optional[torch.Tensor] = None,
+    ):
         return torch.Tensor._make_wrapper_subclass(
             cls,
             tensor.size(),
@@ -96,9 +101,18 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             requires_grad=tensor.requires_grad,
         )
 
-    def __init__(self, tensor: torch.Tensor, mm_config: ScaledMMConfig):
+    def __init__(
+        self,
+        tensor: torch.Tensor,
+        mm_config: ScaledMMConfig,
+        precomputed_scale: Optional[torch.Tensor] = None,
+    ):
         self._tensor = tensor
         self._mm_config = mm_config
+        # for dynamic scaling
+        # `precompute_float8_dynamic_scale_for_fsdp` calculates scales
+        # for all float8 parameters after optimizer step
+        self._precomputed_scale = precomputed_scale
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
@@ -127,20 +141,35 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __tensor_flatten__(self):
-        return ["_tensor"], self._mm_config
+        if self._precomputed_scale:
+            return ["_tensor", "_precomputed_scale"], self._mm_config
+        else:
+            return ["_tensor"], self._mm_config
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
         mm_config = flatten_spec
-        return WeightWithDynamicFloat8CastTensor(inner_tensors["_tensor"], mm_config)
+        return WeightWithDynamicFloat8CastTensor(
+            inner_tensors["_tensor"],
+            mm_config,
+            getattr(inner_tensors, "_precomputed_scale", None),
+        )
 
     def __repr__(self):
         return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
-        float8_tensor = cast_to_float8_e4m3_dynamic(
-            self._tensor, self._mm_config, reduce_amax=True
-        )
+        if self._precomputed_scale is not None:
+            float8_tensor = Float8Tensor.to_float8(
+                self._tensor,
+                self._precomputed_scale,
+                torch.float8_e4m3fn,
+                mm_config=self._mm_config,
+            )
+        else:
+            float8_tensor = cast_to_float8_e4m3_dynamic(
+                self._tensor, self._mm_config, reduce_amax=True
+            )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
     def fsdp_post_all_gather(

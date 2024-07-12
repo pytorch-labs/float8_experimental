@@ -37,6 +37,7 @@ This is the most accurate recipe as every tensor is scaled dynamically.
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
 )
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 from float8_experimental.float8_linear import Float8Linear
 
 # create model
@@ -51,7 +52,18 @@ model = FSDP(model, use_orig_params=True)
 # optional: enable torch.compile for improved performance
 m = torch.compile(m)
 
-# train/finetune (not shown)
+# toy training loop
+for _ in range(N_ITER):
+    optimizer.zero_grad()
+    y = m(x)
+    y.sum().backward()
+    optimizer.step()
+
+    # specific to fsdp2 + dynamic scaling, when fp8 all-gather is turned on
+    # this method is optional but is highly recommended for performance
+    # it calcuclates scales for all parameters in a single all-reduce
+    precompute_float8_dynamic_scale_for_fsdp(model)
+
 ```
 
 ## float8 linear with delayed scaling
