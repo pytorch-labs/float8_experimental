@@ -28,6 +28,7 @@ from float8_experimental.float8_tensor import (
     Float8Tensor,
     merge_mm_configs,
     ScaledMMConfig,
+    GemmInputRole,
 )
 from float8_experimental.float8_utils import (
     compute_error,
@@ -438,9 +439,9 @@ class TestScaledMM:
         x_fp32 = torch.randn(16, 16, device="cuda")
         x_scale = torch.tensor(1.0, device="cuda")
         fp8_dtype = e4m3_dtype
-        a = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
+        a = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype, gemm_input_role=GemmInputRole.X)
         b = Float8Tensor.to_float8(
-            x_fp32, x_scale, fp8_dtype, mm_config=ScaledMMConfig(True)
+            x_fp32, x_scale, fp8_dtype, mm_config=ScaledMMConfig(True), gemm_input_role=GemmInputRole.W
         )
         with pytest.raises(
             AssertionError,

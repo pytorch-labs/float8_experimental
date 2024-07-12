@@ -12,6 +12,7 @@ from float8_experimental.float8_tensor import (
     Float8Tensor,
     merge_mm_configs,
     ScaledMMConfig,
+    choose_scaled_mm_config,
 )
 from float8_experimental.float8_utils import is_row_major, pad_tensor_for_matmul
 
@@ -125,10 +126,16 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
     a_scale = a._scale
     b_data = b._data
 
-    if a._mm_config.pad_inner_dim:
-        assert (
-            b._mm_config.pad_inner_dim
-        ), "Both mm configs must have pad_inner_dim set to True"
+    scaled_mm_config = choose_scaled_mm_config(
+        a._gemm_input_role, a._mm_config,
+        b._gemm_input_role, b._mm_config,
+    )
+
+    if scaled_mm_config.pad_inner_dim:
+        # TODO(before land): assert this when choosing config
+        # assert (
+        #     b._mm_config.pad_inner_dim
+        # ), "Both mm configs must have pad_inner_dim set to True"
         assert a._data.size(1) == b._data.size(
             0
         ), f"Inner dims must match for mm, got {a._data.size(1)} and {b._data.size(0)}"
@@ -155,10 +162,14 @@ def float8_mm(aten_op, args, kwargs=None):
     )
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
-    a_mm_config: ScaledMMConfig = a._mm_config
-    b_mm_config: ScaledMMConfig = b._mm_config
-    mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
-    if mm_config.emulate:
+    # a_mm_config: ScaledMMConfig = a._mm_config
+    # b_mm_config: ScaledMMConfig = b._mm_config
+    # mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
+    scaled_mm_config = choose_scaled_mm_config(
+        a._gemm_input_role, a._mm_config,
+        b._gemm_input_role, b._mm_config,
+    )
+    if scaled_mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
         )
@@ -170,7 +181,7 @@ def float8_mm(aten_op, args, kwargs=None):
         output_dtype,
         output_scale=None,
         bias=None,
-        use_fast_accum=mm_config.use_fast_accum,
+        use_fast_accum=scaled_mm_config.use_fast_accum,
     )
     return tensor_out
 
@@ -188,10 +199,14 @@ def float8_addmm(aten_op, args, kwargs=None):
     a_data, a_scale, b_data, b_scale = preprocess_addmm(a, b)
     output_dtype = a._orig_dtype
     assert bias.dtype == output_dtype, "bias dtype must match output dtype"
-    a_mm_config: ScaledMMConfig = a._mm_config
-    b_mm_config: ScaledMMConfig = b._mm_config
-    mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
-    if mm_config.emulate:
+    # a_mm_config: ScaledMMConfig = a._mm_config
+    # b_mm_config: ScaledMMConfig = b._mm_config
+    # mm_config: ScaledMMConfig = merge_mm_configs(a_mm_config, b_mm_config)
+    scaled_mm_config = choose_scaled_mm_config(
+        a._gemm_input_role, a._mm_config,
+        b._gemm_input_role, b._mm_config,
+    )
+    if scaled_mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
             a._data, a._scale, b._data, b._scale, output_dtype
         )
@@ -204,7 +219,7 @@ def float8_addmm(aten_op, args, kwargs=None):
         output_dtype,
         output_scale=None,
         bias=bias,
-        use_fast_accum=mm_config.use_fast_accum,
+        use_fast_accum=scaled_mm_config.use_fast_accum,
     )
     return tensor_out
 

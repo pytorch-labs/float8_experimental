@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 from collections import namedtuple
+import enum
 from typing import Dict, Optional
 
 import torch
@@ -18,6 +19,31 @@ from torch.distributed._tensor import DTensor
 
 aten = torch.ops.aten
 
+#
+# A note on configuration of float8 logic in a linear
+# TODO(future): move all the configs to separate file
+#
+# There are three gemms in a forward + backward of a Linear layer:
+# 
+# 1.     x @ w_t   = y     (forward pass)
+# 2. dL_dY @ w     = dL_dX (backward pass)
+# 3.   x_t @ dL_dY = dL_dW (backward pass)
+#
+# In the formulas above, there are:
+# A. six input tensors (x, x_t, w, w_t, dL_dY, dL_dY_t). 
+#    - Note that dL_dY_t is implied because of memory format requirements 
+#      of float8 gemms
+# B. three output tensors (y, dL_dX, dL_dW)
+#
+# We want each input tensor, gemm, and output tensor to be configurable.
+# The state of this configuration today is:
+# 
+# i. pairs of input tensors (non-t and t variants) have their scaling 
+#    configurable via the scaling_type_{x_w_dL_dY} arguments to Float8Linear
+# ii. each gemm + output is configurable via ScaledMMConfig, which is not user facing
+# iii. LinearMMConfig is a container for the three ScaledMMConfig objects needed
+#    to configure all three gemms, also not user facing
+
 
 # ScaledMMConfig is a namedtuple that defines the configuration for the scaled_mm in the forward and backward pass.
 # emulate: whether to emulate the matmuls in fp32
@@ -29,6 +55,48 @@ ScaledMMConfig = namedtuple(
     ["emulate", "use_fast_accum", "fp8_output", "pad_inner_dim"],
     defaults=[False, False, False, False],
 )
+
+# The object below exists for convenience, to allow Float8Tensor to use
+# the right config based on which gemm from `y`, `dL_dX`, `dL_dW` is
+# being called.
+LinearMMConfig = namedtuple(
+    "LinearMMConfig",
+    ["y", "dL_dX", "dL_dW"],
+    defaults=[
+        ScaledMMConfig(False, True, False, False),
+        ScaledMMConfig(False, False, False, False),
+        ScaledMMConfig(False, False, False, False),
+    ]
+)
+
+# Given a Float8Tensor, the enum below describes the expected role of this
+# tensor in the three gemms present in the fw + bw pass of a Linear layer.
+# This is used to choose the right config for a float8 gemm when the
+# gemm is performed.
+class GemmInputRole(enum.Enum):
+    X = "x"
+    W = "w"
+    DL_DY = "dL_dY"
+
+# choose which scaled_mm_config to use based on gemm inputs
+def choose_scaled_mm_config(
+    a_role: GemmInputRole, 
+    a_linear_mm_config: LinearMMConfig, 
+    b_role: GemmInputRole, 
+    b_linear_mm_config: LinearMMConfig,
+):
+    if a_role is GemmInputRole.X and b_role is GemmInputRole.W:
+        assert a_linear_mm_config.y == b_linear_mm_config.y
+        return a_linear_mm_config.y
+    elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.W:
+        assert a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
+        return a_linear_mm_config.dL_dX
+    else:
+        assert a_role is GemmInputRole.X and b_role is GemmInputRole.DL_DY, \
+            f"unexpected a_role {a_role} and b_role {b_role}"
+        assert a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
+        return a_linear_mm_config.dL_dW
+
 
 
 def merge_mm_configs(
@@ -194,7 +262,9 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    _mm_config: ScaledMMConfig
+    # TODO(before land): change this to _linear_mm_config, wanted to do that after
+    # initial review
+    _mm_config: LinearMMConfig
     __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config"]
 
     def __new__(
@@ -202,7 +272,8 @@ class Float8Tensor(torch.Tensor):
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        mm_config: Optional[ScaledMMConfig],
+        mm_config: Optional[LinearMMConfig],
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
     ):
         assert (
             scale.numel() == 1
@@ -223,7 +294,8 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._mm_config = mm_config if mm_config is not None else ScaledMMConfig()
+        self._mm_config = mm_config if mm_config is not None else LinearMMConfig()
+        self._gemm_input_role = gemm_input_role
 
         return self
 
@@ -257,7 +329,8 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        mm_config: Optional[ScaledMMConfig] = None,
+        mm_config: Optional[LinearMMConfig] = None,
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 
@@ -272,7 +345,7 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor, scale, float8_dtype, amax_buffer, mm_config
+            tensor, scale, float8_dtype, amax_buffer, mm_config, gemm_input_role,
         )
 
     @classmethod
