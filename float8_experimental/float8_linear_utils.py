@@ -23,9 +23,9 @@ log.addHandler(logging.NullHandler())
 
 
 def linear_requires_sync(
-    scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+    scaling_type_x: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
 ):
     """Returns whether the given linear_type requires sync before forward."""
     return any(
