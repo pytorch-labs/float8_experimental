@@ -3,10 +3,8 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-import copy
 import logging
-from enum import auto, Enum
-from typing import Callable, List, Optional, Type, Union
+from typing import Callable, List, Optional
 
 import torch
 import torch.distributed as dist
