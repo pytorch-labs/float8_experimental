@@ -1,12 +1,12 @@
 import contextlib
-from typing import List, Type
+from typing import List
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 
 
 def check_parity_no_mp(
@@ -16,6 +16,7 @@ def check_parity_no_mp(
     fsdp_model: nn.Module,
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
+    precompute: bool = False,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -29,6 +30,8 @@ def check_parity_no_mp(
                     param.grad.div_(dist.get_world_size())
             # TODO(future): add amax syncing once delayed scaling is supported
             optim.step()
+            if model is fsdp_model and precompute:
+                precompute_float8_dynamic_scale_for_fsdp(model)
         test_cls.assertEqual(losses[0], losses[1])
 
 
