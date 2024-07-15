@@ -5,7 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 # Lets define a few top level things here
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig, GemmInputRole
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    GemmInputRole,
+    ScaledMMConfig,
+)
 
 # Needed to load Float8Tensor with weights_only = True
 from torch.serialization import add_safe_globals

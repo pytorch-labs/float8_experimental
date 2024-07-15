@@ -12,11 +12,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 from float8_experimental.float8_dynamic_utils import cast_to_float8_e4m3_dynamic
 
-from float8_experimental.float8_tensor import (
-    Float8Tensor,
-    merge_mm_configs,
-    ScaledMMConfig,
-)
+from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
 
 from float8_experimental.float8_utils import e4m3_dtype, EPS
 from torch._prims_common import suggest_memory_format
@@ -129,7 +125,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             if mm_config is None:
                 mm_config = t._mm_config
             else:
-                mm_config = merge_mm_configs(mm_config, t._mm_config)
+                assert t._mm_config == mm_config
             return t._tensor
 
         args, kwargs = pytree.tree_map_only(
@@ -257,7 +253,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             if mm_config is None:
                 mm_config = t._mm_config
             else:
-                mm_config = merge_mm_configs(mm_config, t._mm_config)
+                assert t._mm_config == mm_config
             nonlocal amax_buffer
             if amax_buffer is None:
                 amax_buffer = t._amax_buffer

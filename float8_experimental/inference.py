@@ -20,6 +20,7 @@ from float8_experimental.float8_linear_utils import swap_linear_layers
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
+    GemmInputRole,
     ScaledMMConfig,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
@@ -126,6 +127,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             scale,
             dtype,
             self.forward_config,
+            gemm_input_role=GemmInputRole.W,
         )
         self.weight = nn.Parameter(quantized_weight)
         self.weight.requires_grad = False

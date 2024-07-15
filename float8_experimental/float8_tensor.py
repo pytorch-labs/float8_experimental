@@ -3,8 +3,8 @@
 #
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
-from collections import namedtuple
 import enum
+from collections import namedtuple
 from typing import Dict, Optional
 
 import torch
@@ -24,21 +24,21 @@ aten = torch.ops.aten
 # TODO(future): move all the configs to separate file
 #
 # There are three gemms in a forward + backward of a Linear layer:
-# 
+#
 # 1.     x @ w_t   = y     (forward pass)
 # 2. dL_dY @ w     = dL_dX (backward pass)
 # 3.   x_t @ dL_dY = dL_dW (backward pass)
 #
 # In the formulas above, there are:
-# A. six input tensors (x, x_t, w, w_t, dL_dY, dL_dY_t). 
-#    - Note that dL_dY_t is implied because of memory format requirements 
+# A. six input tensors (x, x_t, w, w_t, dL_dY, dL_dY_t).
+#    - Note that dL_dY_t is implied because of memory format requirements
 #      of float8 gemms
 # B. three output tensors (y, dL_dX, dL_dW)
 #
 # We want each input tensor, gemm, and output tensor to be configurable.
 # The state of this configuration today is:
-# 
-# i. pairs of input tensors (non-t and t variants) have their scaling 
+#
+# i. pairs of input tensors (non-t and t variants) have their scaling
 #    configurable via the scaling_type_{x_w_dL_dY} arguments to Float8Linear
 # ii. each gemm + output is configurable via ScaledMMConfig, which is not user facing
 # iii. LinearMMConfig is a container for the three ScaledMMConfig objects needed
@@ -66,8 +66,9 @@ LinearMMConfig = namedtuple(
         ScaledMMConfig(False, True, False, False),
         ScaledMMConfig(False, False, False, False),
         ScaledMMConfig(False, False, False, False),
-    ]
+    ],
 )
+
 
 # Given a Float8Tensor, the enum below describes the expected role of this
 # tensor in the three gemms present in the fw + bw pass of a Linear layer.
@@ -78,47 +79,32 @@ class GemmInputRole(enum.Enum):
     W = "w"
     DL_DY = "dL_dY"
 
+
 # choose which scaled_mm_config to use based on gemm inputs
 def choose_scaled_mm_config(
-    a_role: GemmInputRole, 
-    a_linear_mm_config: LinearMMConfig, 
-    b_role: GemmInputRole, 
+    a_role: GemmInputRole,
+    a_linear_mm_config: LinearMMConfig,
+    b_role: GemmInputRole,
     b_linear_mm_config: LinearMMConfig,
 ):
     if a_role is GemmInputRole.X and b_role is GemmInputRole.W:
-        assert a_linear_mm_config.y == b_linear_mm_config.y
+        assert (
+            a_linear_mm_config.y == b_linear_mm_config.y
+        ), f"linear_mm_config.y mismatch: {a_linear_mm_config.y} vs {b_linear_mm_config.y}"
         return a_linear_mm_config.y
     elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.W:
-        assert a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
+        assert (
+            a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
+        ), f"linear_mm_config.dL_dX mismatch: {a_linear_mm_config.dL_dX} vs {b_linear_mm_config.dL_dX}"
         return a_linear_mm_config.dL_dX
     else:
-        assert a_role is GemmInputRole.X and b_role is GemmInputRole.DL_DY, \
-            f"unexpected a_role {a_role} and b_role {b_role}"
-        assert a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
+        assert (
+            a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X
+        ), f"unexpected a_role {a_role} and b_role {b_role}"
+        assert (
+            a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
+        ), f"linear_mm_config.dL_dW mismatch: {a_linear_mm_config.dL_dW} vs {b_linear_mm_config.dL_dW}"
         return a_linear_mm_config.dL_dW
-
-
-
-def merge_mm_configs(
-    a_mm_config: ScaledMMConfig, b_mm_config: ScaledMMConfig
-) -> ScaledMMConfig:
-    """Merges two mm_configs together emulate behavior must match,
-    However we want to use_fast_accum in forward and not in backward.
-    We do this by populating the fields of the backproping grad. Same applies for fp8_output.
-
-    For both use_fast_accum and fp8_output, if either config is False, the merged config will be False.
-    """
-    assert (
-        a_mm_config.emulate == b_mm_config.emulate
-    ), "Both mm_configs must have the same emulate value, but got {} and {}".format(
-        a_mm_config.emulate, b_mm_config.emulate
-    )
-    return ScaledMMConfig(
-        emulate=a_mm_config.emulate,
-        use_fast_accum=a_mm_config.use_fast_accum and b_mm_config.use_fast_accum,
-        fp8_output=a_mm_config.fp8_output and b_mm_config.fp8_output,
-        pad_inner_dim=a_mm_config.pad_inner_dim and b_mm_config.pad_inner_dim,
-    )
 
 
 def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
@@ -140,7 +126,8 @@ def to_fp8_no_autograd(
     x: torch.Tensor,
     x_scale: torch.Tensor,
     float8_dtype: torch.dtype,
-    mm_config: Optional[ScaledMMConfig],
+    linear_mm_config: Optional[LinearMMConfig],
+    gemm_input_role: Optional[GemmInputRole],
 ) -> "Float8Tensor":
     """Convert a tensor to float8 without autograd
     This is used in multiple places in the codebase to convert a tensor to float8
@@ -158,7 +145,10 @@ def to_fp8_no_autograd(
         x: the tensor to convert
         scale: the scale to use to convert the tensor
         float8_dtype: the float8 dtype to use
-        mm_config: Defines the configuration for the scaled_mm
+        linear_mm_config: Defines the configuration for the scaled_mm for
+          the 3 fwd/bwd gemms of linear
+        gemm_input_role: Defines the role of this tensor (x, w or dL_dY) in
+          the 3 fwd/bwd gemms of linear
     """
     x_scaled = x * x_scale
     bits_fp8 = to_fp8_saturated(x_scaled, float8_dtype)
@@ -172,7 +162,11 @@ def to_fp8_no_autograd(
         local_bits = bits_fp8.to_local()
         local_scale = x_scale.to_local()
         inner_float8_tensor = Float8Tensor(
-            local_bits, local_scale, x.dtype, mm_config=mm_config
+            local_bits,
+            local_scale,
+            x.dtype,
+            mm_config=linear_mm_config,
+            gemm_input_role=gemm_input_role,
         )
         return DTensor.from_local(
             inner_float8_tensor,
@@ -183,7 +177,13 @@ def to_fp8_no_autograd(
             stride=bits_fp8.stride(),
         )
 
-    return Float8Tensor(bits_fp8, x_scale, x.dtype, mm_config=mm_config)
+    return Float8Tensor(
+        bits_fp8,
+        x_scale,
+        x.dtype,
+        mm_config=linear_mm_config,
+        gemm_input_role=gemm_input_role,
+    )
 
 
 @torch._dynamo.allow_in_graph
@@ -201,7 +201,8 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         scale: torch.Tensor,
         float8_dtype=e4m3_dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        mm_config: Optional[ScaledMMConfig] = None,
+        linear_mm_config: Optional[LinearMMConfig] = None,
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
     ):
         """Autograd enabled wrapper around to_fp8_no_autograd that will also populate the amax buffer.
         Args
@@ -214,11 +215,17 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         if amax_buffer is not None:
             amax_buffer.fill_(tensor_to_amax(tensor))
 
-        return to_fp8_no_autograd(tensor, scale, float8_dtype, mm_config=mm_config)
+        return to_fp8_no_autograd(
+            tensor,
+            scale,
+            float8_dtype,
+            linear_mm_config=linear_mm_config,
+            gemm_input_role=gemm_input_role,
+        )
 
     @staticmethod
     def backward(ctx, g):
-        return g, None, None, None, None
+        return g, None, None, None, None, None
 
 
 @torch._dynamo.allow_in_graph
@@ -300,7 +307,7 @@ class Float8Tensor(torch.Tensor):
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\ngemm_input_role={self._gemm_input_role}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
@@ -329,7 +336,7 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
-        mm_config: Optional[LinearMMConfig] = None,
+        linear_mm_config: Optional[LinearMMConfig] = None,
         gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
@@ -345,7 +352,12 @@ class Float8Tensor(torch.Tensor):
             Float8Tensor: a float8 tensor
         """
         return ToFloat8ConstrFunc.apply(
-            tensor, scale, float8_dtype, amax_buffer, mm_config, gemm_input_role,
+            tensor,
+            scale,
+            float8_dtype,
+            amax_buffer,
+            linear_mm_config,
+            gemm_input_role,
         )
 
     @classmethod
