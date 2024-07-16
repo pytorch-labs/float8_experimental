@@ -116,8 +116,8 @@ for _ in range(N_ITER):
 
 # Multi GPU User API
 
-We compose with the `DTensor` based [distributed APIs](https://pytorch.org/docs/stable/distributed.tensor.parallel.html).
-Please see the [torchtitan](https://github.com/pytorch/torchtitan) repository for e2e examples
+We compose with the `DTensor` based [distributed APIs](https://pytorch.org/docs/stable/distributed.tensor.parallel.html),
+such as FSDP, TP and SP. Please see the [torchtitan](https://github.com/pytorch/torchtitan) repository for e2e examples
 on using `float8_experimental` in a distributed setting.
 
 # Testing
