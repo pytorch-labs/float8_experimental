@@ -3,7 +3,7 @@
 This is an early version of a library for accelerating training with float8 in native PyTorch
 according to the recipes laid out in https://arxiv.org/pdf/2209.05433.pdf.
 The codebase strives to stay small, easily hackable, debuggable with native PyTorch tooling,
-and composable with key systems such as autograd, torch.compile and distributed.
+and composable with key systems such as autograd, ```torch.compile``` and distributed.
 With ``torch.compile`` on, initial results show
 throughput speedups of up to 1.2x on small scale (8 GPUs) LLaMa pretraining jobs.
 
