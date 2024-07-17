@@ -18,7 +18,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from float8_experimental import config
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
@@ -51,7 +51,6 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     )
     swap_linear_with_float8_linear(
         m,
-        Float8Linear,
         emulate=emulate,
         scaling_type_x=TensorScalingType.DELAYED,
         scaling_type_w=TensorScalingType.DELAYED,
