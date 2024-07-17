@@ -39,13 +39,12 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
 )
 from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
-from float8_experimental.float8_linear import Float8Linear
 
 # create model
 m = Model(...)
 
 # convert all `torch.nn.Linear` modules to `Float8Linear`
-swap_linear_with_float8_linear(m, Float8Linear)
+swap_linear_with_float8_linear(m)
 
 # optional: use FSDP
 model = FSDP(model, use_orig_params=True)
@@ -76,7 +75,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 
 # create model
 m = Model(...)
@@ -85,7 +84,6 @@ m = Model(...)
 # type
 swap_linear_with_float8_linear(
     m,
-    Float8Linear,
     scaling_type_x=TensorScalingType.DELAYED,
     scaling_type_w=TensorScalingType.DELAYED,
     scaling_type_dL_dY=TensorScalingType.DELAYED,
