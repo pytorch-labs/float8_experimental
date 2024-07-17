@@ -50,7 +50,10 @@ def implements(aten_ops):
 def float8_desugar_op(aten_op, args, kwargs=None):
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(
-        new_data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config
+        new_data,
+        args[0]._scale,
+        args[0]._orig_dtype,
+        args[0]._mm_config,
     )
 
 
@@ -60,7 +63,10 @@ def float8_split(aten_op, args, kwargs=None):
 
     def make_float8(data):
         return Float8Tensor(
-            data, args[0]._scale, args[0]._orig_dtype, args[0]._mm_config
+            data,
+            args[0]._scale,
+            args[0]._orig_dtype,
+            args[0]._mm_config,
         )
 
     out = map(make_float8, new_data_tensors)
@@ -229,7 +235,10 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         torch.bfloat16,
     }, "Only support floating point conversion for autocast w/ Float8Tensor"
     return Float8Tensor(
-        args[0]._data, args[0]._scale, kwargs["dtype"], args[0]._mm_config
+        args[0]._data,
+        args[0]._scale,
+        kwargs["dtype"],
+        args[0]._mm_config,
     )
 
 
@@ -252,7 +261,10 @@ def allgather_fp8(aten_op, args, kwargs=None):
     fp8_data = fp8_data.contiguous()
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
+        fp8_out,
+        fp8_input._scale,
+        fp8_input._orig_dtype,
+        fp8_input._mm_config,
     )
 
 
@@ -264,7 +276,10 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
     fp8_data = fp8_input._data
     fp8_out = aten_op(fp8_data, *args[1:], **kwargs)
     return Float8Tensor(
-        fp8_out, fp8_input._scale, fp8_input._orig_dtype, fp8_input._mm_config
+        fp8_out,
+        fp8_input._scale,
+        fp8_input._orig_dtype,
+        fp8_input._mm_config,
     )
 
 
@@ -282,7 +297,10 @@ def index_put_fp8(aten_op, args, kwargs=None):
     fp8_values_data = fp8_values._data
     fp8_out = aten_op(fp8_data, args[1], fp8_values_data, *args[3:], **kwargs)
     return Float8Tensor(
-        fp8_out, fp8_self._scale, fp8_self._orig_dtype, fp8_self._mm_config
+        fp8_out,
+        fp8_self._scale,
+        fp8_self._orig_dtype,
+        fp8_self._mm_config,
     )
 
 
@@ -315,6 +333,11 @@ def copy_fp8(aten_op, args, kwargs=None):
             self._data.dtype == src._data.dtype
         ), "Expecting both Float8Tensors to be of the same dtypet"
         fp8_out = aten_op(self._data, src._data, *args[2:], **kwargs)
-        return Float8Tensor(fp8_out, self._scale, self._orig_dtype, self._mm_config)
+        return Float8Tensor(
+            fp8_out,
+            self._scale,
+            self._orig_dtype,
+            self._mm_config,
+        )
     else:
         raise RuntimeError("Unsupported semantics for copy_ in Float8Tensor")
