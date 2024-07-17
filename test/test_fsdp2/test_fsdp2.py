@@ -90,12 +90,6 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
                     TensorScalingType.DELAYED,
                 ],
                 "compile_transformer_block": [False, True],
-                # "enable_fsdp_fp8_all_gather": [True],
-                # "precompute": [True],
-                # "scaling_type_w": [
-                #     TensorScalingType.DYNAMIC,
-                # ],
-                # "compile_transformer_block": [True],
             },
             self._test_transformer_parity,
         )
