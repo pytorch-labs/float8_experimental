@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error
@@ -193,7 +193,6 @@ class TestFP8TrainToFP8LinearInference:
         fp8_mlp.reset_parameters()
         swap_linear_with_float8_linear(
             fp8_mlp,
-            Float8Linear,
             scaling_type_x=TensorScalingType.DYNAMIC,
             scaling_type_w=TensorScalingType.DYNAMIC,
             scaling_type_dL_dY=TensorScalingType.DYNAMIC,
@@ -218,7 +217,6 @@ class TestFP8TrainToFP8LinearInference:
             new_fp8_mlp = FeedForward().to(dtype=dtype)
             swap_linear_with_float8_linear(
                 new_fp8_mlp,
-                Float8Linear,
                 scaling_type_x=TensorScalingType.DYNAMIC,
                 scaling_type_w=TensorScalingType.DYNAMIC,
                 scaling_type_dL_dY=TensorScalingType.DYNAMIC,
