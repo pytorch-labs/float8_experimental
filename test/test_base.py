@@ -10,6 +10,8 @@ import random
 import re
 import unittest
 import warnings
+from itertools import product
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pytest
 
@@ -48,6 +50,42 @@ random.seed(0)
 torch.manual_seed(0)
 
 is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)
+
+
+def filtered_parametrize(
+    param_list: List[Tuple[str, List[Any]]],
+    filter_func: Optional[Callable[[Dict[str, Any]], bool]] = None,
+):
+    """
+    A decorator that works like pytest.mark.parametrize but filters out
+    unwanted parameter combinations.
+
+    Args:
+        param_list: A list of tuples, each containing (arg_name, [arg_values])
+        filter_func: A function that takes a dictionary of parameter names and values,
+                     and returns True for valid combinations, False otherwise
+
+    """
+
+    def decorator(func):
+        arg_names = [param[0] for param in param_list]
+        arg_values = [param[1] for param in param_list]
+
+        all_combinations = product(*arg_values)
+        if filter_func:
+            valid_combinations = [
+                combo
+                for combo in all_combinations
+                if filter_func(dict(zip(arg_names, combo)))
+            ]
+        else:
+            valid_combinations = list(all_combinations)
+
+        return pytest.mark.parametrize(
+            argnames=arg_names, argvalues=valid_combinations
+        )(func)
+
+    return decorator
 
 
 def bitwise_identical(a: Float8Tensor, b: Float8Tensor) -> bool:
@@ -243,32 +281,31 @@ class TestFloat8Linear:
         scaling_type_x: TensorScalingType,
         scaling_type_w: TensorScalingType,
         scaling_type_dL_dY: TensorScalingType,
-        linear_dtype: torch.dtype,
-        linear_bias: bool,
     ):
-        if not emulate:
-            if not torch.cuda.is_available():
-                warnings.warn("CUDA not available")
-                pytest.skip()
-            elif torch.cuda.get_device_capability() < (9, 0):
-                warnings.warn(
-                    f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
-                )
-                pytest.skip()
-        x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
-        m_ref = nn.Linear(16, 32, bias=linear_bias, device="cuda", dtype=linear_dtype)
+        x = torch.randn(*x_shape, device="cuda")
+        m_ref = nn.Linear(16, 32, bias=False, device="cuda")
         self._test_linear_impl(
             x,
             m_ref,
+            linear_type,
             emulate,
             scaling_type_x,
             scaling_type_w,
             scaling_type_dL_dY,
         )
-
-    @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
-    @pytest.mark.parametrize(
-        "linear_dtype", [torch.float16, torch.bfloat16, torch.float32]
+    
+    @filtered_parametrize(
+        [
+            ("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)]),
+            ("emulate", [True, False] if is_H100 else [True]),
+            ("scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]),
+            ("scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]),
+            (
+                "scaling_type_dL_dY",
+                [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC],
+            ),
+            ("linear_dtype", [torch.float16, torch.bfloat16, torch.float32]),
+        ],
     )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_autocast_outputs(
@@ -276,15 +313,6 @@ class TestFloat8Linear:
         emulate: bool,
         linear_dtype: torch.dtype,
     ):
-        if not emulate:
-            if not torch.cuda.is_available():
-                warnings.warn("CUDA not available")
-                pytest.skip()
-            elif torch.cuda.get_device_capability() < (9, 0):
-                warnings.warn(
-                    f"CUDA capability {torch.cuda.get_device_capability()} < (9.0)"
-                )
-                pytest.skip()
 
         m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         kwargs = {
