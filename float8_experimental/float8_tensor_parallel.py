@@ -45,7 +45,7 @@ class Float8ColwiseParallel(ColwiseParallel):
             )
 
         input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor, mod.forward_config
+            input_tensor, mod.forward_config, mod.scaling_granularity
         )  # DTensor(Float8Tensor)
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -64,7 +64,9 @@ class Float8ColwiseParallel(ColwiseParallel):
             )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(
+            outputs, mod.backward_config, mod.scaling_granularity
+        )
 
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
@@ -96,7 +98,7 @@ class Float8RowwiseParallel(RowwiseParallel):
             )
 
         input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor, mod.forward_config
+            input_tensor, mod.forward_config, mod.scaling_granularity
         )  # DTensor(Float8Tensor)
 
         if input_layouts != desired_input_layouts:
@@ -114,7 +116,9 @@ class Float8RowwiseParallel(RowwiseParallel):
             outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(
+            outputs, mod.backward_config, mod.scaling_granularity
+        )
 
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
@@ -143,7 +147,8 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
     # FP8 Args:
     #   float8_dtype (torch.dtype, optional): control what float8 dtype to cast to when prepare the module input,
     #       we currently only support torch.float8_e4m3fn. default: torch.float8_e4m3fn
-    #   fwd_config_submodule_fqn (str, optional): the fqn of the submodule that contains the forward config used
+    #   fwd_config_submodule_fqn (str, optional): the fqn of the submodule that contains the forward config 
+    #       and scaling_granularity used
     #       for the float8 cast. If not specified, we will search for the Float8Linear in the submodules
     #       and use the forward config from that module, in this case all module's forward config must be
     #       the same.
@@ -191,7 +196,9 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                 )
 
             dt_inp = cast_to_float8_e4m3_dynamic(
-                dt_inp, self.fwd_linear_config
+                dt_inp,
+                mm_config=self.fwd_linear_config,
+                scaling_granularity=self.scaling_granularity,
             )  # DTensor(Float8Tensor)
             if desired_layout is not None and input_layout != desired_layout:
                 dt_inp = dt_inp.redistribute(placements=(desired_layout,))
@@ -204,21 +211,27 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
         from float8_experimental.float8_linear import Float8Linear
 
         fwd_linear_config = None
+        scaling_granularity = None
         if self.fwd_config_submodule_fqn is not None:
             fwd_linear = module.get_submodule(self.fwd_config_submodule_fqn)
             assert isinstance(fwd_linear, Float8Linear)
             fwd_linear_config = fwd_linear.forward_config
+            scaling_granularity = fwd_linear.scaling_granularity
         else:
             # search for ScaledMM configs for all the submodules and make sure they are the same
             for mod in module.modules():
                 if isinstance(mod, Float8Linear):
                     if fwd_linear_config is None:
                         fwd_linear_config = mod.forward_config
+                        scaling_granularity = mod.scaling_granularity
                     else:
                         assert (
                             fwd_linear_config == mod.forward_config
                         ), "All the Float8Linear modules should have same forward config!"
-
+                        assert (
+                            scaling_granularity == mod.scaling_granularity
+                        ), "All the Float8DynamicLinear modules should have same scaling granularity!"
         self.fwd_linear_config = fwd_linear_config
+        self.scaling_granularity = scaling_granularity
         super()._apply(module, device_mesh)
         return module

@@ -7,9 +7,9 @@
 from typing import Iterable, Literal, Tuple, Union
 
 import float8_experimental.config as config
-
 import torch
 import torch.distributed as dist
+
 
 # Helpful visualizer for debugging (only supports fp32):
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html
@@ -100,7 +100,22 @@ def amax_history_to_scale_stack(
 
 
 @torch.no_grad()
-def tensor_to_amax(x: torch.Tensor, reduce_amax: bool = False) -> torch.Tensor:
+def tensor_to_amax(
+    x: torch.Tensor,
+    scaling_granularity,
+    reduce_amax: bool = False,
+) -> torch.Tensor:
+    """Calculates the amax of a tensor.
+    Args:
+        x: The tensor to calculate the amax for.
+        scaling_granularity: The granularity of with which to calcualte the tensor amax
+        reduce_amax: Whether to perform a distributed reduction on the amax.
+    """
+    from float8_experimental.float8_tensor import ScalingGranularity
+
+    assert (
+        scaling_granularity == ScalingGranularity.TensorWise
+    ), f"Currently only TensorWise is supported for but given scaling_granularity: {scaling_granularity}"
     amax = torch.max(torch.abs(x))
 
     # If the user asked for distributed reduction, do it.
@@ -114,9 +129,19 @@ def tensor_to_amax(x: torch.Tensor, reduce_amax: bool = False) -> torch.Tensor:
 
 @torch.no_grad()
 def tensor_to_scale(
-    x: torch.Tensor, float8_dtype: torch.dtype, reduce_amax: bool = False
+    x: torch.Tensor,
+    float8_dtype: torch.dtype,
+    scaling_granularity,
+    reduce_amax: bool = False,
 ) -> torch.Tensor:
-    amax = tensor_to_amax(x, reduce_amax=reduce_amax)
+    """Calculates the scale that will be used for quantization to Float8Tensor
+    Args:
+        x: The tensor to calculate the scale for.
+        float8_dtype: The Float8 dtype to use.
+        scaling_granularity: The granularity of the scale. See ScalingGranularity for more details.
+        reduce_amax: Whether to perform a distributed reduction on the amax.
+    """
+    amax = tensor_to_amax(x, scaling_granularity, reduce_amax=reduce_amax)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
