@@ -89,6 +89,13 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
                     TensorScalingType.DYNAMIC,
                     TensorScalingType.DELAYED,
                 ],
+                "compile_transformer_block": [False, True],
+                # "enable_fsdp_fp8_all_gather": [True],
+                # "precompute": [True],
+                # "scaling_type_w": [
+                #     TensorScalingType.DYNAMIC,
+                # ],
+                # "compile_transformer_block": [True],
             },
             self._test_transformer_parity,
         )
@@ -98,6 +105,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         enable_fsdp_fp8_all_gather: bool,
         precompute: bool,
         scaling_type_w: TensorScalingType,
+        compile_transformer_block: bool,
     ):
         if not enable_fsdp_fp8_all_gather and precompute:
             return
@@ -114,9 +122,11 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         swap_linear_with_float8_linear(ref_module, scaling_type_w=scaling_type_w)
         with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
             swap_linear_with_float8_linear(module, scaling_type_w=scaling_type_w)
-        for submodule in module.modules():
-            if isinstance(submodule, TransformerBlock):
-                fully_shard(submodule)
+        for layer_id, transformer_block in module.layers.named_children():
+            if compile_transformer_block:
+                transformer_block = torch.compile(transformer_block, dynamic=False)
+            fully_shard(transformer_block)
+            module.layers.register_module(layer_id, transformer_block)
         fully_shard(module)
         ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
         optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
@@ -132,6 +142,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             local_inp,
             precompute,
             scaling_type_w=scaling_type_w,
+            compile_transformer_block=compile_transformer_block,
         )
 
     @skip_if_lt_x_gpu(2)

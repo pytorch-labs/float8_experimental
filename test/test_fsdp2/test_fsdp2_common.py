@@ -6,7 +6,7 @@ import float8_experimental.config as config
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     sync_float8_amax_and_scale_history,
@@ -23,6 +23,7 @@ def check_parity_no_mp(
     local_inp: torch.Tensor,
     precompute: bool = False,
     scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
+    compile_transformer_block: bool = False,
 ):
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
@@ -46,7 +47,10 @@ def check_parity_no_mp(
             ):
                 precompute_float8_dynamic_scale_for_fsdp(model)
 
-        test_cls.assertEqual(losses[0], losses[1])
+        if compile_transformer_block:
+            torch.testing.assert_close(losses[0], losses[1], atol=9.5e-2, rtol=9.5e-2)
+        else:
+            test_cls.assertEqual(losses[0], losses[1])
 
 
 def check_parity_bf16_mp(
