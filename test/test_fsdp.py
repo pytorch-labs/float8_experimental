@@ -21,10 +21,9 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -84,7 +83,6 @@ def fsdp_main(rank, world_size, args):
     # with weights.
     swap_linear_with_float8_linear(
         model_fp8,
-        Float8Linear,
         emulate=False,
         scaling_type_w=scaling_type_w,
     )
@@ -133,7 +131,6 @@ def fsdp_main(rank, world_size, args):
         y_local = model(ref_input_local[i])
         y_local.backward(ref_grad_local[i])
         if is_fp8 and linear_requires_sync(
-            LinearType.DELAYED,
             TensorScalingType.DYNAMIC,
             scaling_type_w,
             TensorScalingType.DYNAMIC,
@@ -152,7 +149,7 @@ def fsdp_main(rank, world_size, args):
             model_fp8 = torch.compile(model_fp8)
         y_local = forward_backward(model, optimizer, is_fp8=False, i=i)
         y_local_fp8 = forward_backward(model_fp8, optimizer_fp8, is_fp8=True, i=i)
-        local_sqnr = compute_error(y_local, y_local_fp8)
+        local_sqnr = compute_error(y_local, y_local_fp8)  # noqa: F841
 
     # get global y
     y_global = [

@@ -14,11 +14,9 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_dynamic_linear import Float8DynamicLinear
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -85,32 +83,14 @@ class TestFloat8NumericsIntegrationTest:
     @pytest.mark.parametrize(
         "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
-    @pytest.mark.parametrize("linear_cls", [Float8Linear, Float8DynamicLinear])
     @pytest.mark.skipif(not is_H100, reason="requires H100 GPU")
     @pytest.mark.skipif(IS_ROCM, reason="test doesn't currently work on the ROCm stack")
     def test_encoder_fw_bw(
         self,
-        linear_cls,
         scaling_type_x: TensorScalingType,
         scaling_type_w: TensorScalingType,
         scaling_type_dL_dY: TensorScalingType,
     ):
-        linear_type = (
-            LinearType.DELAYED if linear_cls == Float8Linear else LinearType.DYNAMIC
-        )
-        if linear_type is LinearType.DYNAMIC:
-            # Only test one combination of scaling types, as they are a no-op
-            # for Float8DynamicLinear. It would be cleaner to split into two
-            # tests, but IMO not worth it since Float8DynamicLinear will be
-            # deleted soon
-            is_all_dynamic = (
-                scaling_type_x is TensorScalingType.DYNAMIC
-                and scaling_type_w is TensorScalingType.DYNAMIC
-                and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            )
-            if not is_all_dynamic:
-                pytest.skip()
-
         # TODO(later): maybe add float16 back if it becomes important
         data_dtype = torch.bfloat16
 
@@ -130,7 +110,6 @@ class TestFloat8NumericsIntegrationTest:
         model_fp8 = copy.deepcopy(model_ref)
         swap_linear_with_float8_linear(
             model_fp8,
-            linear_cls,
             emulate=False,
             scaling_type_x=scaling_type_x,
             scaling_type_w=scaling_type_w,
@@ -156,17 +135,13 @@ class TestFloat8NumericsIntegrationTest:
         model_ref_out = model_ref(data2)
         model_ref_out.sum().backward()
 
-        if linear_requires_sync(
-            linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-        ):
+        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8(data1).sum().backward()
         # zero out grads without stepping, since we just want to compare grads
         # of the second datum
         optim_fp8.zero_grad()
-        if linear_requires_sync(
-            linear_type, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-        ):
+        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8_out = model_fp8(data2)
         model_fp8_out.sum().backward()
