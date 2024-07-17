@@ -14,11 +14,9 @@ import pandas as pd
 
 import torch
 import torch.utils.benchmark as benchmark
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
-    get_float8_linear,
     linear_requires_sync,
-    LinearType,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_tensor import ScaledMMConfig
@@ -69,7 +67,6 @@ class Experiment:
     dtype: torch.dtype
     compiled: bool
     use_fast_accum: bool
-    linear_type: str
     scaling_repr: str
 
     # 3 Times since we are calculating forward backward
@@ -98,7 +95,6 @@ def main(
     n_limit: Optional[int] = None,
     fast_accum_filter: Optional[bool] = None,
     shape_name_filter: Optional[str] = None,
-    linear_type_filter: Optional[str] = None,
     scaling_type_x: str = "delayed",
     scaling_type_w: str = "delayed",
     scaling_type_dL_dY: str = "delayed",
@@ -123,44 +119,28 @@ def main(
         use_fast_accum = [fast_accum_filter]
     else:
         use_fast_accum = [True, False]
-    if linear_type_filter is not None:
-        linear_types = [linear_type_filter]
-    else:
-        linear_types = ["delayed", "dynamic"]
     if shape_name_filter is not None:
         k = shape_name_filter
         name_to_shapes_70b = {k: name_to_shapes_70b[k]}
     experiment_list: List[Experiment] = []
     dtype = torch.bfloat16
-    for idx, (fast_accum, (name, (K, N)), linear_type) in enumerate(
-        tqdm(list(product(use_fast_accum, name_to_shapes_70b.items(), linear_types)))
+    for idx, (fast_accum, (name, (K, N))) in enumerate(
+        tqdm(list(product(use_fast_accum, name_to_shapes_70b.items())))
     ):
         if n_limit is not None and idx >= n_limit:
             break
         linear_ref = torch.nn.Linear(K, N, bias=input_bias).to(
             device=device, dtype=dtype
         )
-        linear_type_enum = (
-            LinearType.DELAYED if linear_type == "delayed" else LinearType.DYNAMIC
-        )
 
-        if linear_type == "delayed":
-            linear_float8 = get_float8_linear(
-                linear_type_enum,
-                copy.deepcopy(linear_ref),
-                emulate=False,
-                scaling_type_x=scaling_type_x,
-                scaling_type_w=scaling_type_w,
-                scaling_type_dL_dY=scaling_type_dL_dY,
-            )
-            scaling_repr = linear_float8.scaling_repr()
-        else:
-            linear_float8 = get_float8_linear(
-                linear_type_enum,
-                copy.deepcopy(linear_ref),
-                emulate=False,
-            )
-            scaling_repr = None
+        linear_float8 = Float8Linear.from_float(
+            copy.deepcopy(linear_ref),
+            emulate=False,
+            scaling_type_x=scaling_type_x,
+            scaling_type_w=scaling_type_w,
+            scaling_type_dL_dY=scaling_type_dL_dY,
+        )
+        scaling_repr = linear_float8.scaling_repr()
 
         if fast_accum:
             linear_float8.forward_config = ScaledMMConfig(False, True, False)
@@ -172,19 +152,10 @@ def main(
         input_tensor = torch.randn(M, K, device=device, dtype=dtype, requires_grad=True)
         ref_forw_backward = lambda: linear_ref(input_tensor).sum().backward()
 
-        if linear_type_enum == LinearType.DELAYED:
-
-            def float8_forw_backward():
-                if linear_requires_sync(
-                    linear_type_enum, scaling_type_x, scaling_type_w, scaling_type_dL_dY
-                ):
-                    sync_float8_amax_and_scale_history(linear_float8)
-                linear_float8(input_tensor).sum().backward()
-
-        else:
-
-            def float8_forw_backward():
-                linear_float8(input_tensor).sum().backward()
+        def float8_forw_backward():
+            if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+                sync_float8_amax_and_scale_history(linear_float8)
+            linear_float8(input_tensor).sum().backward()
 
         def n_times(n, fn, *args, **kwargs):
             def wrapper(*args, **kwargs):
@@ -224,7 +195,6 @@ def main(
             dtype,
             compile,
             use_fast_accum=fast_accum,
-            linear_type=linear_type,
             scaling_repr=scaling_repr,
         )
         print(experiment)
@@ -237,7 +207,6 @@ def main(
         "M",
         "K",
         "N",
-        "linear_type",
         "scaling_repr",
         "ref_dtype",
         "compiled",
@@ -257,7 +226,6 @@ def main(
                 experiment.shape[0],
                 experiment.shape[1],
                 experiment.shape[2],
-                experiment.linear_type,
                 experiment.scaling_repr,
                 experiment.dtype,
                 experiment.compiled,
@@ -287,7 +255,6 @@ def main(
         [
             "name",
             "shape",
-            "linear_type",
             "scaling_repr",
             "compiled",
             "use_fast_accum",
@@ -311,7 +278,6 @@ def invoke_main() -> None:
     parser.add_argument("-n", "--n_limit", type=int, required=False)
     parser.add_argument("--fast_accum_filter", type=bool, required=False)
     parser.add_argument("--shape_name_filter", type=str, required=False)
-    parser.add_argument("--linear_type_filter", type=str, required=False)
     parser.add_argument("--scaling_type_x", type=str, required=False)
     parser.add_argument("--scaling_type_w", type=str, required=False)
     parser.add_argument("--scaling_type_dL_dY", type=str, required=False)
@@ -330,7 +296,6 @@ def invoke_main() -> None:
         args.n_limit,
         args.fast_accum_filter,
         args.shape_name_filter,
-        args.linear_type_filter,
         **kwargs,
     )
 
