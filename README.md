@@ -2,11 +2,12 @@
 
 This is an early version of a library for accelerating training with float8 in native PyTorch
 according to the recipes laid out in https://arxiv.org/pdf/2209.05433.pdf.
-The codebase strives to stay small, easily hackable, and debuggable with native PyTorch tooling.
-``torch.compile`` is supported out of the box. With ``torch.compile`` on, initial results show
+The codebase strives to stay small, easily hackable, debuggable with native PyTorch tooling,
+and composable with key systems such as autograd, ```torch.compile``` and distributed.
+With ``torch.compile`` on, initial results show
 throughput speedups of up to 1.2x on small scale (8 GPUs) LLaMa pretraining jobs.
 
-:warning: <em>See the [feature tracker](https://github.com/pytorch-labs/float8_experimental/issues/187) for upcoming features. Key features such as weight cast recomputation in backward and large scale distributed support are not ready yet. </em>
+:warning: <em>See the [feature tracker](https://github.com/pytorch-labs/float8_experimental/issues/187) for upcoming features.</em>
 
 :warning: <em>Backwards compatibility is not guaranteed at this point. The codebase is in active development and
 will change rapidly.</em>
@@ -25,7 +26,7 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-# User API
+# Single GPU User API
 
 We provide two per-tensor scaling strategies: dynamic and delayed.  See https://arxiv.org/pdf/2209.05433.pdf, Section 4.3 for more details. These strategies are configurable separately for activations (`x`), weights (`w`) and gradients (`dL_dY`).
 
@@ -37,6 +38,7 @@ This is the most accurate recipe as every tensor is scaled dynamically.
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
 )
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 from float8_experimental.float8_linear import Float8Linear
 
 # create model
@@ -51,7 +53,18 @@ model = FSDP(model, use_orig_params=True)
 # optional: enable torch.compile for improved performance
 m = torch.compile(m)
 
-# train/finetune (not shown)
+# toy training loop
+for _ in range(N_ITER):
+    optimizer.zero_grad()
+    y = m(x)
+    y.sum().backward()
+    optimizer.step()
+
+    # specific to fsdp2 + dynamic scaling, when fp8 all-gather is turned on
+    # this method is optional but is highly recommended for performance
+    # it calcuclates scales for all parameters in a single all-reduce
+    precompute_float8_dynamic_scale_for_fsdp(model)
+
 ```
 
 ## float8 linear with delayed scaling
@@ -71,7 +84,7 @@ m = Model(...)
 # convert all `torch.nn.Linear` modules to `Float8Linear`, specifying scaling
 # type
 swap_linear_with_float8_linear(
-    m, 
+    m,
     Float8Linear,
     scaling_type_x=TensorScalingType.DELAYED,
     scaling_type_w=TensorScalingType.DELAYED,
@@ -101,13 +114,11 @@ for _ in range(N_ITER):
     optimizer.step()
 ```
 
-# 🧭 Code Organization
+# Multi GPU User API
 
-* `float8_experimental/float8_linear.py`
-    - `Float8Linear` (main user facing entry point for Float8Linear)
-* `float8_experimental/float8_tensor.py`
-    - `Float8Tensor`, which allows `Float8Linear` to abide by the `x.dtype == x.grad.dtype` restriction
-    - `ScaledMMConfig` defines the semantics for matmul in the forward and backwards pass
+We compose with the `DTensor` based [distributed APIs](https://pytorch.org/docs/stable/distributed.tensor.parallel.html),
+such as FSDP, TP and SP. Please see the [torchtitan](https://github.com/pytorch/torchtitan) repository for e2e examples
+on using `float8_experimental` in a distributed setting.
 
 # Testing
 
@@ -115,16 +126,20 @@ for _ in range(N_ITER):
 # run single-GPU unit tests
 pytest test/test_base.py
 
-# run a single-GPU integration test on SAM
-pytest test/test_sam.py
-
 # run single-GPU compile tests
 pytest test/test_compile.py
+
+# run single-GPU numerics integration tests
+pytest test/test_numerics_integration.py
+
 # run a two-GPU integration test on FSDP
 ./test/test_fsdp.sh
 
-# run integration tests for TP/SP (outdated)
-./test/test_tp.sh
+# run integration tests on the DTensor TP/SP integration
+./test/test_dtensor.sh
+
+# run integration tests on the FSDP2 integration
+python test/test_fsdp2/test_fsdp2_eager.py
 
 # run all of these tests
 ./test/test_everything.sh

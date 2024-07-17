@@ -16,8 +16,6 @@ import torch.nn as nn
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     get_float8_layers,
-    get_float8_linear,
-    LinearType,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
@@ -34,7 +32,6 @@ def _test_compile_base(
     backend: str,
     fullgraph: bool,
     emulate: bool,
-    linear_type: LinearType,
     scaling_type_x,
     scaling_type_w,
     scaling_type_dL_dY,
@@ -48,8 +45,12 @@ def _test_compile_base(
     x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
     m_ref = nn.Linear(16, 32, bias=True, device="cuda", dtype=linear_dtype)
 
-    m_fp8 = get_float8_linear(
-        linear_type, m_ref, emulate, scaling_type_x, scaling_type_w, scaling_type_dL_dY
+    m_fp8 = Float8Linear.from_float(
+        copy.deepcopy(m_ref),
+        emulate,
+        scaling_type_x,
+        scaling_type_w,
+        scaling_type_dL_dY,
     )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
@@ -66,7 +67,6 @@ def _test_compile_base(
 
 
 @pytest.mark.parametrize("fullgraph", [True])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize(
     "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
@@ -82,30 +82,16 @@ def _test_compile_base(
 def test_eager_only(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
     scaling_type_x: TensorScalingType,
     scaling_type_w: TensorScalingType,
     scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
-    if linear_type is LinearType.DYNAMIC:
-        # Only test one combination of scaling types, as they are a no-op
-        # for Float8DynamicLinear. It would be cleaner to split into two
-        # tests, but IMO not worth it since Float8DynamicLinear will be
-        # deleted soon
-        is_all_dynamic = (
-            scaling_type_x is TensorScalingType.DYNAMIC
-            and scaling_type_w is TensorScalingType.DYNAMIC
-            and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-        )
-        if not is_all_dynamic:
-            pytest.skip()
     torch._dynamo.reset()
     _test_compile_base(
         "eager",
         fullgraph,
         emulate,
-        linear_type,
         scaling_type_x,
         scaling_type_w,
         scaling_type_dL_dY,
@@ -115,7 +101,6 @@ def test_eager_only(
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize(
     "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
@@ -130,30 +115,16 @@ def test_eager_only(
 def test_aot_eager(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
     scaling_type_x: TensorScalingType,
     scaling_type_w: TensorScalingType,
     scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
-    if linear_type is LinearType.DYNAMIC:
-        # Only test one combination of scaling types, as they are a no-op
-        # for Float8DynamicLinear. It would be cleaner to split into two
-        # tests, but IMO not worth it since Float8DynamicLinear will be
-        # deleted soon
-        is_all_dynamic = (
-            scaling_type_x is TensorScalingType.DYNAMIC
-            and scaling_type_w is TensorScalingType.DYNAMIC
-            and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-        )
-        if not is_all_dynamic:
-            pytest.skip()
     torch._dynamo.reset()
     _test_compile_base(
         "aot_eager",
         fullgraph,
         emulate,
-        linear_type,
         scaling_type_x,
         scaling_type_w,
         scaling_type_dL_dY,
@@ -163,7 +134,6 @@ def test_aot_eager(
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
-@pytest.mark.parametrize("linear_type", [LinearType.DELAYED, LinearType.DYNAMIC])
 @pytest.mark.parametrize(
     "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
@@ -178,30 +148,16 @@ def test_aot_eager(
 def test_inductor(
     fullgraph,
     emulate: bool,
-    linear_type: bool,
     scaling_type_x: TensorScalingType,
     scaling_type_w: TensorScalingType,
     scaling_type_dL_dY: TensorScalingType,
     dtype: torch.dtype,
 ):
-    if linear_type is LinearType.DYNAMIC:
-        # Only test one combination of scaling types, as they are a no-op
-        # for Float8DynamicLinear. It would be cleaner to split into two
-        # tests, but IMO not worth it since Float8DynamicLinear will be
-        # deleted soon
-        is_all_dynamic = (
-            scaling_type_x is TensorScalingType.DYNAMIC
-            and scaling_type_w is TensorScalingType.DYNAMIC
-            and scaling_type_dL_dY is TensorScalingType.DYNAMIC
-        )
-        if not is_all_dynamic:
-            pytest.skip()
     torch._dynamo.reset()
     _test_compile_base(
         "inductor",
         fullgraph,
         emulate,
-        linear_type,
         scaling_type_x,
         scaling_type_w,
         scaling_type_dL_dY,
@@ -301,7 +257,6 @@ def test_sync_amax_func():
     )
     float8_mod = swap_linear_with_float8_linear(
         module,
-        Float8Linear,
         scaling_type_x=TensorScalingType.DELAYED,
         scaling_type_w=TensorScalingType.DELAYED,
         scaling_type_dL_dY=TensorScalingType.DELAYED,
@@ -337,7 +292,6 @@ def test_sync_amax_func_cuda_graph_success():
         ).to("cuda")
         swap_linear_with_float8_linear(
             my_module,
-            Float8Linear,
             scaling_type_x=TensorScalingType.DELAYED,
             scaling_type_w=TensorScalingType.DELAYED,
             scaling_type_dL_dY=TensorScalingType.DELAYED,
