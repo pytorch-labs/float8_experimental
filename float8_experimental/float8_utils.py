@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Iterable, Literal, Tuple, Union
+from typing import Iterable, Literal, Optional, Tuple, Union
 
 import float8_experimental.config as config
 import torch
@@ -30,6 +30,12 @@ FP8_TYPES = {
 # User defined type for using the individual F8 type based on config
 e4m3_dtype = torch.float8_e4m3fn if not config.use_fnuz_dtype else torch.float8_e4m3fnuz
 e5m2_dtype = torch.float8_e5m2 if not config.use_fnuz_dtype else torch.float8_e5m2fnuz
+
+
+def get_supported_granularity():
+    from float8_experimental.float8_tensor import ScalingGranularity
+
+    return [ScalingGranularity.TensorWise, ScalingGranularity.AxisWise]
 
 
 @torch.no_grad()
@@ -103,20 +109,34 @@ def amax_history_to_scale_stack(
 def tensor_to_amax(
     x: torch.Tensor,
     scaling_granularity,
+    dim: Optional[int] = None,
     reduce_amax: bool = False,
 ) -> torch.Tensor:
     """Calculates the amax of a tensor.
     Args:
         x: The tensor to calculate the amax for.
         scaling_granularity: The granularity of with which to calcualte the tensor amax
+        dim: The dimension along which to calculate the amax. This is only used if scaling_granularity is AxisWise.
         reduce_amax: Whether to perform a distributed reduction on the amax.
     """
     from float8_experimental.float8_tensor import ScalingGranularity
 
-    assert (
-        scaling_granularity == ScalingGranularity.TensorWise
-    ), f"Currently only TensorWise is supported for but given scaling_granularity: {scaling_granularity}"
-    amax = torch.max(torch.abs(x))
+    supported_granularities = get_supported_granularity()
+
+    if scaling_granularity not in supported_granularities:
+        raise ValueError(
+            f"Currently only {supported_granularities} are supported. Given scaling_granularity: {scaling_granularity}"
+        )
+
+    if scaling_granularity == ScalingGranularity.TensorWise:
+        amax = torch.max(torch.abs(x))
+    elif scaling_granularity == ScalingGranularity.AxisWise:
+        if dim is None:
+            raise ValueError("For AxisWise scaling, a dim must be passed in!")
+        amax = torch.max(torch.abs(x), dim=dim, keepdim=True).values
+    else:
+        # This should never be reached due to the earlier check, but it's here for completeness
+        raise ValueError(f"Unsupported scaling_granularity: {scaling_granularity}")
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
@@ -132,16 +152,20 @@ def tensor_to_scale(
     x: torch.Tensor,
     float8_dtype: torch.dtype,
     scaling_granularity,
+    dim: Optional[int] = None,
     reduce_amax: bool = False,
+    collapse_leading_dims: bool = False,
 ) -> torch.Tensor:
     """Calculates the scale that will be used for quantization to Float8Tensor
     Args:
         x: The tensor to calculate the scale for.
         float8_dtype: The Float8 dtype to use.
         scaling_granularity: The granularity of the scale. See ScalingGranularity for more details.
+        dim: The dimension along which to calculate the scale. This is only used if scaling_granularity is AxisWise.
         reduce_amax: Whether to perform a distributed reduction on the amax.
+        collapse_leading_dims: Whether to collapse leading dimensions of the tensor.
     """
-    amax = tensor_to_amax(x, scaling_granularity, reduce_amax=reduce_amax)
+    amax = tensor_to_amax(x, scaling_granularity, dim=dim, reduce_amax=reduce_amax)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 
