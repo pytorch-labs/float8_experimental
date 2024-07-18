@@ -91,13 +91,13 @@ class Experiment:
 
 def main(
     sweep_path: Optional[Path] = None,
-    compile: bool = False,
+    compile: bool = True,
     n_limit: Optional[int] = None,
     fast_accum_filter: Optional[bool] = None,
     shape_name_filter: Optional[str] = None,
-    scaling_type_x: str = "delayed",
-    scaling_type_w: str = "delayed",
-    scaling_type_dL_dY: str = "delayed",
+    scaling_type_x: str = "dynamic",
+    scaling_type_w: str = "dynamic",
+    scaling_type_dL_dY: str = "dynamic",
 ):
     device = "cuda"
     print(f"Compile is set to             | {compile}")
@@ -274,7 +274,7 @@ def main(
 def invoke_main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--output_path", type=str, required=False)
-    parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--disable_compile", action="store_true")
     parser.add_argument("-n", "--n_limit", type=int, required=False)
     parser.add_argument("--fast_accum_filter", type=bool, required=False)
     parser.add_argument("--shape_name_filter", type=str, required=False)
@@ -292,7 +292,7 @@ def invoke_main() -> None:
         kwargs["scaling_type_dL_dY"] = args.scaling_type_dL_dY
     main(
         output_path,
-        args.compile,
+        not args.disable_compile,
         args.n_limit,
         args.fast_accum_filter,
         args.shape_name_filter,
