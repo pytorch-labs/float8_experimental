@@ -64,7 +64,9 @@ def precompute_float8_dynamic_scale_for_fsdp(module: nn.Module) -> None:
         scale_tensor = torch.clamp(scale_tensor, max=torch.finfo(torch.float16).max)
     scales = torch.split(scale_tensor, 1)  # Replicate
     for scale, float8_linear in zip(scales, float8_linears):
-        float8_linear.weight._local_tensor._precomputed_scale = scale._local_tensor
+        float8_linear.weight._local_tensor._precomputed_scale = (
+            scale._local_tensor.squeeze()
+        )
 
 
 # FSDP pads its local tensor on dim-0. The subclass should be preserved such
@@ -301,7 +303,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             ],
             {
                 "mm_config": self._mm_config,
-                "is_amax_initialized": is_amax_initialized,
+                "is_amax_initialized": self.is_amax_initialized,
             },
         )
 

@@ -4,8 +4,6 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, Optional, Tuple
-
 import torch
 
 from float8_experimental.float8_tensor import (
