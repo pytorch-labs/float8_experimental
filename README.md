@@ -139,7 +139,7 @@ pytest test/test_numerics_integration.py
 ./test/test_dtensor.sh
 
 # run integration tests on the FSDP2 integration
-python test/test_fsdp2/test_fsdp2_eager.py
+python test/test_fsdp2/test_fsdp2.py
 
 # run all of these tests
 ./test/test_everything.sh
