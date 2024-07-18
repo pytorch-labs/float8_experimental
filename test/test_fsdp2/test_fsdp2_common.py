@@ -48,7 +48,7 @@ def check_parity_no_mp(
                 precompute_float8_dynamic_scale_for_fsdp(model)
 
         if compile_transformer_block:
-            torch.testing.assert_close(losses[0], losses[1], atol=9.5e-2, rtol=9.5e-2)
+            test_cls.assertEqual(losses[0], losses[1], atol=1e-4, rtol=1e-4)
         else:
             test_cls.assertEqual(losses[0], losses[1])
 

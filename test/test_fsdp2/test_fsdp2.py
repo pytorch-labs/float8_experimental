@@ -114,6 +114,10 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         module = self.init_transformer(weight_tying=weight_tying).cuda()
         ref_module = copy.deepcopy(module)
         swap_linear_with_float8_linear(ref_module, scaling_type_w=scaling_type_w)
+        if compile_transformer_block:
+            for layer_id, transformer_block in ref_module.layers.named_children():
+                transformer_block = torch.compile(transformer_block, dynamic=False)
+                ref_module.layers.register_module(layer_id, transformer_block)
         with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
             swap_linear_with_float8_linear(module, scaling_type_w=scaling_type_w)
         for layer_id, transformer_block in module.layers.named_children():
