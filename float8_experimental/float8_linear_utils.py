@@ -59,26 +59,11 @@ def _update_history_stack(
     amax_history_stack.copy_(new_amax_history_stack)
 
 
-def filter_out_small_unaligned_layers(size_limit: int) -> Callable[[nn.Linear], bool]:
-    """
-    Returns a callable that filters out small (dimensions less than the given `size_limit`)
-        and unaligned (dimenstions not divisible by 16) layers.
-    It can be passed as the `linear_layer_filter` argument to `swap_linear_with_float8_linear`.
-    """
-    return (
-        lambda linear_layer: linear_layer.in_features >= size_limit
-        and linear_layer.out_features >= size_limit
-        and linear_layer.in_features % 16 == 0
-        and linear_layer.out_features % 16 == 0
-    )
-
-
 def swap_linear_layers(
     module: nn.Module,
     from_float_func: Callable[[nn.Linear], nn.Linear],
     *,
-    skip_fqn_list: Optional[List[str]] = None,
-    linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
+    layer_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
 ) -> Optional[nn.Module]:
     """
     Generic function to swap linear layers in a module with a new type of linear layer.
@@ -90,18 +75,17 @@ def swap_linear_layers(
     Args:
         module: Module to modify.
         from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
-        skip_fqn_list: If specified, a list of module FQNs to skip.
-        linear_layer_filter: If specified, only the linear layers
-            that pass the filter function will be swapped.
-        from_float_kwargs: Additional keyword arguments for from_float_func.
+        layer_filter_fn: If specified, only the modules that
+            that pass the filter function will be swapped. The inputs to the
+            filter function are the FQN and module instance.
 
     Returns:
      nn.Module: The modified module with swapped linear layers.
     """
-    module_names_to_skip = set(skip_fqn_list or [])
-
     if isinstance(module, nn.Linear) and (
-        linear_layer_filter is None or linear_layer_filter(module)
+        # linear_layer_filter is None or linear_layer_filter(module)
+        layer_filter_fn is None
+        or layer_filter_fn("", module)
     ):
         if len(list(module.children())) > 0:
             raise AssertionError(
@@ -112,43 +96,44 @@ def swap_linear_layers(
         )
 
     root_module = module
-    visited_modules = {root_module}
-
-    for module_name, module in root_module.named_modules():
-        if module_name in module_names_to_skip:
-            visited_modules.add(module)
 
     def post_order_traversal(
-        module: nn.Module, module_name: str, parent_module: Optional[nn.Module]
+        module: nn.Module,
+        cur_fqn: Optional[str] = None,
+        parent_module: Optional[nn.Module] = None,
     ):
-        nonlocal visited_modules
+        if cur_fqn is None:
+            cur_fqn = ""
+
         for child_module_name, child_module in module.named_children():
-            if child_module not in visited_modules:
-                visited_modules.add(child_module)
-                post_order_traversal(child_module, child_module_name, module)
+            if cur_fqn == "":
+                new_fqn = child_module_name
+            else:
+                new_fqn = f"{cur_fqn}.{child_module_name}"
+
+            post_order_traversal(child_module, new_fqn, module)
 
         if isinstance(module, nn.Linear) and (
-            linear_layer_filter is None or linear_layer_filter(module)
+            # linear_layer_filter is None or linear_layer_filter(module)
+            layer_filter_fn is None
+            or layer_filter_fn(cur_fqn, module)
         ):
             assert (
                 parent_module is not None
             ), f"Linear root module should return early: {module}"
             new_linear_module = from_float_func(module)
-            setattr(parent_module, module_name, new_linear_module)
+            cur_module_name = cur_fqn.split(".")[-1]
+            setattr(parent_module, cur_module_name, new_linear_module)
 
-    post_order_traversal(root_module, "", None)
-    # Without this explicit `del`, this set only gets deleted upon an explicit
-    # garbage collection (not from when its refcount hits zero)
-    del visited_modules
+    post_order_traversal(root_module)
     return root_module
 
 
 def swap_linear_with_float8_linear(
     module: nn.Module,
     *,
-    skip_fqn_list: Optional[List[str]] = None,
     emulate: bool = False,
-    linear_layer_filter: Optional[Callable[[nn.Linear], bool]] = None,
+    layer_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
     scaling_type_x: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
@@ -158,10 +143,10 @@ def swap_linear_with_float8_linear(
 
     Args:
         module: Module to modify.
-        skip_fqn_list: If specified, a list of module FQNs to skip.
         emulate: If True, emulation is used instead of hardware accelerated gemm
-        linear_layer_filter: If specified, only the linear layers
-            that pass the filter function will be swapped.
+        layer_filter_fn: If specified, only the modules that
+            that pass the filter function will be swapped. The inputs to the
+            filter function are the FQN and module instance.
         scaling_type_x (TensorScalingType): scaling type for `x`
         scaling_type_w (TensorScalingType): scaling type for `w`
         scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
@@ -179,8 +164,7 @@ def swap_linear_with_float8_linear(
     return swap_linear_layers(
         module,
         from_float,
-        skip_fqn_list=skip_fqn_list,
-        linear_layer_filter=linear_layer_filter,
+        layer_filter_fn=layer_filter_fn,
     )
 
 

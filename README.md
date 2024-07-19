@@ -43,8 +43,19 @@ from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_f
 # create model
 m = Model(...)
 
+# optional: filter layers from being eligible for float8 conversion
+def layer_filter_fn(fqn: str, mod: torch.nn.Module):
+    # don't convert the output layer
+    if fqn == "output":
+        return False
+    # don't convert linear layers with weight dimensions not divisible by 16
+    if isinstance(mod, torch.nn.Linear):
+        if mod.in_features % 16 != 0 or mod.out_features % 16 != 0:
+            return False
+    return True
+
 # convert all `torch.nn.Linear` modules to `Float8Linear`
-swap_linear_with_float8_linear(m)
+swap_linear_with_float8_linear(m, layer_filter_fn=layer_filter_fn)
 
 # optional: use FSDP
 model = FSDP(model, use_orig_params=True)

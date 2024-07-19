@@ -18,7 +18,6 @@ import torch.nn as nn
 
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 from float8_experimental.float8_linear_utils import (
-    filter_out_small_unaligned_layers,
     linear_requires_sync,
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
@@ -600,24 +599,34 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin1 = nn.Linear(dim, 4 * dim)
                 self.lin2 = nn.Linear(4 * dim, 4 * dim)
 
-        for emulate in [True, False]:
-            model = nn.Sequential(MLP(8), nn.Linear(32, 32), MLP(40))
-            # filter out the linear layers whose shape is smaller than 32 or non-divisible by 16.
-            model = swap_linear_with_float8_linear(
-                model,
-                emulate=emulate,
-                linear_layer_filter=filter_out_small_unaligned_layers(32),
+        model = nn.Sequential(MLP(8), nn.Linear(32, 32), MLP(40))
+        # filter out the linear layers whose shape is smaller than 32 or non-divisible by 16.
+
+        size_limit = 32
+
+        def layer_filter_fn(fqn, mod):
+            return (
+                mod.in_features >= size_limit
+                and mod.out_features >= size_limit
+                and mod.in_features % 16 == 0
+                and mod.out_features % 16 == 0
             )
-            # in_features=8, out_features=32, 8 is less than 32.
-            self.assertNotIsInstance(model[0].lin1, Float8Linear)
-            # in_features=32, out_features=32,
-            self.assertIsInstance(model[0].lin2, Float8Linear)
-            # in_features=32, out_features=32,
-            self.assertIsInstance(model[1], Float8Linear)
-            # in_features=40, out_features=160, 40 is not divisible by 16.
-            self.assertNotIsInstance(model[2].lin1, Float8Linear)
-            # in_features=160, out_features=160,
-            self.assertIsInstance(model[2].lin2, Float8Linear)
+
+        model = swap_linear_with_float8_linear(
+            model,
+            emulate=True,
+            layer_filter_fn=layer_filter_fn,
+        )
+        # in_features=8, out_features=32, 8 is less than 32.
+        self.assertNotIsInstance(model[0].lin1, Float8Linear)
+        # in_features=32, out_features=32,
+        self.assertIsInstance(model[0].lin2, Float8Linear)
+        # in_features=32, out_features=32,
+        self.assertIsInstance(model[1], Float8Linear)
+        # in_features=40, out_features=160, 40 is not divisible by 16.
+        self.assertNotIsInstance(model[2].lin1, Float8Linear)
+        # in_features=160, out_features=160,
+        self.assertIsInstance(model[2].lin2, Float8Linear)
 
     def test_swap_submodule_linears_with_skip(self):
         class MLP(nn.Module):
@@ -626,20 +635,21 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin1 = nn.Linear(dim, 4 * dim)
                 self.lin2 = nn.Linear(4 * dim, dim)
 
-        for emulate in [True, False]:
-            model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-            skip_fqn_list = ["2", "0.lin2"]
-            model = swap_linear_with_float8_linear(
-                model, emulate=emulate, skip_fqn_list=skip_fqn_list
-            )
-            self.assertIsInstance(model[0].lin1, Float8Linear)
-            self.assertNotIsInstance(model[0].lin2, Float8Linear)
-            self.assertIsInstance(model[0].lin2, nn.Linear)
-            self.assertIsInstance(model[1], Float8Linear)
-            self.assertNotIsInstance(model[2].lin2, Float8Linear)
-            self.assertNotIsInstance(model[2].lin2, Float8Linear)
-            self.assertIsInstance(model[2].lin1, nn.Linear)
-            self.assertIsInstance(model[2].lin2, nn.Linear)
+        model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
+        layer_filter_fn = lambda fqn, mod: fqn not in [
+            "0.lin2",
+            "2.lin1",
+        ]
+        model = swap_linear_with_float8_linear(
+            model,
+            emulate=True,
+            layer_filter_fn=layer_filter_fn,
+        )
+        self.assertTrue(type(model[0].lin1) is Float8Linear)
+        self.assertTrue(type(model[0].lin2) is nn.Linear)
+        self.assertTrue(type(model[1]) is Float8Linear)
+        self.assertTrue(type(model[2].lin1) is nn.Linear)
+        self.assertTrue(type(model[2].lin2) is Float8Linear)
 
     def test_fp8_tensor_statistics(self):
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
