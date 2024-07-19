@@ -5,6 +5,7 @@ from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e5m2_dynamic_bw,
 )
 from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.float8_tensor import GemmInputRole
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
@@ -45,7 +46,9 @@ class Float8ColwiseParallel(ColwiseParallel):
             )
 
         input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor, mod.forward_config
+            input_tensor,
+            mod.linear_mm_config,
+            gemm_input_role=GemmInputRole.X,
         )  # DTensor(Float8Tensor)
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -64,7 +67,7 @@ class Float8ColwiseParallel(ColwiseParallel):
             )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
 
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
@@ -96,7 +99,9 @@ class Float8RowwiseParallel(RowwiseParallel):
             )
 
         input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor, mod.forward_config
+            input_tensor,
+            mod.linear_mm_config,
+            gemm_input_role=GemmInputRole.X,
         )  # DTensor(Float8Tensor)
 
         if input_layouts != desired_input_layouts:
@@ -114,7 +119,7 @@ class Float8RowwiseParallel(RowwiseParallel):
             outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.backward_config)
+        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
 
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
@@ -191,7 +196,9 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                 )
 
             dt_inp = cast_to_float8_e4m3_dynamic(
-                dt_inp, self.fwd_linear_config
+                dt_inp,
+                self.linear_mm_config,
+                gemm_input_role=GemmInputRole.X,
             )  # DTensor(Float8Tensor)
             if desired_layout is not None and input_layout != desired_layout:
                 dt_inp = dt_inp.redistribute(placements=(desired_layout,))
@@ -207,18 +214,20 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
         if self.fwd_config_submodule_fqn is not None:
             fwd_linear = module.get_submodule(self.fwd_config_submodule_fqn)
             assert isinstance(fwd_linear, Float8Linear)
-            fwd_linear_config = fwd_linear.forward_config
+            linear_mm_config = fwd_linear.linear_mm_config
         else:
             # search for ScaledMM configs for all the submodules and make sure they are the same
             for mod in module.modules():
                 if isinstance(mod, Float8Linear):
                     if fwd_linear_config is None:
-                        fwd_linear_config = mod.forward_config
+                        fwd_linear_config = mod.linear_mm_config
                     else:
                         assert (
-                            fwd_linear_config == mod.forward_config
-                        ), "All the Float8Linear modules should have same forward config!"
+                            fwd_linear_config == mod.linear_mm_config
+                        ), "All the Float8Linear modules should have same linear_mm_config!"
 
-        self.fwd_linear_config = fwd_linear_config
+        self.linear_mm_config = fwd_linear_config
+        # TODO(this PR): something is broken here, fix it
+        assert self.linear_mm_config is not None
         super()._apply(module, device_mesh)
         return module

@@ -21,6 +21,7 @@ from float8_experimental.float8_linear_utils import swap_linear_layers
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
+    LinearMMConfig,
     ScaledMMConfig,
     tensor_already_casted_to_fp8,
     to_fp8_no_autograd,
@@ -74,7 +75,7 @@ class Float8InferenceLinear(torch.nn.Linear):
         self,
         # FP8 specific arguments
         quant_config: QuantConfig,
-        forward_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
         # nn.Linear arguments
         in_features: int,
         out_features: int,
@@ -84,7 +85,7 @@ class Float8InferenceLinear(torch.nn.Linear):
     ) -> None:
         # Construct the superclass this will create dummy weights and biases
         super().__init__(in_features, out_features, bias, device, dtype)
-        self.forward_config = forward_config
+        self.linear_mm_config = linear_mm_config
         self.activation_casting = quant_config.activation_casting
         if self.activation_casting == ActivationCasting.STATIC:
             self.register_buffer(
@@ -101,7 +102,7 @@ class Float8InferenceLinear(torch.nn.Linear):
 
         x_fp8 = cast_to_float8_e4m3_inference(
             input,
-            self.forward_config,
+            self.linear_mm_config,
             static_quantization_scale=self.static_quantization_scale,
         )
         return torch.nn.functional.linear(x_fp8, self.weight, self.bias)
@@ -126,7 +127,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             self.weight,
             scale,
             dtype,
-            self.forward_config,
+            self.linear_mm_config,
             gemm_input_role=GemmInputRole.W,
         )
         self.weight = nn.Parameter(quantized_weight)
@@ -152,9 +153,12 @@ class Float8InferenceLinear(torch.nn.Linear):
         forward_config = ScaledMMConfig(
             False, use_fast_accum, pad_inner_dim=config.pad_inner_dim
         )
+        linear_mm_config = LinearMMConfig(
+            forward_config, forward_config, forward_config
+        )
         linear = cls(
             quant_config,
-            forward_config,
+            linear_mm_config,
             module.in_features,
             module.out_features,
             False,
@@ -167,7 +171,7 @@ class Float8InferenceLinear(torch.nn.Linear):
 
 def cast_to_float8_e4m3_inference(
     inpt_tensor: torch.Tensor,
-    mm_config: ScaledMMConfig,
+    linear_mm_config: LinearMMConfig,
     reduce_amax: bool = False,
     static_quantization_scale: Optional[torch.Tensor] = None,
 ) -> Float8Tensor:
@@ -175,7 +179,7 @@ def cast_to_float8_e4m3_inference(
 
     Args:
         inpt_tensor: The input tensor to be cast.
-        mm_config: Configuration settings for the matrix multiplication
+        linear_mm_config: Configuration settings for the matrix multiplication
         reduce_amax: Whether to reduce the amax (absolute maximum) among the local distributed group.
         static_quantization_scale: Optional tensor specifying the scale for activation. Default is None.
 
@@ -192,7 +196,13 @@ def cast_to_float8_e4m3_inference(
         if static_quantization_scale is not None
         else tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
     )
-    return Float8Tensor.to_float8(inpt_tensor, scale, e4m3_dtype, mm_config=mm_config)
+    return Float8Tensor.to_float8(
+        inpt_tensor,
+        scale,
+        e4m3_dtype,
+        linear_mm_config=linear_mm_config,
+        gemm_input_role=GemmInputRole.X,
+    )
 
 
 def quantize_to_float8(

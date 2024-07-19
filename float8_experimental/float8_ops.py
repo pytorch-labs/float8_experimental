@@ -8,11 +8,7 @@ from typing import Any, Dict, Tuple
 import torch
 
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_tensor import (
-    choose_scaled_mm_config,
-    Float8Tensor,
-    ScaledMMConfig,
-)
+from float8_experimental.float8_tensor import choose_scaled_mm_config, Float8Tensor
 from float8_experimental.float8_utils import is_row_major, pad_tensor_for_matmul
 
 from torch.utils._pytree import tree_map
@@ -53,7 +49,7 @@ def float8_desugar_op(aten_op, args, kwargs=None):
         new_data,
         args[0]._scale,
         args[0]._orig_dtype,
-        args[0]._mm_config,
+        args[0]._linear_mm_config,
         args[0]._gemm_input_role,
     )
 
@@ -67,7 +63,7 @@ def float8_split(aten_op, args, kwargs=None):
             data,
             args[0]._scale,
             args[0]._orig_dtype,
-            args[0]._mm_config,
+            args[0]._linear_mm_config,
             args[0]._gemm_input_role,
         )
 
@@ -82,7 +78,7 @@ def float8_cat(aten_op, args, kwargs=None):
 
     orig_dtype = chunked_tensors[0]._orig_dtype
     scale = chunked_tensors[0]._scale
-    mm_config = chunked_tensors[0]._mm_config
+    mm_config = chunked_tensors[0]._linear_mm_config
     fp8_dtype = chunked_tensors[0]._data.dtype
     gemm_input_role = chunked_tensors[0]._gemm_input_role
     chunk_data = []
@@ -97,7 +93,7 @@ def float8_cat(aten_op, args, kwargs=None):
             chunk._scale is scale
         ), "Expecting all chunks to have thee same scale as a result of a split"
         assert (
-            chunk._mm_config is mm_config
+            chunk._linear_mm_config is mm_config
         ), "Expecting all chunks to have thee same mm config as a result of a split"
         assert (
             chunk._data.dtype == fp8_dtype
@@ -139,16 +135,12 @@ def preprocess_addmm(a: Float8Tensor, b: Float8Tensor):
 
     scaled_mm_config = choose_scaled_mm_config(
         a._gemm_input_role,
-        a._mm_config,
+        a._linear_mm_config,
         b._gemm_input_role,
-        b._mm_config,
+        b._linear_mm_config,
     )
 
     if scaled_mm_config.pad_inner_dim:
-        # TODO(before land): assert this when choosing config
-        # assert (
-        #     b._mm_config.pad_inner_dim
-        # ), "Both mm configs must have pad_inner_dim set to True"
         assert a._data.size(1) == b._data.size(
             0
         ), f"Inner dims must match for mm, got {a._data.size(1)} and {b._data.size(0)}"
@@ -177,9 +169,9 @@ def float8_mm(aten_op, args, kwargs=None):
     output_dtype = a._orig_dtype
     scaled_mm_config = choose_scaled_mm_config(
         a._gemm_input_role,
-        a._mm_config,
+        a._linear_mm_config,
         b._gemm_input_role,
-        b._mm_config,
+        b._linear_mm_config,
     )
     if scaled_mm_config.emulate:
         return torch.ops.aten.mm_float8_emulated(
@@ -213,9 +205,9 @@ def float8_addmm(aten_op, args, kwargs=None):
     assert bias.dtype == output_dtype, "bias dtype must match output dtype"
     scaled_mm_config = choose_scaled_mm_config(
         a._gemm_input_role,
-        a._mm_config,
+        a._linear_mm_config,
         b._gemm_input_role,
-        b._mm_config,
+        b._linear_mm_config,
     )
     if scaled_mm_config.emulate:
         out = torch.ops.aten.mm_float8_emulated(
@@ -258,7 +250,7 @@ def autocast_to_copy(aten_op, args, kwargs=None):
         args[0]._data,
         args[0]._scale,
         kwargs["dtype"],
-        args[0]._mm_config,
+        args[0]._linear_mm_config,
         args[0]._gemm_input_role,
     )
 
@@ -285,7 +277,7 @@ def allgather_fp8(aten_op, args, kwargs=None):
         fp8_out,
         fp8_input._scale,
         fp8_input._orig_dtype,
-        fp8_input._mm_config,
+        fp8_input._linear_mm_config,
         fp8_input._gemm_input_role,
     )
 
@@ -301,7 +293,7 @@ def wait_tensor_fp8(aten_op, args, kwargs=None):
         fp8_out,
         fp8_input._scale,
         fp8_input._orig_dtype,
-        fp8_input._mm_config,
+        fp8_input._linear_mm_config,
         fp8_input._gemm_input_role,
     )
 
@@ -323,7 +315,7 @@ def index_put_fp8(aten_op, args, kwargs=None):
         fp8_out,
         fp8_self._scale,
         fp8_self._orig_dtype,
-        fp8_self._mm_config,
+        fp8_self._linear_mm_config,
         fp8_self._gemm_input_role,
     )
 
@@ -351,7 +343,7 @@ def copy_fp8(aten_op, args, kwargs=None):
             self._scale == src._scale
         ), "Expecting both Float8Tensors to have thee same scale"
         assert (
-            self._mm_config == src._mm_config
+            self._linear_mm_config == src._linear_mm_config
         ), "Expecting both Float8Tensors to have thee same mm config"
         assert (
             self._data.dtype == src._data.dtype
@@ -364,7 +356,7 @@ def copy_fp8(aten_op, args, kwargs=None):
             fp8_out,
             self._scale,
             self._orig_dtype,
-            self._mm_config,
+            self._linear_mm_config,
             self._gemm_input_role,
         )
     else:

@@ -471,10 +471,9 @@ class Float8Linear(torch.nn.Linear):
         if config.enable_fsdp_fp8_all_gather:
             if scaling_type_w is TensorScalingType.DYNAMIC:
                 new_mod.weight = torch.nn.Parameter(
-                    # TODO(this PR): change callsites below to linear_mm_config
                     WeightWithDynamicFloat8CastTensor(
                         new_mod.weight,
-                        new_mod.forward_config,
+                        new_mod.linear_mm_config,
                     )
                 )
             else:
@@ -485,7 +484,7 @@ class Float8Linear(torch.nn.Linear):
                         new_mod.fp8_amax_w,
                         new_mod.fp8_amax_history_w,
                         new_mod.fp8_scale_w,
-                        new_mod.forward_config,
+                        new_mod.linear_mm_config,
                         new_mod.is_amax_initialized,
                     )
                 )

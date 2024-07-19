@@ -165,7 +165,7 @@ def to_fp8_no_autograd(
             local_bits,
             local_scale,
             x.dtype,
-            mm_config=linear_mm_config,
+            linear_mm_config=linear_mm_config,
             gemm_input_role=gemm_input_role,
         )
         return DTensor.from_local(
@@ -181,7 +181,7 @@ def to_fp8_no_autograd(
         bits_fp8,
         x_scale,
         x.dtype,
-        mm_config=linear_mm_config,
+        linear_mm_config=linear_mm_config,
         gemm_input_role=gemm_input_role,
     )
 
@@ -269,17 +269,15 @@ class Float8Tensor(torch.Tensor):
     _data: torch.Tensor
     _scale: torch.Tensor
     _orig_dtype: torch.dtype
-    # TODO(before land): change this to _linear_mm_config, wanted to do that after
-    # initial review
-    _mm_config: LinearMMConfig
-    __slots__ = ["_data", "_scale", "_orig_dtype", "_mm_config"]
+    _linear_mm_config: LinearMMConfig
+    __slots__ = ["_data", "_scale", "_orig_dtype", "_linear_mm_config"]
 
     def __new__(
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
-        mm_config: Optional[LinearMMConfig],
+        linear_mm_config: Optional[LinearMMConfig],
         gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
     ):
         assert (
@@ -301,18 +299,21 @@ class Float8Tensor(torch.Tensor):
         self._data = data
         self._scale = scale
         self._orig_dtype = orig_dtype
-        self._mm_config = mm_config if mm_config is not None else LinearMMConfig()
+        self._linear_mm_config = (
+            linear_mm_config if linear_mm_config is not None else LinearMMConfig()
+        )
         self._gemm_input_role = gemm_input_role
 
         return self
 
     def __repr__(self):
-        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, mm_config={self._mm_config}\ngemm_input_role={self._gemm_input_role}\nas_orig_prec={self.to_original_precision()}"
+        return f"Float8Tensor(dtype={self._data.dtype}, scale={self._scale}, linear_mm_config={self._linear_mm_config}\ngemm_input_role={self._gemm_input_role}\nas_orig_prec={self.to_original_precision()}"
 
     def __tensor_flatten__(self):
         ctx = {
             "_orig_dtype": self._orig_dtype,
-            "_mm_config": self._mm_config,
+            "_linear_mm_config": self._linear_mm_config,
+            "_gemm_input_role": self._gemm_input_role,
         }
         return ["_data", "_scale"], ctx
 
@@ -323,7 +324,8 @@ class Float8Tensor(torch.Tensor):
             inner_tensors["_data"],
             inner_tensors["_scale"],
             metadata["_orig_dtype"],
-            metadata["_mm_config"],
+            metadata["_linear_mm_config"],
+            metadata["_gemm_input_role"],
         )
 
     def to_original_precision(self):
@@ -346,7 +348,7 @@ class Float8Tensor(torch.Tensor):
             scale: the scale to use to convert the tensor
             float8_dtype: the float8 dtype to use
             amax_buffer: a buffer to store the amax value in prior to conversion
-            mm_config: Defines the configuration for the scaled_mm
+            linearmm_config: Defines the configuration for 3 gemms in fwd/bwd of linear
 
         Returns:
             Float8Tensor: a float8 tensor

@@ -12,7 +12,11 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 from float8_experimental.float8_dynamic_utils import cast_to_float8_e4m3_dynamic
 
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    GemmInputRole,
+    LinearMMConfig,
+)
 
 from float8_experimental.float8_utils import e4m3_dtype, EPS
 from torch._prims_common import suggest_memory_format
@@ -83,7 +87,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def __new__(
         cls,
         tensor: torch.Tensor,
-        mm_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
         precomputed_scale: Optional[torch.Tensor] = None,
     ):
         return torch.Tensor._make_wrapper_subclass(
@@ -102,11 +106,11 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def __init__(
         self,
         tensor: torch.Tensor,
-        mm_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
         precomputed_scale: Optional[torch.Tensor] = None,
     ):
         self._tensor = tensor
-        self._mm_config = mm_config
+        self._linear_mm_config = linear_mm_config
         # for dynamic scaling
         # `precompute_float8_dynamic_scale_for_fsdp` calculates scales
         # for all float8 parameters after optimizer step
@@ -116,16 +120,16 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         if func == torch.ops.aten.detach.default:
             return WeightWithDynamicFloat8CastTensor(
-                args[0]._tensor, args[0]._mm_config
+                args[0]._tensor, args[0]._linear_mm_config
             )
-        mm_config: Optional[ScaledMMConfig] = None
+        mm_config: Optional[LinearMMConfig] = None
 
         def unwrap(t):
             nonlocal mm_config
             if mm_config is None:
-                mm_config = t._mm_config
+                mm_config = t._linear_mm_config
             else:
-                assert t._mm_config == mm_config
+                assert t._linear_mm_config == mm_config
             return t._tensor
 
         args, kwargs = pytree.tree_map_only(
@@ -140,9 +144,9 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
 
     def __tensor_flatten__(self):
         if self._precomputed_scale:
-            return ["_tensor", "_precomputed_scale"], self._mm_config
+            return ["_tensor", "_precomputed_scale"], self._linear_mm_config
         else:
-            return ["_tensor"], self._mm_config
+            return ["_tensor"], self._linear_mm_config
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -154,7 +158,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, mm_config={self._mm_config})"
+        return f"WeightWithDynamicFloat8CastTensor(tensor={self._tensor}, linear_mm_config={self._linear_mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
         if self._precomputed_scale is not None:
@@ -162,11 +166,15 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 self._tensor,
                 self._precomputed_scale,
                 torch.float8_e4m3fn,
-                mm_config=self._mm_config,
+                linear_mm_config=self._linear_mm_config,
+                gemm_input_role=GemmInputRole.W,
             )
         else:
             float8_tensor = cast_to_float8_e4m3_dynamic(
-                self._tensor, self._mm_config, reduce_amax=True
+                self._tensor,
+                self._linear_mm_config,
+                reduce_amax=True,
+                gemm_input_role=GemmInputRole.W,
             )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
@@ -184,7 +192,13 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             assert isinstance(out, Float8Tensor), f"{type(out)}"
             out._scale = scale
             return
-        return Float8Tensor(data, scale, param_dtype, self._mm_config), (data,)
+        return Float8Tensor(
+            data,
+            scale,
+            param_dtype,
+            self._linear_mm_config,
+            gemm_input_role=GemmInputRole.W,
+        ), (data,)
 
 
 class WeightWithDelayedFloat8CastTensor(torch.Tensor):
@@ -195,7 +209,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
         amax_buffer: torch.Tensor,
         amax_history_buffer: torch.Tensor,
         scale_buffer: torch.Tensor,
-        mm_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
         is_amax_initialized: bool,
     ):
         return torch.Tensor._make_wrapper_subclass(
@@ -217,14 +231,14 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
         amax_buffer: torch.Tensor,
         amax_history_buffer: torch.Tensor,
         scale_buffer: torch.Tensor,
-        mm_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
         is_amax_initialized: bool,
     ):
         self._tensor = tensor
         self._amax_buffer = amax_buffer
         self._amax_history_buffer = amax_history_buffer
         self._scale_buffer = scale_buffer
-        self._mm_config = mm_config
+        self._linear_mm_config = linear_mm_config
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
@@ -239,10 +253,10 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
                 args[0]._amax_buffer,
                 args[0]._amax_history_buffer,
                 args[0]._scale_buffer,
-                args[0]._mm_config,
+                args[0]._linear_mm_config,
                 args[0].is_amax_initialized,
             )
-        mm_config: Optional[ScaledMMConfig] = None
+        mm_config: Optional[LinearMMConfig] = None
         amax_buffer: Optional[torch.Tensor] = None
         amax_history_buffer: Optional[torch.Tensor] = None
         scale_buffer: Optional[torch.Tensor] = None
@@ -251,9 +265,9 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
         def unwrap(t):
             nonlocal mm_config
             if mm_config is None:
-                mm_config = t._mm_config
+                mm_config = t._linear_mm_config
             else:
-                assert t._mm_config == mm_config
+                assert t._linear_mm_config == mm_config
             nonlocal amax_buffer
             if amax_buffer is None:
                 amax_buffer = t._amax_buffer
@@ -296,7 +310,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
                 "_scale_buffer",
             ],
             {
-                "mm_config": self._mm_config,
+                "mm_config": self._linear_mm_config,
                 "is_amax_initialized": is_amax_initialized,
             },
         )
@@ -313,7 +327,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"WeightWithDelayedFloat8CastTensor(tensor={self._tensor}, amax_buffer={self._amax_buffer}, scale_buffer={self._scale_buffer}, mm_config={self._mm_config})"
+        return f"WeightWithDelayedFloat8CastTensor(tensor={self._tensor}, amax_buffer={self._amax_buffer}, scale_buffer={self._scale_buffer}, mm_config={self._linear_mm_config})"
 
     def fsdp_pre_all_gather(self, mesh):
         # initialize if needed
@@ -345,7 +359,8 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             self._scale_buffer,
             e4m3_dtype,
             self._amax_buffer,
-            self._mm_config,
+            self._linear_mm_config,
+            gemm_input_role=GemmInputRole.W,
         )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
@@ -363,4 +378,10 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             assert isinstance(out, Float8Tensor), f"{type(out)}"
             out._scale = scale
             return
-        return Float8Tensor(data, scale, param_dtype, self._mm_config), (data,)
+        return Float8Tensor(
+            data,
+            scale,
+            param_dtype,
+            self._linear_mm_config,
+            gemm_input_role=GemmInputRole.W,
+        ), (data,)
