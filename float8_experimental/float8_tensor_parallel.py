@@ -174,6 +174,7 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
 
         # fp8 specific fields
         self.float8_dtype = float8_dtype
+        self.linear_mm_config = None
         self.fwd_config_submodule_fqn = fwd_config_submodule_fqn
 
         if self.float8_dtype != torch.float8_e4m3fn:
@@ -210,24 +211,21 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         from float8_experimental.float8_linear import Float8Linear
 
-        fwd_linear_config = None
         if self.fwd_config_submodule_fqn is not None:
             fwd_linear = module.get_submodule(self.fwd_config_submodule_fqn)
             assert isinstance(fwd_linear, Float8Linear)
-            linear_mm_config = fwd_linear.linear_mm_config
+            self.linear_mm_config = fwd_linear.linear_mm_config
         else:
             # search for ScaledMM configs for all the submodules and make sure they are the same
             for mod in module.modules():
                 if isinstance(mod, Float8Linear):
-                    if fwd_linear_config is None:
-                        fwd_linear_config = mod.linear_mm_config
+                    if self.linear_mm_config is None:
+                        self.linear_mm_config = mod.linear_mm_config
                     else:
                         assert (
-                            fwd_linear_config == mod.linear_mm_config
+                            self.linear_mm_config == mod.linear_mm_config
                         ), "All the Float8Linear modules should have same linear_mm_config!"
 
-        self.linear_mm_config = fwd_linear_config
-        # TODO(this PR): something is broken here, fix it
         assert self.linear_mm_config is not None
         super()._apply(module, device_mesh)
         return module

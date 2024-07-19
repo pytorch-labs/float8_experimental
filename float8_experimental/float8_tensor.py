@@ -56,7 +56,8 @@ ScaledMMConfig = namedtuple(
     defaults=[False, False, False, False],
 )
 
-# The object below exists for convenience, to allow Float8Tensor to use
+# The object below is not user facing and exists for convenience,
+# to allow Float8Tensor to use
 # the right config based on which gemm from `y`, `dL_dX`, `dL_dW` is
 # being called.
 LinearMMConfig = namedtuple(
@@ -70,11 +71,14 @@ LinearMMConfig = namedtuple(
 )
 
 
-# Given a Float8Tensor, the enum below describes the expected role of this
-# tensor in the three gemms present in the fw + bw pass of a Linear layer.
-# This is used to choose the right config for a float8 gemm when the
-# gemm is performed.
 class GemmInputRole(enum.Enum):
+    """
+    Given a Float8Tensor, the enum below describes the expected role of this
+    tensor in the three gemms present in the fw + bw pass of a Linear layer.
+    This is used to choose the right config for a float8 gemm when the
+    gemm is performed.
+    """
+
     X = "x"
     W = "w"
     DL_DY = "dL_dY"
@@ -97,14 +101,13 @@ def choose_scaled_mm_config(
             a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
         ), f"linear_mm_config.dL_dX mismatch: {a_linear_mm_config.dL_dX} vs {b_linear_mm_config.dL_dX}"
         return a_linear_mm_config.dL_dX
-    else:
-        assert (
-            a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X
-        ), f"unexpected a_role {a_role} and b_role {b_role}"
+    elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X:
         assert (
             a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
         ), f"linear_mm_config.dL_dW mismatch: {a_linear_mm_config.dL_dW} vs {b_linear_mm_config.dL_dW}"
         return a_linear_mm_config.dL_dW
+    else:
+        raise AssertionError(f"unexpected a_role {a_role} and b_role {b_role}")
 
 
 def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
