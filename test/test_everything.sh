@@ -15,7 +15,7 @@ then
 ./test/test_fsdp.sh
 ./test/test_fsdp_compile.sh
 ./test/test_dtensor.sh
-pytest test/test_fsdp2/test_fsdp2_eager.py
+pytest test/test_fsdp2/test_fsdp2.py
 fi
 
 echo "all tests successful"
