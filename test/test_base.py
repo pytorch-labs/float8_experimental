@@ -25,7 +25,8 @@ from float8_experimental.float8_linear_utils import (
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
 from float8_experimental.float8_tensor import (
     Float8Tensor,
-    merge_mm_configs,
+    GemmInputRole,
+    LinearMMConfig,
     ScaledMMConfig,
 )
 from float8_experimental.float8_utils import (
@@ -120,7 +121,7 @@ class TestFloat8Tensor(unittest.TestCase):
             torch.empty(16, dtype=torch.float8_e4m3fn),
             scale_a,
             torch.bfloat16,
-            fp8_a._mm_config,
+            fp8_a._linear_mm_config,
         )
         fp8_b.copy_(fp8_a)
         torch.testing.assert_close(fp8_a._data, fp8_b._data)
@@ -437,37 +438,35 @@ class TestScaledMM:
         x_fp32 = torch.randn(16, 16, device="cuda")
         x_scale = torch.tensor(1.0, device="cuda")
         fp8_dtype = e4m3_dtype
-        a = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
+        linear_config_a = LinearMMConfig(
+            ScaledMMConfig(False, True, False, False),
+            ScaledMMConfig(False, False, False, False),
+            ScaledMMConfig(False, False, False, False),
+        )
+        linear_config_b = LinearMMConfig(
+            ScaledMMConfig(True, True, False, False),
+            ScaledMMConfig(True, False, False, False),
+            ScaledMMConfig(True, False, False, False),
+        )
+        a = Float8Tensor.to_float8(
+            x_fp32,
+            x_scale,
+            fp8_dtype,
+            linear_mm_config=linear_config_a,
+            gemm_input_role=GemmInputRole.X,
+        )
         b = Float8Tensor.to_float8(
-            x_fp32, x_scale, fp8_dtype, mm_config=ScaledMMConfig(True)
+            x_fp32,
+            x_scale,
+            fp8_dtype,
+            linear_mm_config=linear_config_b,
+            gemm_input_role=GemmInputRole.W,
         )
         with pytest.raises(
             AssertionError,
-            match="Both mm_configs must have the same emulate value, but got False and True",
+            match="linear_mm_config.y mismatch",
         ):
             a @ b
-
-    def test_merge_configs(self):
-        a = ScaledMMConfig(False, True, True)
-        b = ScaledMMConfig(True, False, False)
-        with pytest.raises(
-            AssertionError,
-            match="Both mm_configs must have the same emulate value, but got False and True",
-        ):
-            merge_mm_configs(a, b)
-        a = ScaledMMConfig(False, True, True)
-        b = ScaledMMConfig(False, False, False)
-        c = merge_mm_configs(a, b)
-        assert c.emulate is False
-        assert c.use_fast_accum is False
-        assert c.fp8_output is False
-
-        a = ScaledMMConfig(False, True, False)
-        b = ScaledMMConfig(False, True, False)
-        c = merge_mm_configs(a, b)
-        assert c.emulate is False
-        assert c.use_fast_accum is True
-        assert c.fp8_output is False
 
     @unittest.skipIf(
         not is_H100,
@@ -488,8 +487,12 @@ class TestScaledMM:
         a_scale = tensor_to_scale(a, input_dtype).float()
         b_scale = tensor_to_scale(b, input_dtype).float()
 
-        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype)
-        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype)
+        a_fp8 = Float8Tensor.to_float8(
+            a, a_scale, input_dtype, gemm_input_role=GemmInputRole.X
+        )
+        b_fp8 = Float8Tensor.to_float8(
+            b, b_scale, input_dtype, gemm_input_role=GemmInputRole.W
+        )
 
         with pytest.raises(
             RuntimeError,
@@ -499,19 +502,47 @@ class TestScaledMM:
         ):
             a_fp8 @ b_fp8
 
-        pad_config = ScaledMMConfig(False, use_fast_accum, False, True)
+        scaled_mm_config = ScaledMMConfig(False, use_fast_accum, False, True)
+        pad_config = LinearMMConfig(
+            scaled_mm_config, scaled_mm_config, scaled_mm_config
+        )
 
-        a_fp8 = Float8Tensor.to_float8(a, a_scale, input_dtype, mm_config=pad_config)
-        b_fp8 = Float8Tensor.to_float8(b, b_scale, input_dtype, mm_config=pad_config)
+        a_fp8 = Float8Tensor.to_float8(
+            a,
+            a_scale,
+            input_dtype,
+            linear_mm_config=pad_config,
+            gemm_input_role=GemmInputRole.X,
+        )
+        b_fp8 = Float8Tensor.to_float8(
+            b,
+            b_scale,
+            input_dtype,
+            linear_mm_config=pad_config,
+            gemm_input_role=GemmInputRole.W,
+        )
         out_padded = a_fp8 @ b_fp8
         out_padded.to(compare_type)
 
-        emulated_conifg = ScaledMMConfig(True, use_fast_accum, False, False)
+        emulated_scaled_mm_config = ScaledMMConfig(True, use_fast_accum, False, False)
+        emulated_config = LinearMMConfig(
+            emulated_scaled_mm_config,
+            emulated_scaled_mm_config,
+            emulated_scaled_mm_config,
+        )
         a_fp8 = Float8Tensor.to_float8(
-            a, a_scale, input_dtype, mm_config=emulated_conifg
+            a,
+            a_scale,
+            input_dtype,
+            linear_mm_config=emulated_config,
+            gemm_input_role=GemmInputRole.X,
         )
         b_fp8 = Float8Tensor.to_float8(
-            b, b_scale, input_dtype, mm_config=emulated_conifg
+            b,
+            b_scale,
+            input_dtype,
+            linear_mm_config=emulated_config,
+            gemm_input_role=GemmInputRole.W,
         )
         out_emualted = a_fp8 @ b_fp8
         out_emualted.to(compare_type)
@@ -563,8 +594,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
             module = nn.Linear(3, 3)
             module = swap_linear_with_float8_linear(module, emulate=emulate)
             self.assertIsInstance(module, Float8Linear)
-            self.assertEqual(module.forward_config.emulate, emulate)
-            self.assertEqual(module.backward_config.emulate, emulate)
+            self.assertEqual(module.linear_mm_config.y.emulate, emulate)
+            self.assertEqual(module.linear_mm_config.y.emulate, emulate)
 
     def test_swap_root_linear_with_children_raises(self):
         for emulate in [True, False]:
