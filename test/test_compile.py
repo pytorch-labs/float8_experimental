@@ -19,7 +19,7 @@ from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import Float8Tensor, LinearMMConfig
 from float8_experimental.float8_utils import e4m3_dtype
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
@@ -179,7 +179,7 @@ class TestGraphBreaks(DynamoTestCase):
                 self.fp8_scale_x,
                 e4m3_dtype,
                 self.fp8_amax_x,
-                ScaledMMConfig(),
+                LinearMMConfig(),
             )
             if self.graph_break:
                 torch._dynamo.graph_break()
@@ -242,9 +242,9 @@ class TestGraphBreaks(DynamoTestCase):
             type(y_compiled._orig_dtype)
         )
         assert isinstance(
-            y_compiled._mm_config.emulate, bool
+            y_compiled._linear_mm_config.y.emulate, bool
         ), "Float8Tensor._emulate should be a bool but got {}".format(
-            type(y_compiled._mm_config.emulate)
+            type(y_compiled._linear_mm_config.y.emulate)
         )
 
 
