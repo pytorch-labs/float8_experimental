@@ -479,7 +479,7 @@ class TestScaledMM:
     @pytest.mark.parametrize("use_fast_accum", [True, False])
     def test_pad_inner_dim(self, base_dtype, use_fast_accum):
         torch.manual_seed(42)
-        input_dtype = torch.float8_e4m3fn
+        input_dtype = e4m3_dtype
         compare_type = torch.float32
 
         a = torch.randn(16, 41, device="cuda", dtype=base_dtype)

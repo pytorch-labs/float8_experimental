@@ -4,6 +4,16 @@
 set -e
 IS_ROCM=$(rocm-smi --version || true)
 
+
+# Set USE_FNUZ_DTYPE environment variable if IS_ROCM is not empty
+if [ -n "$IS_ROCM" ]; then
+    export USE_FNUZ_DTYPE=true
+    echo "ROCm detected. Set USE_FNUZ_DTYPE=true"
+else
+    export USE_FNUZ_DTYPE=false
+    echo "ROCm not detected. Set USE_FNUZ_DTYPE=false"
+fi
+
 pytest test/test_base.py
 pytest test/test_compile.py
 pytest test/test_inference_flows.py
