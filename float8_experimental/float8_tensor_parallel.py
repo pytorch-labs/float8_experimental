@@ -28,8 +28,8 @@ def _float8_linear_supports_float8_allgather(m):
     # TODO(future): add support for delayed scaling for activations
     # and gradients
     return (
-        m.scaling_type_x == TensorScalingType.DYNAMIC
-        and m.scaling_type_dL_dY == TensorScalingType.DYNAMIC
+        m.scaling_type_input == TensorScalingType.DYNAMIC
+        and m.scaling_type_grad_output == TensorScalingType.DYNAMIC
     )
 
 

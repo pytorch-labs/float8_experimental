@@ -204,20 +204,23 @@ def profile_function(
 def main(
     profile_path_prefix: Path,
     compile: bool = True,
-    scaling_type_x: str = "dynamic",
-    scaling_type_w: str = "dynamic",
-    scaling_type_dL_dY: str = "dynamic",
+    scaling_type_input: str = "dynamic",
+    scaling_type_weight: str = "dynamic",
+    scaling_type_grad_output: str = "dynamic",
     model_type: str = "linear",
     dtype_filter: str = "both",
 ):
     assert model_type in ("linear", "ln_linear", "norm_ffn_norm"), "unsupported"
     assert dtype_filter in ("both", "float8", "bfloat16")
 
-    scaling_type_x = TensorScalingType(scaling_type_x)
-    scaling_type_w = TensorScalingType(scaling_type_w)
-    scaling_type_dL_dY = TensorScalingType(scaling_type_dL_dY)
+    scaling_type_input = TensorScalingType(scaling_type_input)
+    scaling_type_weight = TensorScalingType(scaling_type_weight)
+    scaling_type_grad_output = TensorScalingType(scaling_type_grad_output)
     scaling_repr = "_".join(
-        [s.short_str() for s in (scaling_type_x, scaling_type_w, scaling_type_dL_dY)]
+        [
+            s.short_str()
+            for s in (scaling_type_input, scaling_type_weight, scaling_type_grad_output)
+        ]
     )
 
     print(f"Compile is set to       | {compile}")
@@ -254,9 +257,9 @@ def main(
     m_ref = m_ref.to(device).to(ref_dtype)
 
     extra_kwargs = {
-        "scaling_type_x": scaling_type_x,
-        "scaling_type_w": scaling_type_w,
-        "scaling_type_dL_dY": scaling_type_dL_dY,
+        "scaling_type_input": scaling_type_input,
+        "scaling_type_weight": scaling_type_weight,
+        "scaling_type_grad_output": scaling_type_grad_output,
     }
 
     m_float8 = copy.deepcopy(m_ref)
@@ -278,7 +281,9 @@ def main(
         # inspection of the fw+bw torch.compile without the scale
         # syncing code
         # TODO(future): make this better
-        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+        if linear_requires_sync(
+            scaling_type_input, scaling_type_weight, scaling_type_grad_output
+        ):
             with record_function("scale_amax_and_scales"):
                 sync_amax_history(m_float8)
         out = float8_forw(x)

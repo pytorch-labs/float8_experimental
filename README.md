@@ -28,9 +28,9 @@ pip install -e ".[dev]"
 
 # Single GPU User API
 
-We provide two per-tensor scaling strategies: dynamic and delayed.  See https://arxiv.org/pdf/2209.05433.pdf, Section 4.3 for more details. These strategies are configurable separately for activations (`x`), weights (`w`) and gradients (`dL_dY`).
+We provide two per-tensor scaling strategies: dynamic and delayed.  See https://arxiv.org/pdf/2209.05433.pdf, Section 4.3 for more details. These strategies are configurable separately for activations (`input`), weights (`weight`) and gradients (`grad_output`).
 
-## float8 linear with dynamic scaling for `x`, `w` and `dL_dY`
+## float8 linear with dynamic scaling for `input`, `weight` and `grad_output`
 
 This is the most accurate recipe as every tensor is scaled dynamically.
 
@@ -95,9 +95,9 @@ m = Model(...)
 # type
 swap_linear_with_float8_linear(
     m,
-    scaling_type_x=TensorScalingType.DELAYED,
-    scaling_type_w=TensorScalingType.DELAYED,
-    scaling_type_dL_dY=TensorScalingType.DELAYED,
+    scaling_type_input=TensorScalingType.DELAYED,
+    scaling_type_weight=TensorScalingType.DELAYED,
+    scaling_type_grad_output=TensorScalingType.DELAYED,
 )
 
 # optional: use FSDP. Note that workarounds gated with config.enable_amax_init and

@@ -73,18 +73,18 @@ def fsdp_main(rank, world_size, args):
     model = get_model(K, N, base_dtype=base_dtype).to(rank)
     model_fp8 = copy.deepcopy(model)
 
-    scaling_type_w = (
+    scaling_type_weight = (
         TensorScalingType.DYNAMIC
         if use_weight_dynamic_scaling
         else TensorScalingType.DELAYED
     )
 
-    # Note: we only iterate over `scaling_type_w` because FSDP only interacts
+    # Note: we only iterate over `scaling_type_weight` because FSDP only interacts
     # with weights.
     swap_linear_with_float8_linear(
         model_fp8,
         emulate=False,
-        scaling_type_w=scaling_type_w,
+        scaling_type_weight=scaling_type_weight,
     )
 
     # To compile FSDP, we need use_orig_params to True
@@ -132,7 +132,7 @@ def fsdp_main(rank, world_size, args):
         y_local.backward(ref_grad_local[i])
         if is_fp8 and linear_requires_sync(
             TensorScalingType.DYNAMIC,
-            scaling_type_w,
+            scaling_type_weight,
             TensorScalingType.DYNAMIC,
         ):
             sync_float8_func(model)

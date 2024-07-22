@@ -185,9 +185,9 @@ def _test_fp8_mlp_tensor_parallelism_base(
     # TODO(future): add support for float8 all-gather with delayed scaling
     # for activations and gradients.
     extra_kwargs = {
-        "scaling_type_x": TensorScalingType.DYNAMIC,
-        "scaling_type_w": TensorScalingType.DYNAMIC,
-        "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+        "scaling_type_input": TensorScalingType.DYNAMIC,
+        "scaling_type_weight": TensorScalingType.DYNAMIC,
+        "scaling_type_grad_output": TensorScalingType.DYNAMIC,
     }
 
     toy_model = ToyModel().to(device)
