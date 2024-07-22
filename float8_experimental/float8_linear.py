@@ -99,9 +99,11 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, go):
-        fp8_amax_grad_output, fp8_amax_history_grad_output, fp8_scale_grad_output = (
-            ctx.saved_tensors
-        )
+        (
+            fp8_amax_grad_output,
+            fp8_amax_history_grad_output,
+            fp8_scale_grad_output,
+        ) = ctx.saved_tensors
         scale_fn_name = ctx.scale_fn_name
         is_amax_initialized = ctx.is_amax_initialized
 
