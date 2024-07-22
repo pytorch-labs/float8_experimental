@@ -63,7 +63,7 @@ def swap_linear_layers(
     module: nn.Module,
     from_float_func: Callable[[nn.Linear], nn.Linear],
     *,
-    layer_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
+    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
 ) -> Optional[nn.Module]:
     """
     Generic function to swap linear layers in a module with a new type of linear layer.
@@ -75,7 +75,7 @@ def swap_linear_layers(
     Args:
         module: Module to modify.
         from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
-        layer_filter_fn: If specified, only the modules that
+        module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
             filter function are the FQN and module instance.
 
@@ -83,9 +83,7 @@ def swap_linear_layers(
      nn.Module: The modified module with swapped linear layers.
     """
     if isinstance(module, nn.Linear) and (
-        # linear_layer_filter is None or linear_layer_filter(module)
-        layer_filter_fn is None
-        or layer_filter_fn("", module)
+        module_filter_fn is None or module_filter_fn("", module)
     ):
         if len(list(module.children())) > 0:
             raise AssertionError(
@@ -115,8 +113,8 @@ def swap_linear_layers(
 
         if isinstance(module, nn.Linear) and (
             # linear_layer_filter is None or linear_layer_filter(module)
-            layer_filter_fn is None
-            or layer_filter_fn(cur_fqn, module)
+            module_filter_fn is None
+            or module_filter_fn(cur_fqn, module)
         ):
             assert (
                 parent_module is not None
@@ -133,7 +131,7 @@ def swap_linear_with_float8_linear(
     module: nn.Module,
     *,
     emulate: bool = False,
-    layer_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
+    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
     scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
@@ -144,7 +142,7 @@ def swap_linear_with_float8_linear(
     Args:
         module: Module to modify.
         emulate: If True, emulation is used instead of hardware accelerated gemm
-        layer_filter_fn: If specified, only the modules that
+        module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
             filter function are the FQN and module instance.
         scaling_type_input (TensorScalingType): scaling type for `input`
@@ -164,7 +162,7 @@ def swap_linear_with_float8_linear(
     return swap_linear_layers(
         module,
         from_float,
-        layer_filter_fn=layer_filter_fn,
+        module_filter_fn=module_filter_fn,
     )
 
 
