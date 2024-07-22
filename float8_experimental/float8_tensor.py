@@ -101,7 +101,9 @@ def choose_scaled_mm_config(
             a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
         ), f"linear_mm_config.dL_dX mismatch: {a_linear_mm_config.dL_dX} vs {b_linear_mm_config.dL_dX}"
         return a_linear_mm_config.dL_dX
-    elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X:
+    elif (a_role is GemmInputRole.X and b_role is GemmInputRole.DL_DY) or (
+        a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X
+    ):
         assert (
             a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
         ), f"linear_mm_config.dL_dW mismatch: {a_linear_mm_config.dL_dW} vs {b_linear_mm_config.dL_dW}"
