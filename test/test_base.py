@@ -635,7 +635,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
 
         size_limit = 32
 
-        def layer_filter_fn(fqn, mod):
+        def module_filter_fn(fqn, mod):
             return (
                 mod.in_features >= size_limit
                 and mod.out_features >= size_limit
@@ -646,7 +646,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
         model = swap_linear_with_float8_linear(
             model,
             emulate=True,
-            layer_filter_fn=layer_filter_fn,
+            module_filter_fn=module_filter_fn,
         )
         # in_features=8, out_features=32, 8 is less than 32.
         self.assertNotIsInstance(model[0].lin1, Float8Linear)
@@ -667,14 +667,14 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin2 = nn.Linear(4 * dim, dim)
 
         model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-        layer_filter_fn = lambda fqn, mod: fqn not in [
+        module_filter_fn = lambda fqn, mod: fqn not in [
             "0.lin2",
             "2.lin1",
         ]
         model = swap_linear_with_float8_linear(
             model,
             emulate=True,
-            layer_filter_fn=layer_filter_fn,
+            module_filter_fn=module_filter_fn,
         )
         self.assertTrue(type(model[0].lin1) is Float8Linear)
         self.assertTrue(type(model[0].lin2) is nn.Linear)
