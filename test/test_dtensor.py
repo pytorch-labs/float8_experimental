@@ -17,7 +17,11 @@ import torch.nn.functional as F
 from float8_experimental.float8_dynamic_utils import NoopFwToFloat8E5M2Bw
 from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    Float8Tensor,
+    GemmInputRole,
+    LinearMMConfig,
+)
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
     Float8RowwiseParallel,
@@ -82,8 +86,12 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         x_scale = tensor_to_scale(x_fp32, fp8_dtype).float()
         y_scale = tensor_to_scale(y_fp32, fp8_dtype).float()
 
-        x_fp8 = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
-        y_fp8 = Float8Tensor.to_float8(y_fp32, y_scale, fp8_dtype)
+        x_fp8 = Float8Tensor.to_float8(
+            x_fp32, x_scale, fp8_dtype, gemm_input_role=GemmInputRole.X
+        )
+        y_fp8 = Float8Tensor.to_float8(
+            y_fp32, y_scale, fp8_dtype, gemm_input_role=GemmInputRole.W
+        )
 
         dist_x_fp8 = DTensor.from_local(x_fp8, mesh, [lhs_placement], run_check=False)
         dist_y_fp8 = DTensor.from_local(y_fp8, mesh, [rhs_placement], run_check=False)
@@ -155,13 +163,15 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     dist_weight_scale = tensor_to_scale(dist_wight_fp32, fp8_dtype).float()
     dist_target = distribute_tensor(target, mesh, [Shard(0)])
 
-    dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
+    dist_x_fp8 = Float8Tensor.to_float8(
+        dist_x_fp32, dist_x_scale, fp8_dtype, gemm_input_role=GemmInputRole.X
+    )
     dist_weight_fp8 = Float8Tensor.to_float8(
-        dist_wight_fp32, dist_weight_scale, fp8_dtype
+        dist_wight_fp32, dist_weight_scale, fp8_dtype, gemm_input_role=GemmInputRole.W
     )
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
-    out = NoopFwToFloat8E5M2Bw.apply(out, ScaledMMConfig())
+    out = NoopFwToFloat8E5M2Bw.apply(out, LinearMMConfig())
     assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
     loss = torch.sum(torch.abs(out - dist_target))
     loss.backward()

@@ -23,6 +23,8 @@ from float8_experimental.float8_dynamic_utils import (
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
+    GemmInputRole,
+    LinearMMConfig,
     ScaledMMConfig,
     to_fp8_no_autograd,
 )
@@ -70,9 +72,8 @@ def _maybe_initialize_amaxes_scales_for_float8_cast(
 
 
 # this code was resurrected from https://github.com/pytorch-labs/float8_experimental/pull/128/files
-# and modified to only support dynamic scaling
 @torch._dynamo.allow_in_graph
-class float8_mm(torch.autograd.Function):
+class manual_float8_mm(torch.autograd.Function):
     """
     Like torch.mm, but with X and W in float8
     """
@@ -100,33 +101,25 @@ class float8_mm(torch.autograd.Function):
         go_fp8_orig_shape = go_fp8.shape
         go_fp8_reshaped = go_fp8.reshape(-1, go_fp8_orig_shape[-1])
 
-        w_fp8_t_c_t = w_fp8.t().contiguous().t()
-
-        #
         # calculate dL/dX
-        #
         dL_dX = torch.mm(
             go_fp8_reshaped,
-            w_fp8_t_c_t,
+            w_fp8,
         )
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
         x_fp8_orig_shape = x_fp8.shape
-        x_fp8_reshaped_t_c = x_fp8.reshape(-1, x_fp8_orig_shape[-1]).t().contiguous()
+        x_fp8_reshaped = x_fp8.reshape(-1, x_fp8_orig_shape[-1])
 
-        go_fp8_reshaped_t_c_t = go_fp8_reshaped.t().contiguous().t()
-
-        #
         # calculate dL/dW
-        #
+        # Note: the variant below is slightly faster on LLaMa 3 8B pretraining
+        # compared to than calculating `dL_dW_t = x_fp8_t @ go_fp8_reshaped`
         dL_dW = torch.mm(
-            x_fp8_reshaped_t_c,
-            go_fp8_reshaped_t_c_t,
+            go_fp8_reshaped.t(),
+            x_fp8_reshaped,
         )
-        dL_dW = dL_dW.t()
 
-        empty_grads = (None,)
-        return dL_dX, dL_dW, *empty_grads
+        return dL_dX, dL_dW
 
 
 @torch._dynamo.allow_in_graph
@@ -145,12 +138,12 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_scale_dL_dY,
         scale_fn_name,
         is_amax_initialized,
-        mm_config: ScaledMMConfig,
+        linear_mm_config: LinearMMConfig,
     ):
         ctx.save_for_backward(fp8_amax_dL_dY, fp8_amax_history_dL_dY, fp8_scale_dL_dY)
         ctx.scale_fn_name = scale_fn_name
         ctx.is_amax_initialized = is_amax_initialized
-        ctx.mm_config = mm_config
+        ctx.linear_mm_config = linear_mm_config
         return tensor
 
     @staticmethod
@@ -173,7 +166,11 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         fp8_amax_dL_dY.fill_(tensor_to_amax(go))
 
         res = to_fp8_no_autograd(
-            go, fp8_scale_dL_dY, e5m2_dtype, mm_config=ctx.mm_config
+            go,
+            fp8_scale_dL_dY,
+            e5m2_dtype,
+            linear_mm_config=ctx.linear_mm_config,
+            gemm_input_role=GemmInputRole.DL_DY,
         )
         empty_grads = None, None, None, None, None, None
         return res, *empty_grads
@@ -252,12 +249,18 @@ class Float8Linear(torch.nn.Linear):
 
         self.create_buffers()
 
-        # Defines the behavior of the matmul in the forward and backward pass
-        self.forward_config = ScaledMMConfig(
-            emulate, True if not emulate else False, False, config.pad_inner_dim
-        )
-        self.backward_config = ScaledMMConfig(
-            emulate, False, False, config.pad_inner_dim
+        # TODO(future): user level configuration of gemms
+        self.linear_mm_config = LinearMMConfig(
+            # x
+            ScaledMMConfig(
+                emulate, True if not emulate else False, False, config.pad_inner_dim
+            ),
+            # w
+            ScaledMMConfig(
+                emulate, True if not emulate else False, False, config.pad_inner_dim
+            ),
+            # dL_dY
+            ScaledMMConfig(emulate, False, False, config.pad_inner_dim),
         )
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
@@ -368,11 +371,12 @@ class Float8Linear(torch.nn.Linear):
                 self.fp8_scale_x,
                 e4m3_dtype,
                 self.fp8_amax_x,
-                self.forward_config,
+                linear_mm_config=self.linear_mm_config,
+                gemm_input_role=GemmInputRole.X,
             )
         else:
             assert self.scaling_type_x is TensorScalingType.DYNAMIC
-            x_fp8 = cast_to_float8_e4m3_dynamic(x, self.forward_config)
+            x_fp8 = cast_to_float8_e4m3_dynamic(x, self.linear_mm_config)
         return x_fp8
 
     def cast_w_to_float8(
@@ -399,14 +403,17 @@ class Float8Linear(torch.nn.Linear):
                     self.fp8_scale_w,
                     e4m3_dtype,
                     self.fp8_amax_w,
-                    self.forward_config,
+                    linear_mm_config=self.linear_mm_config,
+                    gemm_input_role=GemmInputRole.W,
                 )
         else:
             assert self.scaling_type_w is TensorScalingType.DYNAMIC
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 w_fp8 = self.weight
             else:
-                w_fp8 = cast_to_float8_e4m3_dynamic(self.weight, self.forward_config)
+                w_fp8 = cast_to_float8_e4m3_dynamic(
+                    self.weight, self.linear_mm_config, gemm_input_role=GemmInputRole.W
+                )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
@@ -419,11 +426,11 @@ class Float8Linear(torch.nn.Linear):
                 self.fp8_scale_dL_dY,
                 scale_fn_name,
                 self.is_amax_initialized,
-                self.backward_config,
+                self.linear_mm_config,
             )
         else:
             assert self.scaling_type_dL_dY is TensorScalingType.DYNAMIC
-            y = cast_to_float8_e5m2_dynamic_bw(y, self.backward_config)
+            y = cast_to_float8_e5m2_dynamic_bw(y, self.linear_mm_config)
         return y
 
     def float8_pre_forward(self, x):
@@ -454,8 +461,7 @@ class Float8Linear(torch.nn.Linear):
         x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
-        # y = float8_mm.apply(x_fp8, w_fp8)
-        y = float8_mm.apply(x_fp8, w_fp8)
+        y = manual_float8_mm.apply(x_fp8, w_fp8)
 
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y)
@@ -518,7 +524,7 @@ class Float8Linear(torch.nn.Linear):
                 new_mod.weight = torch.nn.Parameter(
                     WeightWithDynamicFloat8CastTensor(
                         new_mod.weight,
-                        new_mod.forward_config,
+                        new_mod.linear_mm_config,
                     )
                 )
             else:
@@ -529,7 +535,7 @@ class Float8Linear(torch.nn.Linear):
                         new_mod.fp8_amax_w,
                         new_mod.fp8_amax_history_w,
                         new_mod.fp8_scale_w,
-                        new_mod.forward_config,
+                        new_mod.linear_mm_config,
                         new_mod.is_amax_initialized,
                     )
                 )
