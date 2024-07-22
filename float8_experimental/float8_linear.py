@@ -82,21 +82,18 @@ class manual_float8_mm(torch.autograd.Function):
     def forward(
         ctx,
         x_fp8,
-        w_fp8,
+        w_fp8_t,
     ):
-        ctx.save_for_backward(x_fp8, w_fp8)
+        ctx.save_for_backward(x_fp8, w_fp8_t)
         orig_shape = x_fp8.shape
         x_fp8_reshaped = x_fp8.reshape(-1, orig_shape[-1])
-
-        w_fp8_t = w_fp8.t()
-
         res_bits = torch.mm(x_fp8_reshaped, w_fp8_t)
         res_bits = res_bits.reshape(*orig_shape[:-1], res_bits.shape[-1])
         return res_bits
 
     @staticmethod
     def backward(ctx, go_fp8):
-        x_fp8, w_fp8 = ctx.saved_tensors
+        x_fp8, w_fp8_t = ctx.saved_tensors
 
         go_fp8_orig_shape = go_fp8.shape
         go_fp8_reshaped = go_fp8.reshape(-1, go_fp8_orig_shape[-1])
@@ -104,7 +101,7 @@ class manual_float8_mm(torch.autograd.Function):
         # calculate dL/dX
         dL_dX = torch.mm(
             go_fp8_reshaped,
-            w_fp8,
+            w_fp8_t.t(),
         )
         dL_dX = dL_dX.reshape(*go_fp8_orig_shape[:-1], dL_dX.shape[-1])
 
@@ -119,7 +116,7 @@ class manual_float8_mm(torch.autograd.Function):
             x_fp8_reshaped,
         )
 
-        return dL_dX, dL_dW
+        return dL_dX, dL_dW.t()
 
 
 @torch._dynamo.allow_in_graph
@@ -461,7 +458,7 @@ class Float8Linear(torch.nn.Linear):
         x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
         w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
-        y = manual_float8_mm.apply(x_fp8, w_fp8)
+        y = manual_float8_mm.apply(x_fp8, w_fp8.t())
 
         # Cast gradY to float8_e5m2 during backward
         y = self.cast_y_to_float8_in_bw(y)
