@@ -193,9 +193,9 @@ class TestFP8TrainToFP8LinearInference:
         fp8_mlp.reset_parameters()
         swap_linear_with_float8_linear(
             fp8_mlp,
-            scaling_type_x=TensorScalingType.DYNAMIC,
-            scaling_type_w=TensorScalingType.DYNAMIC,
-            scaling_type_dL_dY=TensorScalingType.DYNAMIC,
+            scaling_type_input=TensorScalingType.DYNAMIC,
+            scaling_type_weight=TensorScalingType.DYNAMIC,
+            scaling_type_grad_output=TensorScalingType.DYNAMIC,
         )
 
         # Train the model
@@ -217,9 +217,9 @@ class TestFP8TrainToFP8LinearInference:
             new_fp8_mlp = FeedForward().to(dtype=dtype)
             swap_linear_with_float8_linear(
                 new_fp8_mlp,
-                scaling_type_x=TensorScalingType.DYNAMIC,
-                scaling_type_w=TensorScalingType.DYNAMIC,
-                scaling_type_dL_dY=TensorScalingType.DYNAMIC,
+                scaling_type_input=TensorScalingType.DYNAMIC,
+                scaling_type_weight=TensorScalingType.DYNAMIC,
+                scaling_type_grad_output=TensorScalingType.DYNAMIC,
             )
 
         # Load the actual data

@@ -23,16 +23,16 @@ log.addHandler(logging.NullHandler())
 
 
 def linear_requires_sync(
-    scaling_type_x: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
 ):
     """Returns whether the given linear_type requires sync before forward."""
     return any(
         [
-            scaling_type_x is TensorScalingType.DELAYED,
-            scaling_type_w is TensorScalingType.DELAYED,
-            scaling_type_dL_dY is TensorScalingType.DELAYED,
+            scaling_type_input is TensorScalingType.DELAYED,
+            scaling_type_weight is TensorScalingType.DELAYED,
+            scaling_type_grad_output is TensorScalingType.DELAYED,
         ]
     )
 
@@ -134,9 +134,9 @@ def swap_linear_with_float8_linear(
     *,
     emulate: bool = False,
     layer_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
-    scaling_type_x: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_dL_dY: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
 ) -> Optional[nn.Module]:
     """
     Swaps `torch.nn.Linear` in `module` with `Float8Linear`.
@@ -147,9 +147,9 @@ def swap_linear_with_float8_linear(
         layer_filter_fn: If specified, only the modules that
             that pass the filter function will be swapped. The inputs to the
             filter function are the FQN and module instance.
-        scaling_type_x (TensorScalingType): scaling type for `x`
-        scaling_type_w (TensorScalingType): scaling type for `w`
-        scaling_type_dL_dY (TensorScalingType): scaling type for `dL_dY`
+        scaling_type_input (TensorScalingType): scaling type for `input`
+        scaling_type_weight (TensorScalingType): scaling type for `weight`
+        scaling_type_grad_output (TensorScalingType): scaling type for `grad_output`
 
     Returns:
      nn.Module: The modified module with swapped linear layers.
@@ -157,9 +157,9 @@ def swap_linear_with_float8_linear(
     from_float = lambda m: Float8Linear.from_float(
         m,
         emulate=emulate,
-        scaling_type_x=scaling_type_x,
-        scaling_type_w=scaling_type_w,
-        scaling_type_dL_dY=scaling_type_dL_dY,
+        scaling_type_input=scaling_type_input,
+        scaling_type_weight=scaling_type_weight,
+        scaling_type_grad_output=scaling_type_grad_output,
     )
     return swap_linear_layers(
         module,
@@ -230,25 +230,25 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         the inner function will not.
         """
         # Loop over all fp8 layers and grab the needed tensors
-        fp8_amax_x_tensor_list = [None] * len(fp8_layers)
-        fp8_amax_w_tensor_list = [None] * len(fp8_layers)
-        fp8_amax_dL_dY_tensor_list = [None] * len(fp8_layers)
+        fp8_amax_input_tensor_list = [None] * len(fp8_layers)
+        fp8_amax_weight_tensor_list = [None] * len(fp8_layers)
+        fp8_amax_grad_output_tensor_list = [None] * len(fp8_layers)
 
-        fp8_x_amax_history_stack = [None] * len(fp8_layers)
-        fp8_w_amax_history_stack = [None] * len(fp8_layers)
-        fp8_dL_dY_amax_history_stack = [None] * len(fp8_layers)
+        fp8_input_amax_history_stack = [None] * len(fp8_layers)
+        fp8_weight_amax_history_stack = [None] * len(fp8_layers)
+        fp8_grad_output_amax_history_stack = [None] * len(fp8_layers)
 
         x_dtypes = set()
         scale_fn_recipes = set()
 
         for idx, child in enumerate(fp8_layers):
-            fp8_amax_x_tensor_list[idx] = child.fp8_amax_x
-            fp8_amax_w_tensor_list[idx] = child.fp8_amax_w
-            fp8_amax_dL_dY_tensor_list[idx] = child.fp8_amax_dL_dY
+            fp8_amax_input_tensor_list[idx] = child.fp8_amax_input
+            fp8_amax_weight_tensor_list[idx] = child.fp8_amax_weight
+            fp8_amax_grad_output_tensor_list[idx] = child.fp8_amax_grad_output
 
-            fp8_x_amax_history_stack[idx] = child.fp8_amax_history_x
-            fp8_w_amax_history_stack[idx] = child.fp8_amax_history_w
-            fp8_dL_dY_amax_history_stack[idx] = child.fp8_amax_history_dL_dY
+            fp8_input_amax_history_stack[idx] = child.fp8_amax_history_input
+            fp8_weight_amax_history_stack[idx] = child.fp8_amax_history_weight
+            fp8_grad_output_amax_history_stack[idx] = child.fp8_amax_history_grad_output
 
             x_dtypes.add(child.last_seen_input_dtype)
             scale_fn_recipes.add(child.recipe.scale_fn_name)
@@ -267,16 +267,16 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
         scale_fn_recipe = next(iter(scale_fn_recipes))
 
         assert (
-            len(fp8_amax_x_tensor_list)
-            == len(fp8_amax_w_tensor_list)
-            == len(fp8_amax_dL_dY_tensor_list)
+            len(fp8_amax_input_tensor_list)
+            == len(fp8_amax_weight_tensor_list)
+            == len(fp8_amax_grad_output_tensor_list)
         ), "Mismatched lengths of amax tensors."
 
         if dist.is_initialized():
             all_amax_tensors = torch.cat(
-                fp8_amax_x_tensor_list
-                + fp8_amax_w_tensor_list
-                + fp8_amax_dL_dY_tensor_list
+                fp8_amax_input_tensor_list
+                + fp8_amax_weight_tensor_list
+                + fp8_amax_grad_output_tensor_list
             )
             all_reduced_amax_tensor = all_reduce(
                 all_amax_tensors, "MAX", list(range(dist.get_world_size()))
@@ -285,46 +285,52 @@ def sync_float8_amax_and_scale_history(model: torch.nn.Module, fp8_layers=None) 
                 all_reduced_amax_tensor = all_reduced_amax_tensor.wait()
 
             (
-                reduced_fp8_amax_x_tensor,
-                reduced_fp8_amax_w_tensor,
-                reduced_fp8_amax_dL_dY_tensor,
-            ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_x_tensor_list))
+                reduced_fp8_amax_input_tensor,
+                reduced_fp8_amax_weight_tensor,
+                reduced_fp8_amax_grad_output_tensor,
+            ) = torch.split(all_reduced_amax_tensor, len(fp8_amax_input_tensor_list))
 
             for idx, child in enumerate(fp8_layers):
-                child.fp8_amax_x.copy_(reduced_fp8_amax_x_tensor[idx])
-                child.fp8_amax_w.copy_(reduced_fp8_amax_w_tensor[idx])
-                child.fp8_amax_dL_dY.copy_(reduced_fp8_amax_dL_dY_tensor[idx])
+                child.fp8_amax_input.copy_(reduced_fp8_amax_input_tensor[idx])
+                child.fp8_amax_weight.copy_(reduced_fp8_amax_weight_tensor[idx])
+                child.fp8_amax_grad_output.copy_(
+                    reduced_fp8_amax_grad_output_tensor[idx]
+                )
 
         # We create two stacked tensor groups, one for the amax history and one for the current scales
-        fp8_amax_x_tensors = torch.vstack(fp8_amax_x_tensor_list)
-        fp8_amax_w_tensors = torch.vstack(fp8_amax_w_tensor_list)
-        fp8_amax_dL_dY_tensors = torch.vstack(fp8_amax_dL_dY_tensor_list)
+        fp8_amax_input_tensors = torch.vstack(fp8_amax_input_tensor_list)
+        fp8_amax_weight_tensors = torch.vstack(fp8_amax_weight_tensor_list)
+        fp8_amax_grad_output_tensors = torch.vstack(fp8_amax_grad_output_tensor_list)
 
-        fp8_x_amax_history_stack = torch.vstack(fp8_x_amax_history_stack)
-        fp8_w_amax_history_stack = torch.vstack(fp8_w_amax_history_stack)
-        fp8_dL_dY_amax_history_stack = torch.vstack(fp8_dL_dY_amax_history_stack)
+        fp8_input_amax_history_stack = torch.vstack(fp8_input_amax_history_stack)
+        fp8_weight_amax_history_stack = torch.vstack(fp8_weight_amax_history_stack)
+        fp8_grad_output_amax_history_stack = torch.vstack(
+            fp8_grad_output_amax_history_stack
+        )
 
         # Update the history stacks with the new amax values
-        _update_history_stack(fp8_amax_x_tensors, fp8_x_amax_history_stack)
-        _update_history_stack(fp8_amax_w_tensors, fp8_w_amax_history_stack)
-        _update_history_stack(fp8_amax_dL_dY_tensors, fp8_dL_dY_amax_history_stack)
+        _update_history_stack(fp8_amax_input_tensors, fp8_input_amax_history_stack)
+        _update_history_stack(fp8_amax_weight_tensors, fp8_weight_amax_history_stack)
+        _update_history_stack(
+            fp8_amax_grad_output_tensors, fp8_grad_output_amax_history_stack
+        )
 
         # Calculate the new scales from the updated history stacks
-        new_x_scales = amax_history_to_scale_stack(
-            fp8_x_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
+        new_input_scales = amax_history_to_scale_stack(
+            fp8_input_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
         )
-        new_w_scales = amax_history_to_scale_stack(
-            fp8_w_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
+        new_weight_scales = amax_history_to_scale_stack(
+            fp8_weight_amax_history_stack, e4m3_dtype, x_dtype, scale_fn_recipe
         )
-        new_dL_dY_scales = amax_history_to_scale_stack(
-            fp8_dL_dY_amax_history_stack, e5m2_dtype, x_dtype, scale_fn_recipe
+        new_grad_output_scales = amax_history_to_scale_stack(
+            fp8_grad_output_amax_history_stack, e5m2_dtype, x_dtype, scale_fn_recipe
         )
 
         # Iterate through the layers and update the scales
         for idx, child in enumerate(fp8_layers):
-            child.fp8_scale_x.copy_(new_x_scales[idx])
-            child.fp8_scale_w.copy_(new_w_scales[idx])
-            child.fp8_scale_dL_dY.copy_(new_dL_dY_scales[idx])
+            child.fp8_scale_input.copy_(new_input_scales[idx])
+            child.fp8_scale_weight.copy_(new_weight_scales[idx])
+            child.fp8_scale_grad_output.copy_(new_grad_output_scales[idx])
 
     # This allows for the compile to succede on the inner func and fail on the graph breaks
     # at the beginning and and of syncing

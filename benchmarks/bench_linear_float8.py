@@ -95,16 +95,16 @@ def main(
     n_limit: Optional[int] = None,
     fast_accum_filter: Optional[bool] = None,
     shape_name_filter: Optional[str] = None,
-    scaling_type_x: str = "dynamic",
-    scaling_type_w: str = "dynamic",
-    scaling_type_dL_dY: str = "dynamic",
+    scaling_type_input: str = "dynamic",
+    scaling_type_weight: str = "dynamic",
+    scaling_type_grad_output: str = "dynamic",
 ):
     device = "cuda"
     print(f"Compile is set to             | {compile}")
 
-    scaling_type_x = TensorScalingType(scaling_type_x)
-    scaling_type_w = TensorScalingType(scaling_type_w)
-    scaling_type_dL_dY = TensorScalingType(scaling_type_dL_dY)
+    scaling_type_input = TensorScalingType(scaling_type_input)
+    scaling_type_weight = TensorScalingType(scaling_type_weight)
+    scaling_type_grad_output = TensorScalingType(scaling_type_grad_output)
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
@@ -136,9 +136,9 @@ def main(
         linear_float8 = Float8Linear.from_float(
             copy.deepcopy(linear_ref),
             emulate=False,
-            scaling_type_x=scaling_type_x,
-            scaling_type_w=scaling_type_w,
-            scaling_type_dL_dY=scaling_type_dL_dY,
+            scaling_type_input=scaling_type_input,
+            scaling_type_weight=scaling_type_weight,
+            scaling_type_grad_output=scaling_type_grad_output,
         )
         scaling_repr = linear_float8.scaling_repr()
 
@@ -153,7 +153,9 @@ def main(
         ref_forw_backward = lambda: linear_ref(input_tensor).sum().backward()
 
         def float8_forw_backward():
-            if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+            if linear_requires_sync(
+                scaling_type_input, scaling_type_weight, scaling_type_grad_output
+            ):
                 sync_float8_amax_and_scale_history(linear_float8)
             linear_float8(input_tensor).sum().backward()
 
@@ -278,18 +280,18 @@ def invoke_main() -> None:
     parser.add_argument("-n", "--n_limit", type=int, required=False)
     parser.add_argument("--fast_accum_filter", type=bool, required=False)
     parser.add_argument("--shape_name_filter", type=str, required=False)
-    parser.add_argument("--scaling_type_x", type=str, required=False)
-    parser.add_argument("--scaling_type_w", type=str, required=False)
-    parser.add_argument("--scaling_type_dL_dY", type=str, required=False)
+    parser.add_argument("--scaling_type_input", type=str, required=False)
+    parser.add_argument("--scaling_type_weight", type=str, required=False)
+    parser.add_argument("--scaling_type_grad_output", type=str, required=False)
     args = parser.parse_args()
     output_path = Path(args.output_path) if args.output_path is not None else None
     kwargs = {}
-    if args.scaling_type_x is not None:
-        kwargs["scaling_type_x"] = args.scaling_type_x
-    if args.scaling_type_w is not None:
-        kwargs["scaling_type_w"] = args.scaling_type_w
-    if args.scaling_type_dL_dY is not None:
-        kwargs["scaling_type_dL_dY"] = args.scaling_type_dL_dY
+    if args.scaling_type_input is not None:
+        kwargs["scaling_type_input"] = args.scaling_type_input
+    if args.scaling_type_weight is not None:
+        kwargs["scaling_type_weight"] = args.scaling_type_weight
+    if args.scaling_type_grad_output is not None:
+        kwargs["scaling_type_grad_output"] = args.scaling_type_grad_output
     main(
         output_path,
         not args.disable_compile,

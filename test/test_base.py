@@ -148,19 +148,21 @@ class TestFloat8Linear:
         x,
         m_ref,
         emulate: bool,
-        scaling_type_x: TensorScalingType = TensorScalingType.DELAYED,
-        scaling_type_w: TensorScalingType = TensorScalingType.DELAYED,
-        scaling_type_dL_dY: TensorScalingType = TensorScalingType.DELAYED,
+        scaling_type_input: TensorScalingType = TensorScalingType.DELAYED,
+        scaling_type_weight: TensorScalingType = TensorScalingType.DELAYED,
+        scaling_type_grad_output: TensorScalingType = TensorScalingType.DELAYED,
     ):
         m_fp8 = Float8Linear.from_float(
             copy.deepcopy(m_ref),
             emulate,
-            scaling_type_x,
-            scaling_type_w,
-            scaling_type_dL_dY,
+            scaling_type_input,
+            scaling_type_weight,
+            scaling_type_grad_output,
         )
         for _ in range(2):
-            if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+            if linear_requires_sync(
+                scaling_type_input, scaling_type_weight, scaling_type_grad_output
+            ):
                 sync_float8_amax_and_scale_history(m_fp8)
             y_fp8 = m_fp8(x)
             y_fp8.sum().backward()
@@ -178,24 +180,26 @@ class TestFloat8Linear:
             torch.testing.assert_close(m_ref.bias.grad, m_fp8.bias.grad)
 
         # verify all of the amax buffers got updated
-        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+        if linear_requires_sync(
+            scaling_type_input, scaling_type_weight, scaling_type_grad_output
+        ):
             # only check buffers that are actually used, based on per-tensor
             # scaling settings
             amax_buffer_names = []
             amax_history_buffer_names = []
             scale_buffer_names = []
-            if scaling_type_x is TensorScalingType.DELAYED:
-                amax_buffer_names.append("fp8_amax_x")
-                amax_history_buffer_names.append("fp8_amax_history_x")
-                scale_buffer_names.append("fp8_scale_x")
-            if scaling_type_w is TensorScalingType.DELAYED:
-                amax_buffer_names.append("fp8_amax_w")
-                amax_history_buffer_names.append("fp8_amax_history_w")
-                scale_buffer_names.append("fp8_scale_w")
-            if scaling_type_dL_dY is TensorScalingType.DELAYED:
-                amax_buffer_names.append("fp8_amax_dL_dY")
-                amax_history_buffer_names.append("fp8_amax_history_dL_dY")
-                scale_buffer_names.append("fp8_scale_dL_dY")
+            if scaling_type_input is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_input")
+                amax_history_buffer_names.append("fp8_amax_history_input")
+                scale_buffer_names.append("fp8_scale_input")
+            if scaling_type_weight is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_weight")
+                amax_history_buffer_names.append("fp8_amax_history_weight")
+                scale_buffer_names.append("fp8_scale_weight")
+            if scaling_type_grad_output is TensorScalingType.DELAYED:
+                amax_buffer_names.append("fp8_amax_grad_output")
+                amax_history_buffer_names.append("fp8_amax_history_grad_output")
+                scale_buffer_names.append("fp8_scale_grad_output")
 
             # verify all of the amax buffers got updated
             max_float8_pos = {torch.finfo(dtype).max for dtype in FP8_TYPES}
@@ -224,13 +228,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize(
-        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_grad_output",
+        [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC],
     )
     @pytest.mark.parametrize("linear_dtype", [torch.bfloat16, torch.float32])
     @pytest.mark.parametrize("linear_bias", [False, True])
@@ -239,9 +244,9 @@ class TestFloat8Linear:
         self,
         x_shape,
         emulate: bool,
-        scaling_type_x: TensorScalingType,
-        scaling_type_w: TensorScalingType,
-        scaling_type_dL_dY: TensorScalingType,
+        scaling_type_input: TensorScalingType,
+        scaling_type_weight: TensorScalingType,
+        scaling_type_grad_output: TensorScalingType,
         linear_dtype: torch.dtype,
         linear_bias: bool,
     ):
@@ -260,9 +265,9 @@ class TestFloat8Linear:
             x,
             m_ref,
             emulate,
-            scaling_type_x,
-            scaling_type_w,
-            scaling_type_dL_dY,
+            scaling_type_input,
+            scaling_type_weight,
+            scaling_type_grad_output,
         )
 
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
@@ -287,9 +292,9 @@ class TestFloat8Linear:
 
         m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         kwargs = {
-            "scaling_type_x": TensorScalingType.DELAYED,
-            "scaling_type_w": TensorScalingType.DELAYED,
-            "scaling_type_dL_dY": TensorScalingType.DELAYED,
+            "scaling_type_input": TensorScalingType.DELAYED,
+            "scaling_type_weight": TensorScalingType.DELAYED,
+            "scaling_type_grad_output": TensorScalingType.DELAYED,
         }
         m = Float8Linear.from_float(copy.deepcopy(m_ref), emulate, **kwargs)
 
@@ -327,9 +332,9 @@ class TestFloat8Linear:
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         kwargs = {
-            "scaling_type_x": TensorScalingType.DYNAMIC,
-            "scaling_type_w": TensorScalingType.DYNAMIC,
-            "scaling_type_dL_dY": TensorScalingType.DYNAMIC,
+            "scaling_type_input": TensorScalingType.DYNAMIC,
+            "scaling_type_weight": TensorScalingType.DYNAMIC,
+            "scaling_type_grad_output": TensorScalingType.DYNAMIC,
         }
         m = Float8Linear.from_float(copy.deepcopy(m), emulate, **kwargs)
 
@@ -338,15 +343,15 @@ class TestFloat8Linear:
         if linear_requires_sync(**kwargs):
             # Check amax buffer types
             for key in [
-                "fp8_amax_x",
-                "fp8_amax_history_x",
-                "fp8_scale_x",
-                "fp8_amax_w",
-                "fp8_amax_history_w",
-                "fp8_scale_w",
-                "fp8_amax_dL_dY",
-                "fp8_amax_history_dL_dY",
-                "fp8_scale_dL_dY",
+                "fp8_amax_input",
+                "fp8_amax_history_input",
+                "fp8_scale_input",
+                "fp8_amax_weight",
+                "fp8_amax_history_weight",
+                "fp8_scale_weight",
+                "fp8_amax_grad_output",
+                "fp8_amax_history_grad_output",
+                "fp8_scale_grad_output",
             ]:
                 assert (
                     m._buffers[key].dtype == torch.float32
@@ -379,9 +384,9 @@ class TestFloat8Linear:
         m = Float8Linear.from_float(
             copy.deepcopy(m),
             emulate=True,
-            scaling_type_x=TensorScalingType.DYNAMIC,
-            scaling_type_w=TensorScalingType.DELAYED,
-            scaling_type_dL_dY=TensorScalingType.DYNAMIC,
+            scaling_type_input=TensorScalingType.DYNAMIC,
+            scaling_type_weight=TensorScalingType.DELAYED,
+            scaling_type_grad_output=TensorScalingType.DYNAMIC,
         )
         s = m.__repr__()
         assert "x:dyn,w:del,dldy:dyn" in s

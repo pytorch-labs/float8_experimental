@@ -32,9 +32,9 @@ def _test_compile_base(
     backend: str,
     fullgraph: bool,
     emulate: bool,
-    scaling_type_x,
-    scaling_type_w,
-    scaling_type_dL_dY,
+    scaling_type_input,
+    scaling_type_weight,
+    scaling_type_grad_output,
     dtype: torch.dtype,
 ):
     random.seed(0)
@@ -48,9 +48,9 @@ def _test_compile_base(
     m_fp8 = Float8Linear.from_float(
         copy.deepcopy(m_ref),
         emulate,
-        scaling_type_x,
-        scaling_type_w,
-        scaling_type_dL_dY,
+        scaling_type_input,
+        scaling_type_weight,
+        scaling_type_grad_output,
     )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
@@ -68,13 +68,13 @@ def _test_compile_base(
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -82,9 +82,9 @@ def _test_compile_base(
 def test_eager_only(
     fullgraph,
     emulate: bool,
-    scaling_type_x: TensorScalingType,
-    scaling_type_w: TensorScalingType,
-    scaling_type_dL_dY: TensorScalingType,
+    scaling_type_input: TensorScalingType,
+    scaling_type_weight: TensorScalingType,
+    scaling_type_grad_output: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
@@ -92,9 +92,9 @@ def test_eager_only(
         "eager",
         fullgraph,
         emulate,
-        scaling_type_x,
-        scaling_type_w,
-        scaling_type_dL_dY,
+        scaling_type_input,
+        scaling_type_weight,
+        scaling_type_grad_output,
         dtype,
     )
 
@@ -102,22 +102,22 @@ def test_eager_only(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_aot_eager(
     fullgraph,
     emulate: bool,
-    scaling_type_x: TensorScalingType,
-    scaling_type_w: TensorScalingType,
-    scaling_type_dL_dY: TensorScalingType,
+    scaling_type_input: TensorScalingType,
+    scaling_type_weight: TensorScalingType,
+    scaling_type_grad_output: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
@@ -125,9 +125,9 @@ def test_aot_eager(
         "aot_eager",
         fullgraph,
         emulate,
-        scaling_type_x,
-        scaling_type_w,
-        scaling_type_dL_dY,
+        scaling_type_input,
+        scaling_type_weight,
+        scaling_type_grad_output,
         dtype,
     )
 
@@ -135,22 +135,22 @@ def test_aot_eager(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
 @pytest.mark.parametrize(
-    "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
 )
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_inductor(
     fullgraph,
     emulate: bool,
-    scaling_type_x: TensorScalingType,
-    scaling_type_w: TensorScalingType,
-    scaling_type_dL_dY: TensorScalingType,
+    scaling_type_input: TensorScalingType,
+    scaling_type_weight: TensorScalingType,
+    scaling_type_grad_output: TensorScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
@@ -158,9 +158,9 @@ def test_inductor(
         "inductor",
         fullgraph,
         emulate,
-        scaling_type_x,
-        scaling_type_w,
-        scaling_type_dL_dY,
+        scaling_type_input,
+        scaling_type_weight,
+        scaling_type_grad_output,
         dtype,
     )
 
@@ -257,9 +257,9 @@ def test_sync_amax_func():
     )
     float8_mod = swap_linear_with_float8_linear(
         module,
-        scaling_type_x=TensorScalingType.DELAYED,
-        scaling_type_w=TensorScalingType.DELAYED,
-        scaling_type_dL_dY=TensorScalingType.DELAYED,
+        scaling_type_input=TensorScalingType.DELAYED,
+        scaling_type_weight=TensorScalingType.DELAYED,
+        scaling_type_grad_output=TensorScalingType.DELAYED,
     )
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
@@ -292,9 +292,9 @@ def test_sync_amax_func_cuda_graph_success():
         ).to("cuda")
         swap_linear_with_float8_linear(
             my_module,
-            scaling_type_x=TensorScalingType.DELAYED,
-            scaling_type_w=TensorScalingType.DELAYED,
-            scaling_type_dL_dY=TensorScalingType.DELAYED,
+            scaling_type_input=TensorScalingType.DELAYED,
+            scaling_type_weight=TensorScalingType.DELAYED,
+            scaling_type_grad_output=TensorScalingType.DELAYED,
         )
         inpt = torch.randn(
             16, 16, device="cuda", dtype=torch.float32, requires_grad=True

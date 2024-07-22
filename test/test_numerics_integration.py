@@ -75,21 +75,22 @@ class FeedForward(nn.Module):
 
 class TestFloat8NumericsIntegrationTest:
     @pytest.mark.parametrize(
-        "scaling_type_x", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_w", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_dL_dY", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_grad_output",
+        [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC],
     )
     @pytest.mark.skipif(not is_H100, reason="requires H100 GPU")
     @pytest.mark.skipif(IS_ROCM, reason="test doesn't currently work on the ROCm stack")
     def test_encoder_fw_bw(
         self,
-        scaling_type_x: TensorScalingType,
-        scaling_type_w: TensorScalingType,
-        scaling_type_dL_dY: TensorScalingType,
+        scaling_type_input: TensorScalingType,
+        scaling_type_weight: TensorScalingType,
+        scaling_type_grad_output: TensorScalingType,
     ):
         # TODO(later): maybe add float16 back if it becomes important
         data_dtype = torch.bfloat16
@@ -111,9 +112,9 @@ class TestFloat8NumericsIntegrationTest:
         swap_linear_with_float8_linear(
             model_fp8,
             emulate=False,
-            scaling_type_x=scaling_type_x,
-            scaling_type_w=scaling_type_w,
-            scaling_type_dL_dY=scaling_type_dL_dY,
+            scaling_type_input=scaling_type_input,
+            scaling_type_weight=scaling_type_weight,
+            scaling_type_grad_output=scaling_type_grad_output,
         )
 
         lr = 0.01
@@ -135,13 +136,17 @@ class TestFloat8NumericsIntegrationTest:
         model_ref_out = model_ref(data2)
         model_ref_out.sum().backward()
 
-        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+        if linear_requires_sync(
+            scaling_type_input, scaling_type_weight, scaling_type_grad_output
+        ):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8(data1).sum().backward()
         # zero out grads without stepping, since we just want to compare grads
         # of the second datum
         optim_fp8.zero_grad()
-        if linear_requires_sync(scaling_type_x, scaling_type_w, scaling_type_dL_dY):
+        if linear_requires_sync(
+            scaling_type_input, scaling_type_weight, scaling_type_grad_output
+        ):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8_out = model_fp8(data2)
         model_fp8_out.sum().backward()
