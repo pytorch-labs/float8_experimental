@@ -8,14 +8,11 @@ import torch
 import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
+from float8_experimental import Float8LinearConfig
 from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.fsdp_utils import WeightWithDynamicFloat8CastTensor
-from test_fsdp2_common import (
-    check_parity_bf16_mp,
-    check_parity_no_mp,
-    set_enable_fsdp_fp8_all_gather,
-)
+from test_fsdp2_common import check_parity_bf16_mp, check_parity_no_mp
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._tensor import DTensor
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -114,16 +111,21 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         module = self.init_transformer(weight_tying=weight_tying).cuda()
         ref_module = copy.deepcopy(module)
         swap_linear_with_float8_linear(
-            ref_module, scaling_type_weight=scaling_type_weight
+            ref_module,
+            scaling_type_weight=scaling_type_weight,
         )
         if compile_transformer_block:
             for layer_id, transformer_block in ref_module.layers.named_children():
                 transformer_block = torch.compile(transformer_block, dynamic=False)
                 ref_module.layers.register_module(layer_id, transformer_block)
-        with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-            swap_linear_with_float8_linear(
-                module, scaling_type_weight=scaling_type_weight
-            )
+        float8_linear_config = Float8LinearConfig(
+            enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
+        )
+        swap_linear_with_float8_linear(
+            module,
+            scaling_type_weight=scaling_type_weight,
+            config=float8_linear_config,
+        )
         for layer_id, transformer_block in module.layers.named_children():
             if compile_transformer_block:
                 transformer_block = torch.compile(transformer_block, dynamic=False)
@@ -175,8 +177,10 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         model = Transformer(model_args)
         # Emulate the fp8 matmul to bypass the scaled matmul op's divisibility
         # requirement to use a smaller activation size
-        with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-            swap_linear_with_float8_linear(model, emulate=True)
+        float8_linear_config = Float8LinearConfig(
+            enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
+        )
+        swap_linear_with_float8_linear(model, emulate=True, config=float8_linear_config)
         model_unsharded_numel = sum(p.numel() for p in model.parameters())
         model_sharded_numel = (model_unsharded_numel + 1) // 2
         block_lin_weight_numel = 0
@@ -287,12 +291,15 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         tensor_cls = WeightWithDynamicFloat8CastTensor
         # Check for a single FSDP paramter group
         module_fp32 = self.init_single_module()
-        with set_enable_fsdp_fp8_all_gather(True):
-            module = swap_linear_with_float8_linear(
-                module_fp32,
-                emulate=True,
-                **extra_kwargs,
-            )
+        float8_linear_config = Float8LinearConfig(
+            enable_fsdp_fp8_all_gather=True,
+        )
+        module = swap_linear_with_float8_linear(
+            module_fp32,
+            emulate=True,
+            config=float8_linear_config,
+            **extra_kwargs,
+        )
         self.assertIsInstance(module.weight, tensor_cls)
         fully_shard(module)
         for param_name, param in module.named_parameters():
@@ -302,12 +309,12 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
 
         # Check for multiple FSDP paramter groups
         module = self.init_multi_module()
-        with set_enable_fsdp_fp8_all_gather(True):
-            module = swap_linear_with_float8_linear(
-                module,
-                emulate=True,
-                **extra_kwargs,
-            )
+        module = swap_linear_with_float8_linear(
+            module,
+            emulate=True,
+            config=float8_linear_config,
+            **extra_kwargs,
+        )
         for param_name, param in module.named_parameters():
             if "weight" in param_name:
                 self.assertIsInstance(param, tensor_cls)
@@ -353,9 +360,13 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for a single FSDP parameter group
         module_fp32 = self.init_single_module()
         ref_module = copy.deepcopy(module_fp32)
-        with set_enable_fsdp_fp8_all_gather(True):
-            module_fp32 = swap_linear_with_float8_linear(module_fp32)
-            module = module_fp32
+        float8_linear_config = Float8LinearConfig(
+            enable_fsdp_fp8_all_gather=True,
+        )
+        module_fp32 = swap_linear_with_float8_linear(
+            module_fp32, config=float8_linear_config
+        )
+        module = module_fp32
         fully_shard(module)
         local_inp = self.get_local_inp()
         expected_all_gather_size = get_expected_all_gather_size(ref_module)
@@ -382,8 +393,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for multiple FSDP parameter groups
         module = self.init_multi_module()
         ref_module = copy.deepcopy(module)
-        with set_enable_fsdp_fp8_all_gather(True):
-            module = swap_linear_with_float8_linear(module)
+        module = swap_linear_with_float8_linear(module, config=float8_linear_config)
         for submodule in module:
             fully_shard(submodule)
         fully_shard(module)
@@ -410,16 +420,25 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
         )
         for enable_fsdp_fp8_all_gather, scaling_type_weight in choices:
+            float8_linear_config1 = Float8LinearConfig(
+                enable_fsdp_fp8_all_gather=False,
+            )
+            float8_linear_config2 = Float8LinearConfig(
+                enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
+            )
             module_fp32 = self.init_single_module()
             ref_module = copy.deepcopy(module_fp32)
             ref_module = swap_linear_with_float8_linear(
-                ref_module, scaling_type_weight=scaling_type_weight
+                ref_module,
+                scaling_type_weight=scaling_type_weight,
+                config=float8_linear_config1,
             )
             ref_module = ref_module.cuda()
-            with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-                module = swap_linear_with_float8_linear(
-                    module_fp32, scaling_type_weight=scaling_type_weight
-                )
+            module = swap_linear_with_float8_linear(
+                module_fp32,
+                scaling_type_weight=scaling_type_weight,
+                config=float8_linear_config2,
+            )
             fully_shard(module)
             ref_optim = torch.optim.Adam(ref_module.parameters(), lr=1e-2)
             optim = torch.optim.Adam(module.parameters(), lr=1e-2, foreach=True)
@@ -445,15 +464,24 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             [TensorScalingType.DYNAMIC, TensorScalingType.DELAYED],
         )
         for enable_fsdp_fp8_all_gather, scaling_type_weight in choices:
+            float8_linear_config1 = Float8LinearConfig(
+                enable_fsdp_fp8_all_gather=False,
+            )
+            float8_linear_config2 = Float8LinearConfig(
+                enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
+            )
             module = self.init_multi_module().cuda()
             ref_module = copy.deepcopy(module)
             ref_module = swap_linear_with_float8_linear(
-                ref_module, scaling_type_weight=scaling_type_weight
+                ref_module,
+                scaling_type_weight=scaling_type_weight,
+                config=float8_linear_config1,
             )
-            with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-                module = swap_linear_with_float8_linear(
-                    module, scaling_type_weight=scaling_type_weight
-                )
+            module = swap_linear_with_float8_linear(
+                module,
+                scaling_type_weight=scaling_type_weight,
+                config=float8_linear_config2,
+            )
             for submodule in module:
                 fully_shard(submodule)
             fully_shard(module)
@@ -508,11 +536,14 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         Verify that `WeightWithDelayedFloat8CastTensor` updates buffers inplace
         """
         module = self.init_single_module()
-        with set_enable_fsdp_fp8_all_gather(True):
-            m_fp8 = swap_linear_with_float8_linear(
-                module,
-                scaling_type_weight=TensorScalingType.DELAYED,
-            )
+        float8_linear_config = Float8LinearConfig(
+            enable_fsdp_fp8_all_gather=True,
+        )
+        m_fp8 = swap_linear_with_float8_linear(
+            module,
+            scaling_type_weight=TensorScalingType.DELAYED,
+            config=float8_linear_config,
+        )
 
         fp8_amax_weight_old = m_fp8.fp8_amax_weight.clone().detach()
         dummy_mesh = None

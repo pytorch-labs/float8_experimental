@@ -91,6 +91,16 @@ from float8_experimental.float8_linear import TensorScalingType
 # create model
 m = Model(...)
 
+# optional: configure for compatibility with FSDP. Note that workarounds 
+# gated with config.enable_amax_init and
+# config.enable_pre_and_post_forward are needed for 
+# autocast + compile + FSDP + float8 to work
+from float8_experimental import Float8LinearConfig
+config = Float8LinearConfig(
+    enable_amax_init = False,  # only needed for autocast + compile + FSDP +  float8 delayed
+    enable_pre_and_post_forward, False  # only needed for autocast + compile + FSDP +  float8 delayed
+)
+
 # convert all `torch.nn.Linear` modules to `Float8Linear`, specifying scaling
 # type
 swap_linear_with_float8_linear(
@@ -98,13 +108,10 @@ swap_linear_with_float8_linear(
     scaling_type_input=TensorScalingType.DELAYED,
     scaling_type_weight=TensorScalingType.DELAYED,
     scaling_type_grad_output=TensorScalingType.DELAYED,
+    config=config,
 )
 
-# optional: use FSDP. Note that workarounds gated with config.enable_amax_init and
-# config.enable_pre_and_post_forward are needed for autocast + compile + FSDP + float8 to work
-from float8_experimental import config
-config.enable_amax_init = False  # only needed for autocast + compile + FSDP +  float8 delayed
-config.enable_pre_and_post_forward = False  # only needed for autocast + compile + FSDP +  float8 delayed
+# optional: use FSDP
 model = FSDP(model, use_orig_params=True)
 
 # optional: enable torch.compile for improved performance

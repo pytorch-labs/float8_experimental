@@ -12,9 +12,9 @@ import enum
 
 from typing import Optional
 
-import float8_experimental.config as config
-
 import torch
+
+from float8_experimental.config import Float8LinearConfig
 
 from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
@@ -173,6 +173,7 @@ class Float8Linear(torch.nn.Linear):
         * `scaling_type_input`: delayed vs dynamic scaling for `input`
         * `scaling_type_weight`: delayed vs dynamic scaling for `weight`
         * `scaling_type_grad_output`: delayed vs dynamic scaling for `grad_output`
+        * `config`: Float8LinearConfig
         """
 
         delayed_scaling_recipe = kwargs.pop(
@@ -188,6 +189,7 @@ class Float8Linear(torch.nn.Linear):
         scaling_type_grad_output = kwargs.pop(
             "scaling_type_grad_output", TensorScalingType.DYNAMIC
         )
+        config = kwargs.pop("config")
         super().__init__(*args, **kwargs)
 
         # Defines the scaling behavior of input, weight, grad_output
@@ -201,6 +203,8 @@ class Float8Linear(torch.nn.Linear):
             or self.scaling_type_grad_output is TensorScalingType.DELAYED
         )
 
+        self.config = config
+
         # TODO(future): have a unique recipe per buffer instead of one per
         # module, saving implementing that until we need it.
         # TODO(future): serialization for recipes
@@ -212,24 +216,30 @@ class Float8Linear(torch.nn.Linear):
         self.linear_mm_config = LinearMMConfig(
             # input
             ScaledMMConfig(
-                emulate, True if not emulate else False, False, config.pad_inner_dim
+                emulate,
+                True if not emulate else False,
+                False,
+                self.config.pad_inner_dim,
             ),
             # weight
             ScaledMMConfig(
-                emulate, True if not emulate else False, False, config.pad_inner_dim
+                emulate,
+                True if not emulate else False,
+                False,
+                self.config.pad_inner_dim,
             ),
             # grad_output
-            ScaledMMConfig(emulate, False, False, config.pad_inner_dim),
+            ScaledMMConfig(emulate, False, False, self.config.pad_inner_dim),
         )
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
         # control flow visible to dynamo
         # TODO(future PR): add serialization for this flag
-        self.is_amax_initialized = not config.enable_amax_init
+        self.is_amax_initialized = not self.config.enable_amax_init
 
         # Syncing of amaxes and scales happens outside of this function. This
         # flag is here to enforce that the user does not forget to do this.
-        self.amax_and_scale_synced = not config.enable_amax_init
+        self.amax_and_scale_synced = not self.config.enable_amax_init
 
         # This is needed to properly handle autocast in the amax/scale
         # update function for torch.float16
@@ -237,11 +247,11 @@ class Float8Linear(torch.nn.Linear):
 
         # pre_forward and post_forward are currently broken with FSDP
         # and torch.compile, this option can disable them
-        # Note that when using `config.enable_pre_and_post_forward = False`,
-        # it's recommended to also set `config.enable_amax_init = False`.
+        # Note that when using `self.config.enable_pre_and_post_forward = False`,
+        # it's recommended to also set `self.config.enable_amax_init = False`.
         # Otherwise, the amax buffer would never be marked as initialized and
         # would be initialized in every iteration.
-        self.enable_pre_and_post_forward = config.enable_pre_and_post_forward
+        self.enable_pre_and_post_forward = self.config.enable_pre_and_post_forward
 
     def create_buffers(self):
         # Default values for history buffers, see above TODO
@@ -450,6 +460,7 @@ class Float8Linear(torch.nn.Linear):
         scaling_type_input=TensorScalingType.DYNAMIC,
         scaling_type_weight=TensorScalingType.DYNAMIC,
         scaling_type_grad_output=TensorScalingType.DYNAMIC,
+        config: Optional[Float8LinearConfig] = None,
     ):
         """
         Create an nn.Linear with fp8 compute from a regular nn.Linear
@@ -457,7 +468,10 @@ class Float8Linear(torch.nn.Linear):
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
             emulate (bool): whether to emulate fp8 matmul logic in float32
+            config (Optional[Float8LinearConfig]): configuration for conversion to float8
         """
+        if config is None:
+            config = Float8LinearConfig()
         with torch.device("meta"):
             new_mod = cls(
                 mod.in_features,
@@ -467,6 +481,7 @@ class Float8Linear(torch.nn.Linear):
                 scaling_type_weight=scaling_type_weight,
                 scaling_type_grad_output=scaling_type_grad_output,
                 emulate=emulate,
+                config=config,
             )
         new_mod.weight = mod.weight
         new_mod.bias = mod.bias
