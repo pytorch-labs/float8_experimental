@@ -22,7 +22,7 @@ def check_parity_no_mp(
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
     precompute: bool = False,
-    scaling_type_w: TensorScalingType = TensorScalingType.DYNAMIC,
+    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
     compile_transformer_block: bool = False,
 ):
     for iter_idx in range(10):
@@ -36,14 +36,14 @@ def check_parity_no_mp(
                     dist.all_reduce(param.grad)
                     param.grad.div_(dist.get_world_size())
 
-            if linear_requires_sync(scaling_type_w=scaling_type_w):
+            if linear_requires_sync(scaling_type_weight=scaling_type_weight):
                 sync_float8_amax_and_scale_history(model)
 
             optim.step()
             if (
                 model is fsdp_model
                 and precompute
-                and scaling_type_w is TensorScalingType.DYNAMIC
+                and scaling_type_weight is TensorScalingType.DYNAMIC
             ):
                 precompute_float8_dynamic_scale_for_fsdp(model)
 

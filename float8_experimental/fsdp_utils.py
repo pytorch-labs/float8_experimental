@@ -37,7 +37,8 @@ def precompute_float8_dynamic_scale_for_fsdp(module: nn.Module) -> None:
     from torch.distributed._tensor import DTensor
 
     if any(
-        isinstance(m, Float8Linear) and m.scaling_type_w is TensorScalingType.DELAYED
+        isinstance(m, Float8Linear)
+        and m.scaling_type_weight is TensorScalingType.DELAYED
         for m in module.modules()
     ):
         raise NotImplementedError("Only supports delayed scaling")

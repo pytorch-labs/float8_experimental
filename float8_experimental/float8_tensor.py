@@ -22,6 +22,8 @@ aten = torch.ops.aten
 #
 # A note on configuration of float8 logic in a linear
 # TODO(future): move all the configs to separate file
+# TODO(future): change this to input/weight/grad_output notation,
+#   can be separate PR because none of this is user facing
 #
 # There are three gemms in a forward + backward of a Linear layer:
 #
