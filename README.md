@@ -95,19 +95,19 @@ m = Model(...)
 # gated with config.enable_amax_init and
 # config.enable_pre_and_post_forward are needed for 
 # autocast + compile + FSDP + float8 to work
-from float8_experimental import Float8LinearConfig
+from float8_experimental import Float8LinearConfig, TensorScalingType, Float8TensorCastConfig
 config = Float8LinearConfig(
     enable_amax_init = False,  # only needed for autocast + compile + FSDP +  float8 delayed
     enable_pre_and_post_forward, False  # only needed for autocast + compile + FSDP +  float8 delayed
+    cast_config_input=float8tensorcastconfig(scaling_type=TensorScalingType.DELAYED),
+    cast_config_weight=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
+    cast_config_grad_output=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
 )
 
 # convert all `torch.nn.Linear` modules to `Float8Linear`, specifying scaling
 # type
 swap_linear_with_float8_linear(
     m,
-    scaling_type_input=TensorScalingType.DELAYED,
-    scaling_type_weight=TensorScalingType.DELAYED,
-    scaling_type_grad_output=TensorScalingType.DELAYED,
     config=config,
 )
 

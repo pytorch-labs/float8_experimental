@@ -18,7 +18,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from float8_experimental import Float8LinearConfig
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import Float8TensorCastConfig, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
@@ -55,7 +55,18 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     # amax_and_scale_synced=True, we get
     # https://gist.github.com/vkuzo/ed8e168fd9f7463f1fce34301334ab55
     # to get around this, we can disable amax init
-    config = Float8LinearConfig(enable_amax_init=False)
+    config = Float8LinearConfig(
+        enable_amax_init=False,
+        cast_config_input=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+        cast_config_weight=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+    )
 
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
@@ -64,9 +75,6 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     swap_linear_with_float8_linear(
         m,
         emulate=emulate,
-        scaling_type_input=TensorScalingType.DELAYED,
-        scaling_type_weight=TensorScalingType.DELAYED,
-        scaling_type_grad_output=TensorScalingType.DELAYED,
         config=config,
     )
     return m

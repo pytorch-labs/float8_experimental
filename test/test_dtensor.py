@@ -13,9 +13,9 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from float8_experimental.config import TensorScalingType
 
 from float8_experimental.float8_dynamic_utils import NoopFwToFloat8E5M2Bw
-from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
 from float8_experimental.float8_tensor import (
     Float8Tensor,
@@ -184,21 +184,14 @@ def _test_fp8_mlp_tensor_parallelism_base(
     # For now, only supports dynamic scaling of `x` and `dL_dY`.
     # TODO(future): add support for float8 all-gather with delayed scaling
     # for activations and gradients.
-    extra_kwargs = {
-        "scaling_type_input": TensorScalingType.DYNAMIC,
-        "scaling_type_weight": TensorScalingType.DYNAMIC,
-        "scaling_type_grad_output": TensorScalingType.DYNAMIC,
-    }
 
     toy_model = ToyModel().to(device)
-    toy_model_fp8 = swap_linear_with_float8_linear(
-        toy_model, emulate=True, **extra_kwargs
-    )
+    toy_model_fp8 = swap_linear_with_float8_linear(toy_model, emulate=True)
 
     tp_model = copy.deepcopy(toy_model)
-    tp_model = swap_linear_with_float8_linear(tp_model, emulate=True, **extra_kwargs)
+    tp_model = swap_linear_with_float8_linear(tp_model, emulate=True)
     sp_model = copy.deepcopy(toy_model)
-    sp_model = swap_linear_with_float8_linear(sp_model, emulate=True, **extra_kwargs)
+    sp_model = swap_linear_with_float8_linear(sp_model, emulate=True)
 
     # vanilla TP
     tp_model = parallelize_module(
@@ -229,7 +222,7 @@ def _test_fp8_mlp_tensor_parallelism_base(
 
     # PrepareFloat8ModuleInput with specific submodule fqn
     sp_model2 = copy.deepcopy(toy_model)
-    sp_model2 = swap_linear_with_float8_linear(sp_model2, emulate=True, **extra_kwargs)
+    sp_model2 = swap_linear_with_float8_linear(sp_model2, emulate=True)
 
     sp_model2 = parallelize_module(
         sp_model2,

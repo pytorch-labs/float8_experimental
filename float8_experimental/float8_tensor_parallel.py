@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
+from float8_experimental.config import TensorScalingType
 from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
 )
-from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_tensor import GemmInputRole
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh

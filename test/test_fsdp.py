@@ -21,7 +21,11 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     swap_linear_with_float8_linear,
@@ -78,13 +82,16 @@ def fsdp_main(rank, world_size, args):
         if use_weight_dynamic_scaling
         else TensorScalingType.DELAYED
     )
+    config = Float8LinearConfig(
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+    )
 
     # Note: we only iterate over `scaling_type_weight` because FSDP only interacts
     # with weights.
     swap_linear_with_float8_linear(
         model_fp8,
         emulate=False,
-        scaling_type_weight=scaling_type_weight,
+        config=config,
     )
 
     # To compile FSDP, we need use_orig_params to True
@@ -130,11 +137,7 @@ def fsdp_main(rank, world_size, args):
         optim.zero_grad()
         y_local = model(ref_input_local[i])
         y_local.backward(ref_grad_local[i])
-        if is_fp8 and linear_requires_sync(
-            TensorScalingType.DYNAMIC,
-            scaling_type_weight,
-            TensorScalingType.DYNAMIC,
-        ):
+        if is_fp8 and linear_requires_sync(config):
             sync_float8_func(model)
         optim.step()
         return y_local

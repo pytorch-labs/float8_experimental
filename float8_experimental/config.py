@@ -4,7 +4,29 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
+import enum
 from dataclasses import dataclass
+
+
+class TensorScalingType(enum.Enum):
+    DELAYED = "delayed"
+    DYNAMIC = "dynamic"
+
+    def short_str(self):
+        if self is TensorScalingType.DELAYED:
+            return "del"
+        else:
+            assert self is TensorScalingType.DYNAMIC
+            return "dyn"
+
+
+@dataclass(frozen=True)
+class Float8TensorCastConfig:
+    """
+    Configuration for casting a single tensor to float8
+    """
+
+    scaling_type: TensorScalingType = TensorScalingType.DYNAMIC
 
 
 @dataclass(frozen=True)
@@ -13,6 +35,17 @@ class Float8LinearConfig:
     Configuration for converting a `torch.nn.Linear` module to float8
     for training.
     """
+
+    #
+    # Per-tensor configuration for `input`, `weight`, `grad_output`
+    #
+    cast_config_input: Float8TensorCastConfig = Float8TensorCastConfig()
+    cast_config_weight: Float8TensorCastConfig = Float8TensorCastConfig()
+    cast_config_grad_output: Float8TensorCastConfig = Float8TensorCastConfig()
+
+    #
+    # Per-linear configuration
+    #
 
     # If True, on the first iteration of Float8Linear the amaxes will be
     # initialized with the incoming data. As of 2023-12-30, this doesn't work

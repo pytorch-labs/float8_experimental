@@ -13,7 +13,12 @@ import pytest
 
 import torch
 import torch.nn as nn
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
+from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     get_float8_layers,
     swap_linear_with_float8_linear,
@@ -32,9 +37,7 @@ def _test_compile_base(
     backend: str,
     fullgraph: bool,
     emulate: bool,
-    scaling_type_input,
-    scaling_type_weight,
-    scaling_type_grad_output,
+    config: Float8LinearConfig,
     dtype: torch.dtype,
 ):
     random.seed(0)
@@ -48,9 +51,7 @@ def _test_compile_base(
     m_fp8 = Float8Linear.from_float(
         copy.deepcopy(m_ref),
         emulate,
-        scaling_type_input,
-        scaling_type_weight,
-        scaling_type_grad_output,
+        config,
     )
 
     m_fp8 = torch.compile(m_fp8, backend=backend, fullgraph=fullgraph)
@@ -88,13 +89,18 @@ def test_eager_only(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=scaling_type_grad_output
+        ),
+    )
     _test_compile_base(
         "eager",
         fullgraph,
         emulate,
-        scaling_type_input,
-        scaling_type_weight,
-        scaling_type_grad_output,
+        config,
         dtype,
     )
 
@@ -121,13 +127,18 @@ def test_aot_eager(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=scaling_type_grad_output
+        ),
+    )
     _test_compile_base(
         "aot_eager",
         fullgraph,
         emulate,
-        scaling_type_input,
-        scaling_type_weight,
-        scaling_type_grad_output,
+        config,
         dtype,
     )
 
@@ -154,13 +165,18 @@ def test_inductor(
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=scaling_type_grad_output
+        ),
+    )
     _test_compile_base(
         "inductor",
         fullgraph,
         emulate,
-        scaling_type_input,
-        scaling_type_weight,
-        scaling_type_grad_output,
+        config,
         dtype,
     )
 
@@ -255,11 +271,20 @@ def test_sync_amax_func():
     module = torch.nn.Sequential(
         nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
     )
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+        cast_config_weight=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=TensorScalingType.DELAYED
+        ),
+    )
     float8_mod = swap_linear_with_float8_linear(
         module,
-        scaling_type_input=TensorScalingType.DELAYED,
-        scaling_type_weight=TensorScalingType.DELAYED,
-        scaling_type_grad_output=TensorScalingType.DELAYED,
+        config=config,
     )
     compiled_swap_func = torch.compile(sync_float8_amax_and_scale_history, backend=cnts)
     compiled_swap_func(float8_mod)
