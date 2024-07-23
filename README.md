@@ -99,7 +99,7 @@ from float8_experimental import Float8LinearConfig, TensorScalingType, Float8Ten
 config = Float8LinearConfig(
     enable_amax_init = False,  # only needed for autocast + compile + FSDP +  float8 delayed
     enable_pre_and_post_forward, False  # only needed for autocast + compile + FSDP +  float8 delayed
-    cast_config_input=float8tensorcastconfig(scaling_type=TensorScalingType.DELAYED),
+    cast_config_input=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
     cast_config_weight=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
     cast_config_grad_output=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
 )
