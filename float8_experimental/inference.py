@@ -10,7 +10,7 @@ Defines an nn module designed to be used during inference
 from dataclasses import dataclass
 
 from enum import auto, Enum
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import float8_experimental.config as config
 
@@ -209,7 +209,7 @@ def quantize_to_float8(
     module: nn.Module,
     quant_config: QuantConfig,
     *,
-    skip_fqn_list: Optional[List[str]] = None,
+    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
     use_fast_accum: bool = True,
 ) -> Optional[nn.Module]:
     """
@@ -222,7 +222,9 @@ def quantize_to_float8(
     Args:
         module (nn.Module): The module to modify.
         quant_config (QuantConfig): Quantization configuration for Float8 conversion.
-        skip_fqn_list (List[str], optional): List of module FQNs to skip during conversion.
+        module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
+            that pass the filter function will be swapped. The inputs to the
+            filter function are the FQN and module instance.
         use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
 
     Returns:
@@ -234,5 +236,5 @@ def quantize_to_float8(
     return swap_linear_layers(
         module,
         lambda m: Float8InferenceLinear.from_float(m, quant_config, use_fast_accum),
-        skip_fqn_list=skip_fqn_list,
+        module_filter_fn=module_filter_fn,
     )
