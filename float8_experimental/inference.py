@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Callable, List, Optional
 
-import float8_experimental.config as config
-
 import torch
 import torch.nn as nn
 from float8_experimental.float8_linear_utils import swap_linear_layers
@@ -54,6 +52,12 @@ class QuantConfig:
 
     activation_casting: ActivationCasting
     static_quantization_scale: Optional[torch.Tensor] = None
+
+    # If True, then prior to performing the fp8 scaled mamtmul we will pad the
+    # inner dimension of a (dim 1) and b (dim 2) with 0s. This is needed for matmuls
+    # _scaled_mm since it has the strong constraint that for M,N,K  N, K must be a multiple of 16.
+    # This can cause a memory spike however so we keep this off by default.
+    pad_inner_dim = False
 
     def __post_init__(self):
         if self.activation_casting == ActivationCasting.STATIC:
@@ -151,7 +155,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             quant_config (QuantConfig): Configuration for the weight and activation casting
         """
         forward_config = ScaledMMConfig(
-            False, use_fast_accum, pad_inner_dim=config.pad_inner_dim
+            False, use_fast_accum, pad_inner_dim=quant_config.pad_inner_dim
         )
         linear_mm_config = LinearMMConfig(
             forward_config, forward_config, forward_config

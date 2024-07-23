@@ -17,7 +17,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-from float8_experimental import config
+from float8_experimental import Float8LinearConfig
 from float8_experimental.float8_linear import TensorScalingType
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
@@ -45,6 +45,18 @@ def cleanup():
 
 
 def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
+    # composability of torch.compile + FSDP + autocast + Float8Linear
+    # as fo 2023-12-30
+
+    # without any changes to the Float8Linear, we get this error:
+    # https://gist.github.com/vkuzo/3bcb81806cc92f99ac0b9c5fdf287730
+
+    # if we initialize Float8Linear with is_amax_initialized=True and
+    # amax_and_scale_synced=True, we get
+    # https://gist.github.com/vkuzo/ed8e168fd9f7463f1fce34301334ab55
+    # to get around this, we can disable amax init
+    config = Float8LinearConfig(enable_amax_init=False)
+
     m = nn.Sequential(
         nn.Linear(K, N, dtype=base_dtype),
         nn.ReLU(),
@@ -55,6 +67,7 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
         scaling_type_input=TensorScalingType.DELAYED,
         scaling_type_weight=TensorScalingType.DELAYED,
         scaling_type_grad_output=TensorScalingType.DELAYED,
+        config=config,
     )
     return m
 
@@ -66,18 +79,6 @@ def fsdp_main(rank, world_size, args):
     torch.cuda.set_device(rank)
 
     (emulate,) = args
-
-    # composability of torch.compile + FSDP + autocast + Float8Linear
-    # as fo 2023-12-30
-
-    # without any changes to the Float8Linear, we get this error:
-    # https://gist.github.com/vkuzo/3bcb81806cc92f99ac0b9c5fdf287730
-
-    # if we initialize Float8Linear with is_amax_initialized=True and
-    # amax_and_scale_synced=True, we get
-    # https://gist.github.com/vkuzo/ed8e168fd9f7463f1fce34301334ab55
-    # to get around this, we can disable amax init
-    config.enable_amax_init = False
 
     # finally, if we remove the usage of self.bias_dtype, then
     # things work e2e. Note that FSDP does not support full-graph compile
