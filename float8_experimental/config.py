@@ -7,7 +7,7 @@
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True)
 class Float8LinearConfig:
     """
     Configuration for converting a `torch.nn.Linear` module to float8
