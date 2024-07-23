@@ -9,6 +9,10 @@ from dataclasses import dataclass
 
 @dataclass
 class Float8LinearConfig:
+    """
+    Configuration for converting a `torch.nn.Linear` module to float8
+    for training.
+    """
 
     # If True, on the first iteration of Float8Linear the amaxes will be
     # initialized with the incoming data. As of 2023-12-30, this doesn't work
