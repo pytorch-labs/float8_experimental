@@ -9,8 +9,8 @@ from typing import Callable, List, Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.config import Float8LinearConfig
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.config import Float8LinearConfig, TensorScalingType
+from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import (
     amax_history_to_scale_stack,
@@ -23,17 +23,13 @@ log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
 
 
-def linear_requires_sync(
-    scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
-):
+def linear_requires_sync(config: Float8LinearConfig):
     """Returns whether the given linear_type requires sync before forward."""
     return any(
         [
-            scaling_type_input is TensorScalingType.DELAYED,
-            scaling_type_weight is TensorScalingType.DELAYED,
-            scaling_type_grad_output is TensorScalingType.DELAYED,
+            config.cast_config_input.scaling_type is TensorScalingType.DELAYED,
+            config.cast_config_weight.scaling_type is TensorScalingType.DELAYED,
+            config.cast_config_grad_output.scaling_type is TensorScalingType.DELAYED,
         ]
     )
 
@@ -133,9 +129,6 @@ def swap_linear_with_float8_linear(
     *,
     emulate: bool = False,
     module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
-    scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
-    scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
     config: Float8LinearConfig = None,
 ) -> Optional[nn.Module]:
     """
@@ -147,9 +140,6 @@ def swap_linear_with_float8_linear(
         module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
             filter function are the FQN and module instance.
-        scaling_type_input (TensorScalingType): scaling type for `input`
-        scaling_type_weight (TensorScalingType): scaling type for `weight`
-        scaling_type_grad_output (TensorScalingType): scaling type for `grad_output`
         config (Float8LinearConfig): configuration for conversion to float8
 
     Returns:
@@ -160,9 +150,6 @@ def swap_linear_with_float8_linear(
     from_float = lambda m: Float8Linear.from_float(
         m,
         emulate=emulate,
-        scaling_type_input=scaling_type_input,
-        scaling_type_weight=scaling_type_weight,
-        scaling_type_grad_output=scaling_type_grad_output,
         config=config,
     )
     return swap_linear_layers(

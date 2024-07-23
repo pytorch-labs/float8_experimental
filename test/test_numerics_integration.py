@@ -14,7 +14,11 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     swap_linear_with_float8_linear,
@@ -109,12 +113,17 @@ class TestFloat8NumericsIntegrationTest:
 
         # for now just test the encoder to simplify things
         model_fp8 = copy.deepcopy(model_ref)
+        config = Float8LinearConfig(
+            cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+            cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+            cast_config_grad_output=Float8TensorCastConfig(
+                scaling_type=scaling_type_grad_output
+            ),
+        )
         swap_linear_with_float8_linear(
             model_fp8,
             emulate=False,
-            scaling_type_input=scaling_type_input,
-            scaling_type_weight=scaling_type_weight,
-            scaling_type_grad_output=scaling_type_grad_output,
+            config=config,
         )
 
         lr = 0.01
@@ -136,17 +145,13 @@ class TestFloat8NumericsIntegrationTest:
         model_ref_out = model_ref(data2)
         model_ref_out.sum().backward()
 
-        if linear_requires_sync(
-            scaling_type_input, scaling_type_weight, scaling_type_grad_output
-        ):
+        if linear_requires_sync(config):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8(data1).sum().backward()
         # zero out grads without stepping, since we just want to compare grads
         # of the second datum
         optim_fp8.zero_grad()
-        if linear_requires_sync(
-            scaling_type_input, scaling_type_weight, scaling_type_grad_output
-        ):
+        if linear_requires_sync(config):
             sync_float8_amax_and_scale_history(model_fp8)
         model_fp8_out = model_fp8(data2)
         model_fp8_out.sum().backward()

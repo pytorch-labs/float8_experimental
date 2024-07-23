@@ -1,12 +1,12 @@
 import contextlib
-from typing import List
+from typing import List, Optional
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import Float8LinearConfig, TensorScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     sync_float8_amax_and_scale_history,
@@ -22,9 +22,10 @@ def check_parity_no_mp(
     fsdp_optim: torch.optim.Optimizer,
     local_inp: torch.Tensor,
     precompute: bool = False,
-    scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
+    config: Optional[Float8LinearConfig] = None,
     compile_transformer_block: bool = False,
 ):
+    # TODO(before land): reorder args and make config not optional
     for iter_idx in range(10):
         losses: List[torch.Tensor] = []
         for model, optim in ((ref_model, ref_optim), (fsdp_model, fsdp_optim)):
@@ -36,14 +37,14 @@ def check_parity_no_mp(
                     dist.all_reduce(param.grad)
                     param.grad.div_(dist.get_world_size())
 
-            if linear_requires_sync(scaling_type_weight=scaling_type_weight):
+            if linear_requires_sync(config):
                 sync_float8_amax_and_scale_history(model)
 
             optim.step()
             if (
                 model is fsdp_model
                 and precompute
-                and scaling_type_weight is TensorScalingType.DYNAMIC
+                and config.cast_config_weight.scaling_type is TensorScalingType.DYNAMIC
             ):
                 precompute_float8_dynamic_scale_for_fsdp(model)
 

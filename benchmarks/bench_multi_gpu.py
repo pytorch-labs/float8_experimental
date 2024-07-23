@@ -14,7 +14,11 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.utils.benchmark as benchmark
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
 from float8_experimental.float8_linear_utils import (
     swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
@@ -27,6 +31,14 @@ torch.manual_seed(0)
 # TODO: Add more shapes for the benchmark
 B, M, K, N = 32, 1024, 1024, 1024
 lr = 0.01
+
+config = Float8LinearConfig(
+    cast_config_input=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
+    cast_config_weight=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
+    cast_config_grad_output=Float8TensorCastConfig(
+        scaling_type=TensorScalingType.DELAYED
+    ),
+)
 
 
 def benchmark_torch_function_in_microseconds(
@@ -68,9 +80,7 @@ def get_model(K, N, is_fp8, base_dtype=torch.float32):
         swap_linear_with_float8_linear(
             m,
             emulate=False,
-            scaling_type_input=TensorScalingType.DELAYED,
-            scaling_type_weight=TensorScalingType.DELAYED,
-            scaling_type_grad_output=TensorScalingType.DELAYED,
+            config=config,
         )
     return m
 
