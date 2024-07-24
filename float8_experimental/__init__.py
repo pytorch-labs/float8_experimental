@@ -10,7 +10,7 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import convert_to_float8_training
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
@@ -29,7 +29,7 @@ __all__ = [
     "Float8LinearConfig",
     "Float8TensorCastConfig",
     # top level UX
-    "swap_linear_with_float8_linear",
+    "convert_to_float8_training",
     # TODO(future): remove Float8Tensor and Float8Linear from public API
     "Float8Tensor",
     "Float8Linear",

@@ -36,7 +36,7 @@ This is the most accurate recipe as every tensor is scaled dynamically.
 
 ```python
 from float8_experimental.float8_linear_utils import (
-    swap_linear_with_float8_linear,
+    convert_to_float8_training,
 )
 from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 
@@ -55,7 +55,7 @@ def module_filter_fn(mod: torch.nn.Module, fqn: str):
     return True
 
 # convert all `torch.nn.Linear` modules to `Float8Linear`
-swap_linear_with_float8_linear(m, module_filter_fn=module_filter_fn)
+convert_to_float8_training(m, module_filter_fn=module_filter_fn)
 
 # optional: use FSDP
 model = FSDP(model, use_orig_params=True)
@@ -83,7 +83,7 @@ This is theoretically the most performant recipe as it minimizes memory reads.
 
 ```python
 from float8_experimental.float8_linear_utils import (
-    swap_linear_with_float8_linear,
+    convert_to_float8_training,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_linear import TensorScalingType
@@ -106,7 +106,7 @@ config = Float8LinearConfig(
 
 # convert all `torch.nn.Linear` modules to `Float8Linear`, specifying scaling
 # type
-swap_linear_with_float8_linear(
+convert_to_float8_training(
     m,
     config=config,
 )
