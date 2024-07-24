@@ -81,6 +81,8 @@ _ops_to_preserve_subclass = {
     torch.ops.aten.as_strided.default,
     torch.ops.aten._to_copy.default,
     torch.ops.aten._pin_memory.default,
+    torch.ops.aten.split.Tensor,
+    torch.ops.aten.clone.default,
 }
 
 
@@ -188,12 +190,22 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
         *,
         out: Optional[torch.Tensor] = None,
     ):
+        from torch.distributed._tensor import DTensor
+
         (data,) = all_gather_outputs
         (scale,) = metadata
         if out is not None:
-            assert isinstance(out, Float8Tensor), f"{type(out)}"
-            out._scale = scale
-            return
+            if isinstance(out, Float8Tensor):
+                out._scale = scale
+            elif isinstance(out, DTensor) and isinstance(
+                out._local_tensor, Float8Tensor
+            ):
+                out._local_tensor._scale = scale
+            else:
+                raise RuntimeError(
+                    f"out must be a Float8Tensor or DTensor with Float8Tensor local tensor, but got {type(out)}"
+                )
+            return out
         return Float8Tensor(
             data,
             scale,

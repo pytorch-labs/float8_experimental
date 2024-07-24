@@ -17,7 +17,13 @@ from test_fsdp2_common import (
     set_enable_fsdp_fp8_all_gather,
 )
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import (
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Shard,
+)
+from torch.distributed.device_mesh import DeviceMesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -514,6 +520,51 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         dummy_mesh = None
         data, scale = m_fp8.weight.fsdp_pre_all_gather(dummy_mesh)
         self.assertNotEqual(fp8_amax_w_old.item(), m_fp8.fp8_amax_w.item())
+
+
+class Test2DFloat8MultiProcess(FSDPTest, TestFloat8Common):
+    @property
+    def world_size(self) -> int:
+        return min(torch.cuda.device_count(), 4)
+
+    def init_global_mesh(self) -> DeviceMesh:
+        dp_size = 2 if self.world_size > 2 else 1
+        return init_device_mesh(
+            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        )
+
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp(
+        self,
+    ):
+        enable_fsdp_fp8_all_gather = True
+        scaling_type_w = TensorScalingType.DYNAMIC
+        global_mesh = self.init_global_mesh()
+        _, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        module = self.init_transformer(weight_tying=False).cuda()
+        with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
+            swap_linear_with_float8_linear(module, scaling_type_w=scaling_type_w)
+
+        # "attention.wq": Float8ColwiseParallel
+        colwise_param = distribute_tensor(
+            module.layers[0].attention.wq.weight, tp_mesh, [Shard(0)]
+        )
+        self.assertTrue(
+            isinstance(colwise_param, DTensor)
+            and isinstance(
+                colwise_param._local_tensor, WeightWithDynamicFloat8CastTensor
+            )
+        )
+        # "attention.wo": Float8RowwiseParallel(output_layouts=Shard(1)),
+        rowwise_param = distribute_tensor(
+            module.layers[0].attention.wo.weight, tp_mesh, [Shard(1)]
+        )
+        self.assertTrue(
+            isinstance(rowwise_param, DTensor)
+            and isinstance(
+                rowwise_param._local_tensor, WeightWithDynamicFloat8CastTensor
+            )
+        )
 
 
 if __name__ == "__main__":
