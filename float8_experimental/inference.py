@@ -215,7 +215,7 @@ def quantize_to_float8(
     *,
     module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
     use_fast_accum: bool = True,
-) -> Optional[nn.Module]:
+) -> nn.Module:
     """
     Converts torch.nn.Linear layers in the given module to Float8InferenceLinear.
 

@@ -20,7 +20,7 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear_utils import (
-    swap_linear_with_float8_linear,
+    convert_to_float8_training,
     sync_float8_amax_and_scale_history,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -77,7 +77,7 @@ def get_model(K, N, is_fp8, base_dtype=torch.float32):
         modules.append(nn.ReLU())
     m = nn.Sequential(*modules)
     if is_fp8:
-        swap_linear_with_float8_linear(
+        convert_to_float8_training(
             m,
             config=config,
         )

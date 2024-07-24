@@ -20,8 +20,8 @@ from float8_experimental.config import (
 )
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
     get_float8_layers,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_tensor import Float8Tensor, LinearMMConfig
@@ -280,7 +280,7 @@ def test_sync_amax_func():
             scaling_type=TensorScalingType.DELAYED
         ),
     )
-    float8_mod = swap_linear_with_float8_linear(
+    float8_mod = convert_to_float8_training(
         module,
         config=config,
     )
@@ -324,7 +324,7 @@ def test_sync_amax_func_cuda_graph_success():
                 scaling_type=TensorScalingType.DELAYED
             ),
         )
-        swap_linear_with_float8_linear(
+        convert_to_float8_training(
             my_module,
             config=config,
         )

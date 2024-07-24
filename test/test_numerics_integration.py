@@ -20,8 +20,8 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
     linear_requires_sync,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_utils import compute_error, IS_ROCM
@@ -120,7 +120,7 @@ class TestFloat8NumericsIntegrationTest:
                 scaling_type=scaling_type_grad_output
             ),
         )
-        swap_linear_with_float8_linear(
+        convert_to_float8_training(
             model_fp8,
             config=config,
         )

@@ -23,8 +23,8 @@ from float8_experimental.config import (
 )
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
     linear_requires_sync,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
@@ -604,7 +604,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
         for emulate in [True, False]:
             module = nn.Linear(3, 3)
             config = Float8LinearConfig(emulate=emulate)
-            module = swap_linear_with_float8_linear(module, config=config)
+            module = convert_to_float8_training(module, config=config)
             self.assertIsInstance(module, Float8Linear)
             self.assertEqual(module.linear_mm_config.y.emulate, emulate)
             self.assertEqual(module.linear_mm_config.y.emulate, emulate)
@@ -618,7 +618,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 AssertionError,
                 "Does not support a root nn.Linear with children",
             ):
-                swap_linear_with_float8_linear(module, config=config)
+                convert_to_float8_training(module, config=config)
 
     def test_swap_submodule_linears(self):
         class MLP(nn.Module):
@@ -630,7 +630,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
         for emulate in [True, False]:
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
             config = Float8LinearConfig(emulate=emulate)
-            model = swap_linear_with_float8_linear(model, config=config)
+            model = convert_to_float8_training(model, config=config)
             self.assertIsInstance(model[0].lin1, Float8Linear)
             self.assertIsInstance(model[0].lin2, Float8Linear)
             self.assertIsInstance(model[1], Float8Linear)
@@ -658,7 +658,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
             )
 
         config = Float8LinearConfig(emulate=True)
-        model = swap_linear_with_float8_linear(
+        model = convert_to_float8_training(
             model,
             config=config,
             module_filter_fn=module_filter_fn,
@@ -687,7 +687,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
             "2.lin1",
         ]
         config = Float8LinearConfig(emulate=True)
-        model = swap_linear_with_float8_linear(
+        model = convert_to_float8_training(
             model,
             config=config,
             module_filter_fn=module_filter_fn,
