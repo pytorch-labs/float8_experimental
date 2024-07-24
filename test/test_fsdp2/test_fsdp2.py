@@ -185,8 +185,9 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         # requirement to use a smaller activation size
         float8_linear_config = Float8LinearConfig(
             enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
+            emulate=True,
         )
-        swap_linear_with_float8_linear(model, emulate=True, config=float8_linear_config)
+        swap_linear_with_float8_linear(model, config=float8_linear_config)
         model_unsharded_numel = sum(p.numel() for p in model.parameters())
         model_sharded_numel = (model_unsharded_numel + 1) // 2
         block_lin_weight_numel = 0
@@ -294,10 +295,10 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         module_fp32 = self.init_single_module()
         float8_linear_config = Float8LinearConfig(
             enable_fsdp_fp8_all_gather=True,
+            emulate=True,
         )
         module = swap_linear_with_float8_linear(
             module_fp32,
-            emulate=True,
             config=float8_linear_config,
         )
         self.assertIsInstance(module.weight, tensor_cls)
@@ -311,7 +312,6 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         module = self.init_multi_module()
         module = swap_linear_with_float8_linear(
             module,
-            emulate=True,
             config=float8_linear_config,
         )
         for param_name, param in module.named_parameters():
@@ -517,12 +517,13 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # parameters, changing the numerics.
         module = self.init_multi_module()
         ref_module_bf16 = copy.deepcopy(module).to(torch.bfloat16)
+        float8_config = Float8LinearConfig(emulate=True)
         ref_module_bf16 = swap_linear_with_float8_linear(
             ref_module_bf16,
-            emulate=True,
+            config=float8_config,
         )
         ref_module_fp32 = copy.deepcopy(module).cuda()
-        module = swap_linear_with_float8_linear(module, emulate=True)
+        module = swap_linear_with_float8_linear(module, config=float8_config)
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         for mlp in module:
             fully_shard(mlp, mp_policy=mp_policy)

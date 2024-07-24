@@ -36,7 +36,6 @@ is_H100 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9
 def _test_compile_base(
     backend: str,
     fullgraph: bool,
-    emulate: bool,
     config: Float8LinearConfig,
     dtype: torch.dtype,
 ):
@@ -50,7 +49,6 @@ def _test_compile_base(
 
     m_fp8 = Float8Linear.from_float(
         copy.deepcopy(m_ref),
-        emulate,
         config,
     )
 
@@ -95,11 +93,11 @@ def test_eager_only(
         cast_config_grad_output=Float8TensorCastConfig(
             scaling_type=scaling_type_grad_output
         ),
+        emulate=emulate,
     )
     _test_compile_base(
         "eager",
         fullgraph,
-        emulate,
         config,
         dtype,
     )
@@ -133,11 +131,11 @@ def test_aot_eager(
         cast_config_grad_output=Float8TensorCastConfig(
             scaling_type=scaling_type_grad_output
         ),
+        emulate=emulate,
     )
     _test_compile_base(
         "aot_eager",
         fullgraph,
-        emulate,
         config,
         dtype,
     )
@@ -171,11 +169,11 @@ def test_inductor(
         cast_config_grad_output=Float8TensorCastConfig(
             scaling_type=scaling_type_grad_output
         ),
+        emulate=emulate,
     )
     _test_compile_base(
         "inductor",
         fullgraph,
-        emulate,
         config,
         dtype,
     )
@@ -315,11 +313,20 @@ def test_sync_amax_func_cuda_graph_success():
         my_module = nn.Sequential(
             nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
         ).to("cuda")
+        config = Float8LinearConfig(
+            cast_config_input=Float8TensorCastConfig(
+                scaling_type=TensorScalingType.DELAYED
+            ),
+            cast_config_weight=Float8TensorCastConfig(
+                scaling_type=TensorScalingType.DELAYED
+            ),
+            cast_config_grad_output=Float8TensorCastConfig(
+                scaling_type=TensorScalingType.DELAYED
+            ),
+        )
         swap_linear_with_float8_linear(
             my_module,
-            scaling_type_input=TensorScalingType.DELAYED,
-            scaling_type_weight=TensorScalingType.DELAYED,
-            scaling_type_grad_output=TensorScalingType.DELAYED,
+            config=config,
         )
         inpt = torch.randn(
             16, 16, device="cuda", dtype=torch.float32, requires_grad=True

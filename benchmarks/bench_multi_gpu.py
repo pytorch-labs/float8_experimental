@@ -79,7 +79,6 @@ def get_model(K, N, is_fp8, base_dtype=torch.float32):
     if is_fp8:
         swap_linear_with_float8_linear(
             m,
-            emulate=False,
             config=config,
         )
     return m

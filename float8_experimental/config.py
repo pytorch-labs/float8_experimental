@@ -69,6 +69,9 @@ class Float8LinearConfig:
     # This can cause a memory spike however so we keep this off by default.
     pad_inner_dim: bool = False
 
+    # If True, emulation is used instead of hardware accelerated gemm
+    emulate: bool = False
+
 
 # If True, use 'fnuz' float8 types for calculations.
 # Currently, ROCm only supports fnuz variants.
