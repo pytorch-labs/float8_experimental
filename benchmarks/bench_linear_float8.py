@@ -14,7 +14,12 @@ import pandas as pd
 
 import torch
 import torch.utils.benchmark as benchmark
-from float8_experimental.float8_linear import Float8Linear, TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
+from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     sync_float8_amax_and_scale_history,
@@ -105,6 +110,13 @@ def main(
     scaling_type_input = TensorScalingType(scaling_type_input)
     scaling_type_weight = TensorScalingType(scaling_type_weight)
     scaling_type_grad_output = TensorScalingType(scaling_type_grad_output)
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=scaling_type_grad_output
+        ),
+    )
 
     # LLaMa 2 70B single-node weight shapes
     # assumes fused attn.wqkv and ffn.w13
@@ -136,9 +148,7 @@ def main(
         linear_float8 = Float8Linear.from_float(
             copy.deepcopy(linear_ref),
             emulate=False,
-            scaling_type_input=scaling_type_input,
-            scaling_type_weight=scaling_type_weight,
-            scaling_type_grad_output=scaling_type_grad_output,
+            config=config,
         )
         scaling_repr = linear_float8.scaling_repr()
 
@@ -153,9 +163,7 @@ def main(
         ref_forw_backward = lambda: linear_ref(input_tensor).sum().backward()
 
         def float8_forw_backward():
-            if linear_requires_sync(
-                scaling_type_input, scaling_type_weight, scaling_type_grad_output
-            ):
+            if linear_requires_sync(config):
                 sync_float8_amax_and_scale_history(linear_float8)
             linear_float8(input_tensor).sum().backward()
 

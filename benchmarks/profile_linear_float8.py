@@ -18,7 +18,11 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.float8_linear import TensorScalingType
+from float8_experimental.config import (
+    Float8LinearConfig,
+    Float8TensorCastConfig,
+    TensorScalingType,
+)
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     swap_linear_with_float8_linear,
@@ -216,6 +220,13 @@ def main(
     scaling_type_input = TensorScalingType(scaling_type_input)
     scaling_type_weight = TensorScalingType(scaling_type_weight)
     scaling_type_grad_output = TensorScalingType(scaling_type_grad_output)
+    config = Float8LinearConfig(
+        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=Float8TensorCastConfig(
+            scaling_type=scaling_type_grad_output
+        ),
+    )
     scaling_repr = "_".join(
         [
             s.short_str()
@@ -256,14 +267,8 @@ def main(
 
     m_ref = m_ref.to(device).to(ref_dtype)
 
-    extra_kwargs = {
-        "scaling_type_input": scaling_type_input,
-        "scaling_type_weight": scaling_type_weight,
-        "scaling_type_grad_output": scaling_type_grad_output,
-    }
-
     m_float8 = copy.deepcopy(m_ref)
-    swap_linear_with_float8_linear(m_float8, **extra_kwargs)
+    swap_linear_with_float8_linear(m_float8, config=config)
 
     def ref_forw_backward(x):
         out = m_ref(x)
@@ -281,9 +286,7 @@ def main(
         # inspection of the fw+bw torch.compile without the scale
         # syncing code
         # TODO(future): make this better
-        if linear_requires_sync(
-            scaling_type_input, scaling_type_weight, scaling_type_grad_output
-        ):
+        if linear_requires_sync(config):
             with record_function("scale_amax_and_scales"):
                 sync_amax_history(m_float8)
         out = float8_forw(x)
