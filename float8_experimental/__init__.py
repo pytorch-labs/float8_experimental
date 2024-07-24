@@ -10,13 +10,18 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear import Float8Linear
-from float8_experimental.float8_linear_utils import convert_to_float8_training
+from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
+    linear_requires_sync,
+    sync_float8_amax_and_scale_history,
+)
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
     LinearMMConfig,
     ScaledMMConfig,
 )
+from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 
 # Needed to load Float8Tensor with weights_only = True
 from torch.serialization import add_safe_globals
@@ -30,7 +35,8 @@ __all__ = [
     "Float8TensorCastConfig",
     # top level UX
     "convert_to_float8_training",
-    # TODO(future): remove Float8Tensor and Float8Linear from public API
-    "Float8Tensor",
-    "Float8Linear",
+    "linear_requires_sync",
+    "sync_float8_amax_and_scale_history",
+    "precompute_float8_dynamic_scale_for_fsdp",
+    # note: Float8Tensor and Float8Linear are not public APIs
 ]

@@ -35,10 +35,10 @@ We provide two per-tensor scaling strategies: dynamic and delayed.  See https://
 This is the most accurate recipe as every tensor is scaled dynamically.
 
 ```python
-from float8_experimental.float8_linear_utils import (
+from float8_experimental import (
     convert_to_float8_training,
+    precompute_float8_dynamic_scale_for_fsdp,
 )
-from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_fsdp
 
 # create model
 m = Model(...)
@@ -82,11 +82,11 @@ for _ in range(N_ITER):
 This is theoretically the most performant recipe as it minimizes memory reads.
 
 ```python
-from float8_experimental.float8_linear_utils import (
+from float8_experimental import (
     convert_to_float8_training,
     sync_float8_amax_and_scale_history,
+    TensorScalingType,
 )
-from float8_experimental.float8_linear import TensorScalingType
 
 # create model
 m = Model(...)
