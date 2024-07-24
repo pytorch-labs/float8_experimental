@@ -66,6 +66,7 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
         cast_config_grad_output=Float8TensorCastConfig(
             scaling_type=TensorScalingType.DELAYED
         ),
+        emulate=emulate,
     )
 
     m = nn.Sequential(
@@ -74,7 +75,6 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     )
     swap_linear_with_float8_linear(
         m,
-        emulate=emulate,
         config=config,
     )
     return m

@@ -127,7 +127,6 @@ def swap_linear_layers(
 def swap_linear_with_float8_linear(
     module: nn.Module,
     *,
-    emulate: bool = False,
     module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
     config: Float8LinearConfig = None,
 ) -> Optional[nn.Module]:
@@ -136,7 +135,6 @@ def swap_linear_with_float8_linear(
 
     Args:
         module: Module to modify.
-        emulate: If True, emulation is used instead of hardware accelerated gemm
         module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
             filter function are the FQN and module instance.
@@ -149,7 +147,6 @@ def swap_linear_with_float8_linear(
         config = Float8LinearConfig()
     from_float = lambda m: Float8Linear.from_float(
         m,
-        emulate=emulate,
         config=config,
     )
     return swap_linear_layers(

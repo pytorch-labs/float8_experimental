@@ -84,13 +84,14 @@ def fsdp_main(rank, world_size, args):
     )
     config = Float8LinearConfig(
         cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        # TODO(future): delete this arg as it's always False
+        emulate=False,
     )
 
     # Note: we only iterate over `scaling_type_weight` because FSDP only interacts
     # with weights.
     swap_linear_with_float8_linear(
         model_fp8,
-        emulate=False,
         config=config,
     )
 
