@@ -122,7 +122,6 @@ def swap_linear_layers(
     return root_module
 
 
-# def convert_to_float8_training(
 def convert_to_float8_training(
     module: nn.Module,
     *,
