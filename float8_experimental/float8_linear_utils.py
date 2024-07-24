@@ -9,6 +9,7 @@ from typing import Callable, List, Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from float8_experimental.config import Float8LinearConfig
 from float8_experimental.float8_linear import Float8Linear, TensorScalingType
 
 from float8_experimental.float8_utils import (
@@ -135,6 +136,7 @@ def swap_linear_with_float8_linear(
     scaling_type_input: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_weight: TensorScalingType = TensorScalingType.DYNAMIC,
     scaling_type_grad_output: TensorScalingType = TensorScalingType.DYNAMIC,
+    config: Float8LinearConfig = None,
 ) -> Optional[nn.Module]:
     """
     Swaps `torch.nn.Linear` in `module` with `Float8Linear`.
@@ -148,16 +150,20 @@ def swap_linear_with_float8_linear(
         scaling_type_input (TensorScalingType): scaling type for `input`
         scaling_type_weight (TensorScalingType): scaling type for `weight`
         scaling_type_grad_output (TensorScalingType): scaling type for `grad_output`
+        config (Float8LinearConfig): configuration for conversion to float8
 
     Returns:
      nn.Module: The modified module with swapped linear layers.
     """
+    if config is None:
+        config = Float8LinearConfig()
     from_float = lambda m: Float8Linear.from_float(
         m,
         emulate=emulate,
         scaling_type_input=scaling_type_input,
         scaling_type_weight=scaling_type_weight,
         scaling_type_grad_output=scaling_type_grad_output,
+        config=config,
     )
     return swap_linear_layers(
         module,
