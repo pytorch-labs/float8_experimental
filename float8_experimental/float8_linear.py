@@ -150,6 +150,10 @@ class DelayedScalingRecipe:
 
 class Float8Linear(torch.nn.Linear):
     """
+    Note: this is **not** a public API and is only intended to be used
+    inside of this repository. Please file an issue if you would benefit
+    from this being a public API.
+
     A wrapper around a `torch.nn.Linear` module which does fp8 compute, and tracks
     scales in way friendly to delayed scaling.
     """
