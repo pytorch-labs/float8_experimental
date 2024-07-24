@@ -649,7 +649,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
 
         size_limit = 32
 
-        def module_filter_fn(fqn, mod):
+        def module_filter_fn(mod, fqn):
             return (
                 mod.in_features >= size_limit
                 and mod.out_features >= size_limit
@@ -682,7 +682,7 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 self.lin2 = nn.Linear(4 * dim, dim)
 
         model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-        module_filter_fn = lambda fqn, mod: fqn not in [
+        module_filter_fn = lambda mod, fqn: fqn not in [
             "0.lin2",
             "2.lin1",
         ]

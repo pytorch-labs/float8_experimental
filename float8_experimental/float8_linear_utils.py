@@ -60,7 +60,7 @@ def swap_linear_layers(
     module: nn.Module,
     from_float_func: Callable[[nn.Linear], nn.Linear],
     *,
-    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
+    module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
 ) -> Optional[nn.Module]:
     """
     Generic function to swap linear layers in a module with a new type of linear layer.
@@ -74,13 +74,13 @@ def swap_linear_layers(
         from_float_func: Function that accepts a linear layer and returns a new type of linear layer.
         module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
-            filter function are the FQN and module instance.
+            filter function are the module instance, and the FQN.
 
     Returns:
      nn.Module: The modified module with swapped linear layers.
     """
     if isinstance(module, nn.Linear) and (
-        module_filter_fn is None or module_filter_fn("", module)
+        module_filter_fn is None or module_filter_fn(module, "")
     ):
         if len(list(module.children())) > 0:
             raise AssertionError(
@@ -109,9 +109,7 @@ def swap_linear_layers(
             post_order_traversal(child_module, new_fqn, module)
 
         if isinstance(module, nn.Linear) and (
-            # linear_layer_filter is None or linear_layer_filter(module)
-            module_filter_fn is None
-            or module_filter_fn(cur_fqn, module)
+            module_filter_fn is None or module_filter_fn(module, cur_fqn)
         ):
             assert (
                 parent_module is not None
@@ -127,7 +125,7 @@ def swap_linear_layers(
 def swap_linear_with_float8_linear(
     module: nn.Module,
     *,
-    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
+    module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
     config: Float8LinearConfig = None,
 ) -> Optional[nn.Module]:
     """
@@ -137,7 +135,7 @@ def swap_linear_with_float8_linear(
         module: Module to modify.
         module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
-            filter function are the FQN and module instance.
+            filter function are the module instance and the FQN.
         config (Float8LinearConfig): configuration for conversion to float8
 
     Returns:

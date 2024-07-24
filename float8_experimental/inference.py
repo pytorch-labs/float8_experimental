@@ -213,7 +213,7 @@ def quantize_to_float8(
     module: nn.Module,
     quant_config: QuantConfig,
     *,
-    module_filter_fn: Optional[Callable[[str, nn.Module], bool]] = None,
+    module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
     use_fast_accum: bool = True,
 ) -> Optional[nn.Module]:
     """
@@ -228,7 +228,7 @@ def quantize_to_float8(
         quant_config (QuantConfig): Quantization configuration for Float8 conversion.
         module_filter_fn: If specified, only the `torch.nn.Linear` subclasses that
             that pass the filter function will be swapped. The inputs to the
-            filter function are the FQN and module instance.
+            filter function are the module instance and the FQN.
         use_fast_accum : Whether to enable fast accumulation for the Float8InferenceLinear. Defaults to True.
 
     Returns:
