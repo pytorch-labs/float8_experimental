@@ -44,7 +44,7 @@ from float8_experimental.fsdp_utils import precompute_float8_dynamic_scale_for_f
 m = Model(...)
 
 # optional: filter modules from being eligible for float8 conversion
-def module_filter_fn(fqn: str, mod: torch.nn.Module):
+def module_filter_fn(mod: torch.nn.Module, fqn: str):
     # don't convert the output module
     if fqn == "output":
         return False
@@ -91,9 +91,9 @@ from float8_experimental.float8_linear import TensorScalingType
 # create model
 m = Model(...)
 
-# optional: configure for compatibility with FSDP. Note that workarounds 
+# optional: configure for compatibility with FSDP. Note that workarounds
 # gated with config.enable_amax_init and
-# config.enable_pre_and_post_forward are needed for 
+# config.enable_pre_and_post_forward are needed for
 # autocast + compile + FSDP + float8 to work
 from float8_experimental import Float8LinearConfig, TensorScalingType, Float8TensorCastConfig
 config = Float8LinearConfig(
