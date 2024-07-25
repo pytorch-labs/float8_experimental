@@ -84,7 +84,7 @@ class Float8LinearConfig:
     #
     gemm_config_output: Float8GemmConfig = Float8GemmConfig(use_fast_accum=True)
     gemm_config_grad_input: Float8GemmConfig = Float8GemmConfig()
-    gemm_config_grad_weight: Float8GemmConfig = Float8GemmConfig(use_fast_accum=True)
+    gemm_config_grad_weight: Float8GemmConfig = Float8GemmConfig()
 
     #
     # Per-linear configuration
