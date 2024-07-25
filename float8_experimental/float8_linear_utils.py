@@ -61,7 +61,7 @@ def swap_linear_layers(
     from_float_func: Callable[[nn.Linear], nn.Linear],
     *,
     module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
-) -> Optional[nn.Module]:
+) -> nn.Module:
     """
     Generic function to swap linear layers in a module with a new type of linear layer.
 
@@ -122,12 +122,12 @@ def swap_linear_layers(
     return root_module
 
 
-def swap_linear_with_float8_linear(
+def convert_to_float8_training(
     module: nn.Module,
     *,
     module_filter_fn: Optional[Callable[[nn.Module, str], bool]] = None,
     config: Float8LinearConfig = None,
-) -> Optional[nn.Module]:
+) -> nn.Module:
     """
     Swaps `torch.nn.Linear` in `module` with `Float8Linear`.
 

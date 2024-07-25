@@ -27,8 +27,8 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
     linear_requires_sync,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_utils import compute_error
@@ -90,7 +90,7 @@ def fsdp_main(rank, world_size, args):
 
     # Note: we only iterate over `scaling_type_weight` because FSDP only interacts
     # with weights.
-    swap_linear_with_float8_linear(
+    convert_to_float8_training(
         model_fp8,
         config=config,
     )

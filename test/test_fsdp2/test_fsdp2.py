@@ -13,7 +13,7 @@ from float8_experimental.config import (
     Float8TensorCastConfig,
     TensorScalingType,
 )
-from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import convert_to_float8_training
 from float8_experimental.fsdp_utils import WeightWithDynamicFloat8CastTensor
 from test_fsdp2_common import check_parity_bf16_mp, check_parity_no_mp
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
@@ -116,7 +116,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
         float8_linear_config1 = Float8LinearConfig(
             cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
         )
-        swap_linear_with_float8_linear(
+        convert_to_float8_training(
             ref_module,
             config=float8_linear_config1,
         )
@@ -128,7 +128,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
             cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
         )
-        swap_linear_with_float8_linear(
+        convert_to_float8_training(
             module,
             config=float8_linear_config2,
         )
@@ -187,7 +187,7 @@ class TestFloat8MultiProcess(FSDPTest, TestFloat8Common):
             enable_fsdp_fp8_all_gather=enable_fsdp_fp8_all_gather,
             emulate=True,
         )
-        swap_linear_with_float8_linear(model, config=float8_linear_config)
+        convert_to_float8_training(model, config=float8_linear_config)
         model_unsharded_numel = sum(p.numel() for p in model.parameters())
         model_sharded_numel = (model_unsharded_numel + 1) // 2
         block_lin_weight_numel = 0
@@ -297,7 +297,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             enable_fsdp_fp8_all_gather=True,
             emulate=True,
         )
-        module = swap_linear_with_float8_linear(
+        module = convert_to_float8_training(
             module_fp32,
             config=float8_linear_config,
         )
@@ -310,7 +310,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
 
         # Check for multiple FSDP paramter groups
         module = self.init_multi_module()
-        module = swap_linear_with_float8_linear(
+        module = convert_to_float8_training(
             module,
             config=float8_linear_config,
         )
@@ -362,7 +362,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         float8_linear_config = Float8LinearConfig(
             enable_fsdp_fp8_all_gather=True,
         )
-        module_fp32 = swap_linear_with_float8_linear(
+        module_fp32 = convert_to_float8_training(
             module_fp32, config=float8_linear_config
         )
         module = module_fp32
@@ -392,7 +392,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         # - Check for multiple FSDP parameter groups
         module = self.init_multi_module()
         ref_module = copy.deepcopy(module)
-        module = swap_linear_with_float8_linear(module, config=float8_linear_config)
+        module = convert_to_float8_training(module, config=float8_linear_config)
         for submodule in module:
             fully_shard(submodule)
         fully_shard(module)
@@ -433,12 +433,12 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             )
             module_fp32 = self.init_single_module()
             ref_module = copy.deepcopy(module_fp32)
-            ref_module = swap_linear_with_float8_linear(
+            ref_module = convert_to_float8_training(
                 ref_module,
                 config=float8_linear_config1,
             )
             ref_module = ref_module.cuda()
-            module = swap_linear_with_float8_linear(
+            module = convert_to_float8_training(
                 module_fp32,
                 config=float8_linear_config2,
             )
@@ -481,11 +481,11 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
             )
             module = self.init_multi_module().cuda()
             ref_module = copy.deepcopy(module)
-            ref_module = swap_linear_with_float8_linear(
+            ref_module = convert_to_float8_training(
                 ref_module,
                 config=float8_linear_config1,
             )
-            module = swap_linear_with_float8_linear(
+            module = convert_to_float8_training(
                 module,
                 config=float8_linear_config2,
             )
@@ -518,12 +518,12 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
         module = self.init_multi_module()
         ref_module_bf16 = copy.deepcopy(module).to(torch.bfloat16)
         float8_config = Float8LinearConfig(emulate=True)
-        ref_module_bf16 = swap_linear_with_float8_linear(
+        ref_module_bf16 = convert_to_float8_training(
             ref_module_bf16,
             config=float8_config,
         )
         ref_module_fp32 = copy.deepcopy(module).cuda()
-        module = swap_linear_with_float8_linear(module, config=float8_config)
+        module = convert_to_float8_training(module, config=float8_config)
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         for mlp in module:
             fully_shard(mlp, mp_policy=mp_policy)
@@ -550,7 +550,7 @@ class TestFloat8MultiThread(FSDPTestMultiThread, TestFloat8Common):
                 scaling_type=TensorScalingType.DELAYED
             ),
         )
-        m_fp8 = swap_linear_with_float8_linear(
+        m_fp8 = convert_to_float8_training(
             module,
             config=float8_linear_config,
         )

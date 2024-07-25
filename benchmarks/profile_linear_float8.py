@@ -24,8 +24,8 @@ from float8_experimental.config import (
     TensorScalingType,
 )
 from float8_experimental.float8_linear_utils import (
+    convert_to_float8_training,
     linear_requires_sync,
-    swap_linear_with_float8_linear,
     sync_float8_amax_and_scale_history,
 )
 from torch.profiler import profile, ProfilerActivity, record_function
@@ -268,7 +268,7 @@ def main(
     m_ref = m_ref.to(device).to(ref_dtype)
 
     m_float8 = copy.deepcopy(m_ref)
-    swap_linear_with_float8_linear(m_float8, config=config)
+    convert_to_float8_training(m_float8, config=config)
 
     def ref_forw_backward(x):
         out = m_ref(x)

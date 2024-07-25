@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from float8_experimental import Float8LinearConfig
 
 from float8_experimental.float8_dynamic_utils import NoopFwToFloat8E5M2Bw
-from float8_experimental.float8_linear_utils import swap_linear_with_float8_linear
+from float8_experimental.float8_linear_utils import convert_to_float8_training
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
@@ -187,12 +187,12 @@ def _test_fp8_mlp_tensor_parallelism_base(
     config = Float8LinearConfig(emulate=True)
 
     toy_model = ToyModel().to(device)
-    toy_model_fp8 = swap_linear_with_float8_linear(toy_model, config=config)
+    toy_model_fp8 = convert_to_float8_training(toy_model, config=config)
 
     tp_model = copy.deepcopy(toy_model)
-    tp_model = swap_linear_with_float8_linear(tp_model, config=config)
+    tp_model = convert_to_float8_training(tp_model, config=config)
     sp_model = copy.deepcopy(toy_model)
-    sp_model = swap_linear_with_float8_linear(sp_model, config=config)
+    sp_model = convert_to_float8_training(sp_model, config=config)
 
     # vanilla TP
     tp_model = parallelize_module(
@@ -223,7 +223,7 @@ def _test_fp8_mlp_tensor_parallelism_base(
 
     # PrepareFloat8ModuleInput with specific submodule fqn
     sp_model2 = copy.deepcopy(toy_model)
-    sp_model2 = swap_linear_with_float8_linear(sp_model2, config=config)
+    sp_model2 = convert_to_float8_training(sp_model2, config=config)
 
     sp_model2 = parallelize_module(
         sp_model2,
