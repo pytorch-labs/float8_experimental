@@ -6,7 +6,7 @@ import float8_experimental.config as config
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.config import Float8LinearConfig, TensorScalingType
+from float8_experimental.config import Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     linear_requires_sync,
     sync_float8_amax_and_scale_history,
@@ -44,7 +44,7 @@ def check_parity_no_mp(
             if (
                 model is fsdp_model
                 and precompute
-                and config.cast_config_weight.scaling_type is TensorScalingType.DYNAMIC
+                and config.cast_config_weight.scaling_type is ScalingType.DYNAMIC
             ):
                 precompute_float8_dynamic_scale_for_fsdp(model)
 
