@@ -290,12 +290,6 @@ class Float8Tensor(torch.Tensor):
         linear_mm_config: Optional[LinearMMConfig],
         gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
-        assert (
-            scale.numel() == 1
-        ), "Scale should contain a single value, but got: {} elements".format(
-            scale.numel()
-        )
-
         self = torch.Tensor._make_wrapper_subclass(
             cls,
             data.size(),
