@@ -58,10 +58,9 @@ class Float8LinearConfig:
     # option is useful for safety, but not strictly necessary.
     enable_pre_and_post_forward: bool = True
 
-    # If True, then uses a tensor subclass for the fp8 linear module's weight that
-    # implements pre/post-all-gather methods to do fp8 all-gather with FSDP2.
-    # Only dynamic scaling is supported for now.
-    enable_fsdp_fp8_all_gather: bool = False
+    # If True, then uses a tensor subclass for the float8 linear module's weight that
+    # implements pre/post-all-gather methods to do float8 all-gather with FSDP2.
+    enable_fsdp_float8_all_gather: bool = False
 
     # If True, then prior to performing the fp8 scaled mamtmul we will pad the
     # inner dimension of a (dim 1) and b (dim 2) with 0s. This is needed for matmuls
