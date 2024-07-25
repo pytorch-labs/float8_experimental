@@ -30,6 +30,30 @@ class Float8TensorCastConfig:
 
 
 @dataclass(frozen=True)
+class DelayedScalingConfig:
+    """
+    Configuration for delayed scaling.
+
+    Note: for now, `history_len` values must be the same for all layers in the
+    model using delayed scaling.
+
+    TODO(future): serialization for recipes
+    """
+
+    # Controls the history length of amax buffers
+    history_len: int = 16
+
+    # Controls the way to calculate current scale from amax history
+    # TODO(future): add other functions as needed, hardcoded or user defined
+    scale_fn_name: str = "max"
+
+    def __post_init__(self):
+        assert (
+            self.scale_fn_name == "max"
+        ), f"{self.scale_fn_name} is not implemented yet. Only max is supported for now."
+
+
+@dataclass(frozen=True)
 class Float8LinearConfig:
     """
     Configuration for converting a `torch.nn.Linear` module to float8
@@ -70,6 +94,13 @@ class Float8LinearConfig:
 
     # If True, emulation is used instead of hardware accelerated gemm
     emulate: bool = False
+
+    # Configuration for delayed scaling
+    # Note: this is actually applied per-tensor, but only using the same
+    # configuration for all tensors and layers in the model is currently
+    # supported. If in the future we add support for a more fine grained
+    # configuration, this field may move to per-tensor configs.
+    delayed_scaling_config: DelayedScalingConfig = DelayedScalingConfig()
 
 
 # If True, use 'fnuz' float8 types for calculations.

@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 # Lets define a few top level things here
 from float8_experimental.config import (
+    DelayedScalingConfig,
     Float8LinearConfig,
     Float8TensorCastConfig,
     TensorScalingType,
@@ -30,6 +31,7 @@ add_safe_globals([Float8Tensor, ScaledMMConfig, GemmInputRole, LinearMMConfig])
 
 __all__ = [
     # configuration
+    "DelayedScalingConfig",
     "TensorScalingType",
     "Float8LinearConfig",
     "Float8TensorCastConfig",
