@@ -131,23 +131,6 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
         return res, *empty_grads
 
 
-@dataclasses.dataclass
-class DelayedScalingRecipe:
-    # Controls the history length of amax buffers
-    history_len: int
-
-    # Controls the way to calculate current scale from amax history
-    # TODO(future): add other functions as needed, hardcoded or user defined
-    scale_fn_name: str
-
-    def __init__(self, history_len: int = 16, scale_fn_name: str = "max"):
-        self.history_len = history_len
-        self.scale_fn_name = scale_fn_name
-        assert (
-            self.scale_fn_name == "max"
-        ), f"{self.scale_fn_name} is not implemented yet. Only max is supported for now."
-
-
 class Float8Linear(torch.nn.Linear):
     """
     Note: this is **not** a public API and is only intended to be used
@@ -161,13 +144,9 @@ class Float8Linear(torch.nn.Linear):
     def __init__(self, *args, **kwargs):
         """
         Additional arguments on top of `torch.nn.Linear`'s arguments:
-        * `delayed_scaling_recipe`: configuration for delayed scaling
         * `config`: Float8LinearConfig
         """
 
-        delayed_scaling_recipe = kwargs.pop(
-            "delayed_scaling_recipe", DelayedScalingRecipe()
-        )
         # Amax scales should always be kept as float32.
         self.always_float32_buffers = set()
         config = kwargs.pop("config")
@@ -186,11 +165,6 @@ class Float8Linear(torch.nn.Linear):
         )
 
         self.config = config
-
-        # TODO(future): have a unique recipe per buffer instead of one per
-        # module, saving implementing that until we need it.
-        # TODO(future): serialization for recipes
-        self.recipe = delayed_scaling_recipe
 
         self.create_buffers()
 
@@ -237,7 +211,7 @@ class Float8Linear(torch.nn.Linear):
 
     def create_buffers(self):
         # Default values for history buffers, see above TODO
-        history_len = self.recipe.history_len
+        history_len = self.config.delayed_scaling_config.history_len
         device = self.weight.device
         # TODO(future PR): dtype values below don't have the other float8
         # flavors, fix it
@@ -307,7 +281,7 @@ class Float8Linear(torch.nn.Linear):
             x = x.to(autocast_dtype)
 
         if self.scaling_type_input is TensorScalingType.DELAYED:
-            scale_fn_name = self.recipe.scale_fn_name
+            scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
             _maybe_initialize_amaxes_scales_for_float8_cast(
                 x,
                 self.fp8_amax_input,
@@ -338,7 +312,7 @@ class Float8Linear(torch.nn.Linear):
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 w_fp8 = self.weight
             else:
-                scale_fn_name = self.recipe.scale_fn_name
+                scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
                 _maybe_initialize_amaxes_scales_for_float8_cast(
                     w,
                     self.fp8_amax_weight,
@@ -370,7 +344,7 @@ class Float8Linear(torch.nn.Linear):
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
         if self.scaling_type_grad_output is TensorScalingType.DELAYED:
-            scale_fn_name = self.recipe.scale_fn_name
+            scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
             y = NoopFwToFloat8E5M2Bw.apply(
                 y,
                 self.fp8_amax_grad_output,
