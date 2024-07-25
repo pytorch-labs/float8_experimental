@@ -13,11 +13,7 @@ import pytest
 
 import torch
 import torch.nn as nn
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
@@ -67,13 +63,13 @@ def _test_compile_base(
 
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize(
-    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
@@ -81,18 +77,16 @@ def _test_compile_base(
 def test_eager_only(
     fullgraph,
     emulate: bool,
-    scaling_type_input: TensorScalingType,
-    scaling_type_weight: TensorScalingType,
-    scaling_type_grad_output: TensorScalingType,
+    scaling_type_input: ScalingType,
+    scaling_type_weight: ScalingType,
+    scaling_type_grad_output: ScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
     config = Float8LinearConfig(
-        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=scaling_type_grad_output
-        ),
+        cast_config_input=CastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
         emulate=emulate,
     )
     _test_compile_base(
@@ -106,31 +100,29 @@ def test_eager_only(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False, True] if is_H100 else [True])
 @pytest.mark.parametrize(
-    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 def test_aot_eager(
     fullgraph,
     emulate: bool,
-    scaling_type_input: TensorScalingType,
-    scaling_type_weight: TensorScalingType,
-    scaling_type_grad_output: TensorScalingType,
+    scaling_type_input: ScalingType,
+    scaling_type_weight: ScalingType,
+    scaling_type_grad_output: ScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
     config = Float8LinearConfig(
-        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=scaling_type_grad_output
-        ),
+        cast_config_input=CastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
         emulate=emulate,
     )
     _test_compile_base(
@@ -144,31 +136,29 @@ def test_aot_eager(
 @pytest.mark.parametrize("fullgraph", [True])
 @pytest.mark.parametrize("emulate", [False])
 @pytest.mark.parametrize(
-    "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_input", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_weight", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @pytest.mark.parametrize(
-    "scaling_type_grad_output", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+    "scaling_type_grad_output", [ScalingType.DELAYED, ScalingType.DYNAMIC]
 )
 @unittest.skipIf(not torch.cuda.is_available() or not is_H100, "CUDA not available")
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
 def test_inductor(
     fullgraph,
     emulate: bool,
-    scaling_type_input: TensorScalingType,
-    scaling_type_weight: TensorScalingType,
-    scaling_type_grad_output: TensorScalingType,
+    scaling_type_input: ScalingType,
+    scaling_type_weight: ScalingType,
+    scaling_type_grad_output: ScalingType,
     dtype: torch.dtype,
 ):
     torch._dynamo.reset()
     config = Float8LinearConfig(
-        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=scaling_type_grad_output
-        ),
+        cast_config_input=CastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
         emulate=emulate,
     )
     _test_compile_base(
@@ -270,15 +260,9 @@ def test_sync_amax_func():
         nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
     )
     config = Float8LinearConfig(
-        cast_config_input=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
-        cast_config_weight=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
+        cast_config_input=CastConfig(scaling_type=ScalingType.DELAYED),
+        cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
+        cast_config_grad_output=CastConfig(scaling_type=ScalingType.DELAYED),
     )
     float8_mod = convert_to_float8_training(
         module,
@@ -314,15 +298,9 @@ def test_sync_amax_func_cuda_graph_success():
             nn.Linear(16, 32, bias=True), nn.ReLU(), nn.Linear(32, 16, bias=True)
         ).to("cuda")
         config = Float8LinearConfig(
-            cast_config_input=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
-            cast_config_weight=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
-            cast_config_grad_output=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
+            cast_config_input=CastConfig(scaling_type=ScalingType.DELAYED),
+            cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
+            cast_config_grad_output=CastConfig(scaling_type=ScalingType.DELAYED),
         )
         convert_to_float8_training(
             my_module,

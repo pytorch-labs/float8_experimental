@@ -16,11 +16,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
+from float8_experimental.float8_dynamic_utils import cast_to_float8_e4m3_dynamic
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
@@ -183,15 +180,15 @@ class TestFloat8Linear:
             amax_buffer_names = []
             amax_history_buffer_names = []
             scale_buffer_names = []
-            if config.cast_config_input.scaling_type is TensorScalingType.DELAYED:
+            if config.cast_config_input.scaling_type is ScalingType.DELAYED:
                 amax_buffer_names.append("fp8_amax_input")
                 amax_history_buffer_names.append("fp8_amax_history_input")
                 scale_buffer_names.append("fp8_scale_input")
-            if config.cast_config_weight.scaling_type is TensorScalingType.DELAYED:
+            if config.cast_config_weight.scaling_type is ScalingType.DELAYED:
                 amax_buffer_names.append("fp8_amax_weight")
                 amax_history_buffer_names.append("fp8_amax_history_weight")
                 scale_buffer_names.append("fp8_scale_weight")
-            if config.cast_config_grad_output.scaling_type is TensorScalingType.DELAYED:
+            if config.cast_config_grad_output.scaling_type is ScalingType.DELAYED:
                 amax_buffer_names.append("fp8_amax_grad_output")
                 amax_history_buffer_names.append("fp8_amax_history_grad_output")
                 scale_buffer_names.append("fp8_scale_grad_output")
@@ -223,14 +220,14 @@ class TestFloat8Linear:
     @pytest.mark.parametrize("emulate", [True, False] if is_H100 else [True])
     @pytest.mark.parametrize("x_shape", [(16, 16), (2, 16, 16), (3, 2, 16, 16)])
     @pytest.mark.parametrize(
-        "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_input", [ScalingType.DELAYED, ScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_weight", [ScalingType.DELAYED, ScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
         "scaling_type_grad_output",
-        [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC],
+        [ScalingType.DELAYED, ScalingType.DYNAMIC],
     )
     @pytest.mark.parametrize("linear_dtype", [torch.bfloat16, torch.float32])
     @pytest.mark.parametrize("linear_bias", [False, True])
@@ -239,9 +236,9 @@ class TestFloat8Linear:
         self,
         x_shape,
         emulate: bool,
-        scaling_type_input: TensorScalingType,
-        scaling_type_weight: TensorScalingType,
-        scaling_type_grad_output: TensorScalingType,
+        scaling_type_input: ScalingType,
+        scaling_type_weight: ScalingType,
+        scaling_type_grad_output: ScalingType,
         linear_dtype: torch.dtype,
         linear_bias: bool,
     ):
@@ -257,11 +254,9 @@ class TestFloat8Linear:
         x = torch.randn(*x_shape, device="cuda", dtype=linear_dtype)
         m_ref = nn.Linear(16, 32, bias=linear_bias, device="cuda", dtype=linear_dtype)
         config = Float8LinearConfig(
-            cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-            cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-            cast_config_grad_output=Float8TensorCastConfig(
-                scaling_type=scaling_type_grad_output
-            ),
+            cast_config_input=CastConfig(scaling_type=scaling_type_input),
+            cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+            cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
             emulate=emulate,
         )
         self._test_linear_impl(
@@ -292,15 +287,9 @@ class TestFloat8Linear:
 
         m_ref = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
         config = Float8LinearConfig(
-            cast_config_input=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
-            cast_config_weight=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
-            cast_config_grad_output=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
+            cast_config_input=CastConfig(scaling_type=ScalingType.DELAYED),
+            cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
+            cast_config_grad_output=CastConfig(scaling_type=ScalingType.DELAYED),
             emulate=emulate,
         )
         m = Float8Linear.from_float(copy.deepcopy(m_ref), config)
@@ -385,9 +374,7 @@ class TestFloat8Linear:
     def test_repr(self):
         m = nn.Linear(32, 16)
         config = Float8LinearConfig(
-            cast_config_weight=Float8TensorCastConfig(
-                scaling_type=TensorScalingType.DELAYED
-            ),
+            cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
             emulate=True,
         )
         m = Float8Linear.from_float(
