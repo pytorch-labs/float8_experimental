@@ -467,7 +467,7 @@ class Float8Linear(torch.nn.Linear):
         # 1. weight needs to be on the correct device to create the buffers
         # 2. buffers need to be already created for the delayed scaling version
         #    of the weight wrapper to be initialized
-        if config.enable_fsdp_fp8_all_gather:
+        if config.enable_fsdp_float8_all_gather:
             if config.cast_config_weight.scaling_type is TensorScalingType.DYNAMIC:
                 new_mod.weight = torch.nn.Parameter(
                     WeightWithDynamicFloat8CastTensor(
