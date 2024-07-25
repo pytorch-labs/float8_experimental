@@ -27,21 +27,21 @@ aten = torch.ops.aten
 #
 # There are three gemms in a forward + backward of a Linear layer:
 #
-# 1.     x @ w_t   = y     (forward pass)
-# 2. dL_dY @ w     = dL_dX (backward pass)
-# 3.   x_t @ dL_dY = dL_dW (backward pass)
+# 1.       input @ weight_t    = output     (forward pass)
+# 2. grad_output @ weight      = grad_input (backward pass)
+# 3.     input_t @ grad_output = grad_weight (backward pass)
 #
 # In the formulas above, there are:
-# A. six input tensors (x, x_t, w, w_t, dL_dY, dL_dY_t).
-#    - Note that dL_dY_t is implied because of memory format requirements
+# A. six input tensors (input, input_t, weight, weight_t, grad_output, grad_output_t).
+#    - Note that grad_output_t is implied because of memory format requirements
 #      of float8 gemms
-# B. three output tensors (y, dL_dX, dL_dW)
+# B. three output tensors (output, grad_input, grad_weight)
 #
 # We want each input tensor, gemm, and output tensor to be configurable.
 # The state of this configuration today is:
 #
 # i. pairs of input tensors (non-t and t variants) have their scaling
-#    configurable via the scaling_type_{x_w_dL_dY} arguments to Float8Linear
+#    configurable via the scaling_type_* arguments to Float8Linear
 # ii. each gemm + output is configurable via ScaledMMConfig, which is not user facing
 # iii. LinearMMConfig is a container for the three ScaledMMConfig objects needed
 #    to configure all three gemms, also not user facing
@@ -60,11 +60,12 @@ ScaledMMConfig = namedtuple(
 
 # The object below is not user facing and exists for convenience,
 # to allow Float8Tensor to use
-# the right config based on which gemm from `y`, `dL_dX`, `dL_dW` is
+# the right config based on which gemm from gemms with outputs
+# `output`, `grad_input`, `grad_weight` is
 # being called.
 LinearMMConfig = namedtuple(
     "LinearMMConfig",
-    ["y", "dL_dX", "dL_dW"],
+    ["output", "grad_input", "grad_weight"],
     defaults=[
         ScaledMMConfig(False, True, False, False),
         ScaledMMConfig(False, False, False, False),
@@ -81,9 +82,9 @@ class GemmInputRole(enum.Enum):
     gemm is performed.
     """
 
-    X = "x"
-    W = "w"
-    DL_DY = "dL_dY"
+    INPUT = "input"
+    WEIGHT = "weight"
+    GRAD_OUTPUT = "grad_output"
 
 
 # choose which scaled_mm_config to use based on gemm inputs
@@ -93,21 +94,21 @@ def choose_scaled_mm_config(
     b_role: GemmInputRole,
     b_linear_mm_config: LinearMMConfig,
 ):
-    if a_role is GemmInputRole.X and b_role is GemmInputRole.W:
+    if a_role is GemmInputRole.INPUT and b_role is GemmInputRole.WEIGHT:
         assert (
-            a_linear_mm_config.y == b_linear_mm_config.y
-        ), f"linear_mm_config.y mismatch: {a_linear_mm_config.y} vs {b_linear_mm_config.y}"
-        return a_linear_mm_config.y
-    elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.W:
+            a_linear_mm_config.output == b_linear_mm_config.output
+        ), f"linear_mm_config.output mismatch: {a_linear_mm_config.output} vs {b_linear_mm_config.output}"
+        return a_linear_mm_config.output
+    elif a_role is GemmInputRole.GRAD_OUTPUT and b_role is GemmInputRole.WEIGHT:
         assert (
-            a_linear_mm_config.dL_dX == b_linear_mm_config.dL_dX
-        ), f"linear_mm_config.dL_dX mismatch: {a_linear_mm_config.dL_dX} vs {b_linear_mm_config.dL_dX}"
-        return a_linear_mm_config.dL_dX
-    elif a_role is GemmInputRole.DL_DY and b_role is GemmInputRole.X:
+            a_linear_mm_config.grad_input == b_linear_mm_config.grad_input
+        ), f"linear_mm_config.grad_input mismatch: {a_linear_mm_config.grad_input} vs {b_linear_mm_config.grad_input}"
+        return a_linear_mm_config.grad_input
+    elif a_role is GemmInputRole.GRAD_OUTPUT and b_role is GemmInputRole.INPUT:
         assert (
-            a_linear_mm_config.dL_dW == b_linear_mm_config.dL_dW
-        ), f"linear_mm_config.dL_dW mismatch: {a_linear_mm_config.dL_dW} vs {b_linear_mm_config.dL_dW}"
-        return a_linear_mm_config.dL_dW
+            a_linear_mm_config.grad_weight == b_linear_mm_config.grad_weight
+        ), f"linear_mm_config.grad_weight mismatch: {a_linear_mm_config.grad_weight} vs {b_linear_mm_config.grad_weight}"
+        return a_linear_mm_config.grad_weight
     else:
         raise AssertionError(f"unexpected a_role {a_role} and b_role {b_role}")
 
@@ -207,7 +208,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         float8_dtype=e4m3_dtype,
         amax_buffer: Optional[torch.Tensor] = None,
         linear_mm_config: Optional[LinearMMConfig] = None,
-        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
         """Autograd enabled wrapper around to_fp8_no_autograd that will also populate the amax buffer.
         Args
@@ -287,7 +288,7 @@ class Float8Tensor(torch.Tensor):
         scale: torch.Tensor,
         orig_dtype: torch.dtype,
         linear_mm_config: Optional[LinearMMConfig],
-        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
         assert (
             scale.numel() == 1
@@ -348,7 +349,7 @@ class Float8Tensor(torch.Tensor):
         float8_dtype: torch.dtype,
         amax_buffer: Optional[torch.Tensor] = None,
         linear_mm_config: Optional[LinearMMConfig] = None,
-        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.X,
+        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
         """Converts a higher precision tensor to float8 in a differentiable way.
 

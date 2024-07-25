@@ -132,7 +132,7 @@ class Float8InferenceLinear(torch.nn.Linear):
             scale,
             dtype,
             self.linear_mm_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         )
         self.weight = nn.Parameter(quantized_weight)
         self.weight.requires_grad = False
@@ -205,7 +205,7 @@ def cast_to_float8_e4m3_inference(
         scale,
         e4m3_dtype,
         linear_mm_config=linear_mm_config,
-        gemm_input_role=GemmInputRole.X,
+        gemm_input_role=GemmInputRole.INPUT,
     )
 
 

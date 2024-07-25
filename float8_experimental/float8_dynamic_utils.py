@@ -42,7 +42,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             gradY_scale,
             e5m2_dtype,
             linear_mm_config=ctx.linear_mm_config,
-            gemm_input_role=GemmInputRole.DL_DY,
+            gemm_input_role=GemmInputRole.GRAD_OUTPUT,
         )
         return fp8_tensor, None
 
@@ -51,7 +51,7 @@ def cast_to_float8_e4m3_dynamic(
     inpt_tensor: torch.Tensor,
     linear_mm_config: LinearMMConfig,
     reduce_amax: bool = False,
-    gemm_input_role: GemmInputRole = GemmInputRole.X,
+    gemm_input_role: GemmInputRole = GemmInputRole.INPUT,
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
