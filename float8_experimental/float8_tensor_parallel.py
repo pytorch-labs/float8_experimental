@@ -48,7 +48,7 @@ class Float8ColwiseParallel(ColwiseParallel):
         input_tensor = cast_to_float8_e4m3_dynamic(
             input_tensor,
             mod.linear_mm_config,
-            gemm_input_role=GemmInputRole.X,
+            gemm_input_role=GemmInputRole.INPUT,
         )  # DTensor(Float8Tensor)
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -101,7 +101,7 @@ class Float8RowwiseParallel(RowwiseParallel):
         input_tensor = cast_to_float8_e4m3_dynamic(
             input_tensor,
             mod.linear_mm_config,
-            gemm_input_role=GemmInputRole.X,
+            gemm_input_role=GemmInputRole.INPUT,
         )  # DTensor(Float8Tensor)
 
         if input_layouts != desired_input_layouts:
@@ -199,7 +199,7 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
             dt_inp = cast_to_float8_e4m3_dynamic(
                 dt_inp,
                 self.linear_mm_config,
-                gemm_input_role=GemmInputRole.X,
+                gemm_input_role=GemmInputRole.INPUT,
             )  # DTensor(Float8Tensor)
             if desired_layout is not None and input_layout != desired_layout:
                 dt_inp = dt_inp.redistribute(placements=(desired_layout,))

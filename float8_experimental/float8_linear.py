@@ -125,7 +125,7 @@ class NoopFwToFloat8E5M2Bw(torch.autograd.Function):
             fp8_scale_grad_output,
             e5m2_dtype,
             linear_mm_config=ctx.linear_mm_config,
-            gemm_input_role=GemmInputRole.DL_DY,
+            gemm_input_role=GemmInputRole.GRAD_OUTPUT,
         )
         empty_grads = None, None, None, None, None, None
         return res, *empty_grads
@@ -273,8 +273,8 @@ class Float8Linear(torch.nn.Linear):
             if self._buffers[key] is not None:
                 self._buffers[key] = self._buffers[key].to(torch.float32)
 
-    def cast_x_to_float8(
-        self, x: torch.Tensor, is_amax_initialized: bool
+    def cast_input_to_float8(
+        self, input: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
         # Duplicate the autocast logic for F.linear, so that the output
         # of our module has the right original precision
@@ -282,12 +282,12 @@ class Float8Linear(torch.nn.Linear):
             # For now, hardcode to GPU's autocast dtype
             # if we need CPU support in the future, we can add it
             autocast_dtype = torch.get_autocast_gpu_dtype()
-            x = x.to(autocast_dtype)
+            input = input.to(autocast_dtype)
 
         if self.scaling_type_input is TensorScalingType.DELAYED:
             scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
             _maybe_initialize_amaxes_scales_for_float8_cast(
-                x,
+                input,
                 self.fp8_amax_input,
                 self.fp8_amax_history_input,
                 self.fp8_scale_input,
@@ -296,29 +296,29 @@ class Float8Linear(torch.nn.Linear):
                 is_amax_initialized,
                 reduce_amax=True,
             )
-            x_fp8 = Float8Tensor.to_float8(
-                x,
+            input_fp8 = Float8Tensor.to_float8(
+                input,
                 self.fp8_scale_input,
                 e4m3_dtype,
                 self.fp8_amax_input,
                 linear_mm_config=self.linear_mm_config,
-                gemm_input_role=GemmInputRole.X,
+                gemm_input_role=GemmInputRole.INPUT,
             )
         else:
             assert self.scaling_type_input is TensorScalingType.DYNAMIC
-            x_fp8 = cast_to_float8_e4m3_dynamic(x, self.linear_mm_config)
-        return x_fp8
+            input_fp8 = cast_to_float8_e4m3_dynamic(input, self.linear_mm_config)
+        return input_fp8
 
-    def cast_w_to_float8(
-        self, w: torch.Tensor, is_amax_initialized: bool
+    def cast_weight_to_float8(
+        self, weight: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
         if self.scaling_type_weight is TensorScalingType.DELAYED:
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
-                w_fp8 = self.weight
+                weight_fp8 = self.weight
             else:
                 scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
                 _maybe_initialize_amaxes_scales_for_float8_cast(
-                    w,
+                    weight,
                     self.fp8_amax_weight,
                     self.fp8_amax_history_weight,
                     self.fp8_scale_weight,
@@ -328,29 +328,31 @@ class Float8Linear(torch.nn.Linear):
                     reduce_amax=False,
                 )
 
-                w_fp8 = Float8Tensor.to_float8(
-                    w,
+                weight_fp8 = Float8Tensor.to_float8(
+                    weight,
                     self.fp8_scale_weight,
                     e4m3_dtype,
                     self.fp8_amax_weight,
                     linear_mm_config=self.linear_mm_config,
-                    gemm_input_role=GemmInputRole.W,
+                    gemm_input_role=GemmInputRole.WEIGHT,
                 )
         else:
             assert self.scaling_type_weight is TensorScalingType.DYNAMIC
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
-                w_fp8 = self.weight
+                weight_fp8 = self.weight
             else:
-                w_fp8 = cast_to_float8_e4m3_dynamic(
-                    self.weight, self.linear_mm_config, gemm_input_role=GemmInputRole.W
+                weight_fp8 = cast_to_float8_e4m3_dynamic(
+                    self.weight,
+                    self.linear_mm_config,
+                    gemm_input_role=GemmInputRole.WEIGHT,
                 )
-        return w_fp8
+        return weight_fp8
 
-    def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
+    def cast_output_to_float8_in_bw(self, output: torch.Tensor) -> torch.Tensor:
         if self.scaling_type_grad_output is TensorScalingType.DELAYED:
             scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
-            y = NoopFwToFloat8E5M2Bw.apply(
-                y,
+            output = NoopFwToFloat8E5M2Bw.apply(
+                output,
                 self.fp8_amax_grad_output,
                 self.fp8_amax_history_grad_output,
                 self.fp8_scale_grad_output,
@@ -360,10 +362,10 @@ class Float8Linear(torch.nn.Linear):
             )
         else:
             assert self.scaling_type_grad_output is TensorScalingType.DYNAMIC
-            y = cast_to_float8_e5m2_dynamic_bw(y, self.linear_mm_config)
-        return y
+            output = cast_to_float8_e5m2_dynamic_bw(output, self.linear_mm_config)
+        return output
 
-    def float8_pre_forward(self, x):
+    def float8_pre_forward(self, input):
         if not self.enable_pre_and_post_forward:
             return
         if (
@@ -374,7 +376,7 @@ class Float8Linear(torch.nn.Linear):
             raise AssertionError(
                 "amaxes and scales not synced, please call `sync_float8_amax_and_scale_history` before forward"
             )
-        self.last_seen_input_dtype = x.dtype
+        self.last_seen_input_dtype = input.dtype
 
     def float8_post_forward(self):
         if not self.enable_pre_and_post_forward:
@@ -388,25 +390,25 @@ class Float8Linear(torch.nn.Linear):
         if self.has_any_delayed_scaling:
             self.float8_pre_forward(input)
 
-        x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        input_fp8 = self.cast_input_to_float8(input, self.is_amax_initialized)
+        weight_fp8 = self.cast_weight_to_float8(self.weight, self.is_amax_initialized)
 
-        y = torch.matmul(x_fp8, w_fp8.t())
+        output = torch.matmul(input_fp8, weight_fp8.t())
 
-        # Cast gradY to float8_e5m2 during backward
-        y = self.cast_y_to_float8_in_bw(y)
+        # Cast grad_output to float8_e5m2 during backward
+        output = self.cast_output_to_float8_in_bw(output)
 
         if self.bias is not None:
-            y = y + self.bias.to(y.dtype)
+            output = output + self.bias.to(output.dtype)
 
         if self.has_any_delayed_scaling:
             self.float8_post_forward()
-        return y
+        return output
 
     def scaling_repr(self):
         # add scaling settings without using too many characters
-        # example: "x:del,w:del,dldy:dyn"
-        return f"x:{self.scaling_type_input.short_str()},w:{self.scaling_type_weight.short_str()},dldy:{self.scaling_type_grad_output.short_str()}"
+        # example: "i:del,w:del,go:dyn"
+        return f"i:{self.scaling_type_input.short_str()},w:{self.scaling_type_weight.short_str()},go:{self.scaling_type_grad_output.short_str()}"
 
     def extra_repr(self):
         s = f'{super().extra_repr()}, scaling="{self.scaling_repr()}"'

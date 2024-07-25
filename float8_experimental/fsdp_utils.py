@@ -171,14 +171,14 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 self._precomputed_scale,
                 torch.float8_e4m3fn,
                 linear_mm_config=self._linear_mm_config,
-                gemm_input_role=GemmInputRole.W,
+                gemm_input_role=GemmInputRole.WEIGHT,
             )
         else:
             float8_tensor = cast_to_float8_e4m3_dynamic(
                 self._tensor,
                 self._linear_mm_config,
                 reduce_amax=True,
-                gemm_input_role=GemmInputRole.W,
+                gemm_input_role=GemmInputRole.WEIGHT,
             )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
@@ -201,7 +201,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             scale,
             param_dtype,
             self._linear_mm_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         ), (data,)
 
 
@@ -364,7 +364,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             e4m3_dtype,
             self._amax_buffer,
             self._linear_mm_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
@@ -387,5 +387,5 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             scale,
             param_dtype,
             self._linear_mm_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         ), (data,)
