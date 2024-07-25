@@ -168,24 +168,28 @@ class Float8Linear(torch.nn.Linear):
 
         self.create_buffers()
 
-        # TODO(future): user level configuration of gemms
         self.linear_mm_config = LinearMMConfig(
-            # input
+            # output
             ScaledMMConfig(
                 emulate,
-                True if not emulate else False,
+                self.config.gemm_config_output.use_fast_accum,
                 False,
                 self.config.pad_inner_dim,
             ),
-            # weight
+            # grad_input
             ScaledMMConfig(
                 emulate,
-                True if not emulate else False,
+                self.config.gemm_config_grad_input.use_fast_accum,
                 False,
                 self.config.pad_inner_dim,
             ),
-            # grad_output
-            ScaledMMConfig(emulate, False, False, self.config.pad_inner_dim),
+            # grad_weight
+            ScaledMMConfig(
+                emulate,
+                self.config.gemm_config_grad_weight.use_fast_accum,
+                False,
+                self.config.pad_inner_dim,
+            ),
         )
 
         # Note: is_amax_initialized is not a buffer to avoid data dependent
