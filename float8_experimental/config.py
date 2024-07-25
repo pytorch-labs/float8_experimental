@@ -8,25 +8,26 @@ import enum
 from dataclasses import dataclass
 
 
-class TensorScalingType(enum.Enum):
+# TODO(future): consider renaming to ScalingType
+class ScalingType(enum.Enum):
     DELAYED = "delayed"
     DYNAMIC = "dynamic"
 
     def short_str(self):
-        if self is TensorScalingType.DELAYED:
+        if self is ScalingType.DELAYED:
             return "del"
         else:
-            assert self is TensorScalingType.DYNAMIC
+            assert self is ScalingType.DYNAMIC
             return "dyn"
 
 
 @dataclass(frozen=True)
-class Float8TensorCastConfig:
+class CastConfig:
     """
     Configuration for casting a single tensor to float8
     """
 
-    scaling_type: TensorScalingType = TensorScalingType.DYNAMIC
+    scaling_type: ScalingType = ScalingType.DYNAMIC
 
 
 @dataclass(frozen=True)
@@ -74,9 +75,9 @@ class Float8LinearConfig:
     #
     # Per-tensor configuration for `input`, `weight`, `grad_output`
     #
-    cast_config_input: Float8TensorCastConfig = Float8TensorCastConfig()
-    cast_config_weight: Float8TensorCastConfig = Float8TensorCastConfig()
-    cast_config_grad_output: Float8TensorCastConfig = Float8TensorCastConfig()
+    cast_config_input: CastConfig = CastConfig()
+    cast_config_weight: CastConfig = CastConfig()
+    cast_config_grad_output: CastConfig = CastConfig()
 
     #
     # Per-gemm configuration for gemms calculating `output`, `grad_input` and

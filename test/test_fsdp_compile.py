@@ -18,7 +18,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 from float8_experimental import Float8LinearConfig
-from float8_experimental.config import Float8TensorCastConfig, TensorScalingType
+from float8_experimental.config import CastConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
     sync_float8_amax_and_scale_history,
@@ -57,15 +57,9 @@ def get_model(K, N, is_fp8, emulate, base_dtype=torch.float32):
     # to get around this, we can disable amax init
     config = Float8LinearConfig(
         enable_amax_init=False,
-        cast_config_input=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
-        cast_config_weight=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=TensorScalingType.DELAYED
-        ),
+        cast_config_input=CastConfig(scaling_type=ScalingType.DELAYED),
+        cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
+        cast_config_grad_output=CastConfig(scaling_type=ScalingType.DELAYED),
         emulate=emulate,
     )
 

@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.config import TensorScalingType
+from float8_experimental.config import ScalingType
 from float8_experimental.float8_linear_utils import convert_to_float8_training
 from float8_experimental.float8_tensor import Float8Tensor
 from float8_experimental.float8_utils import compute_error

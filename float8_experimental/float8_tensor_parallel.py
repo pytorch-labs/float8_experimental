@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from float8_experimental.config import TensorScalingType
+from float8_experimental.config import ScalingType
 from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
     cast_to_float8_e5m2_dynamic_bw,
@@ -28,8 +28,8 @@ def _float8_linear_supports_float8_allgather(m):
     # TODO(future): add support for delayed scaling for activations
     # and gradients
     return (
-        m.scaling_type_input == TensorScalingType.DYNAMIC
-        and m.scaling_type_grad_output == TensorScalingType.DYNAMIC
+        m.scaling_type_input == ScalingType.DYNAMIC
+        and m.scaling_type_grad_output == ScalingType.DYNAMIC
     )
 
 
