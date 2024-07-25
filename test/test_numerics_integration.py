@@ -122,7 +122,6 @@ class TestFloat8NumericsIntegrationTest:
         )
         swap_linear_with_float8_linear(
             model_fp8,
-            emulate=False,
             config=config,
         )
 

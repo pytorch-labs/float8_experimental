@@ -152,12 +152,10 @@ class TestFloat8Linear:
         self,
         x,
         m_ref,
-        emulate: bool,
         config: Float8LinearConfig,
     ):
         m_fp8 = Float8Linear.from_float(
             copy.deepcopy(m_ref),
-            emulate,
             config,
         )
         for _ in range(2):
@@ -264,11 +262,11 @@ class TestFloat8Linear:
             cast_config_grad_output=Float8TensorCastConfig(
                 scaling_type=scaling_type_grad_output
             ),
+            emulate=emulate,
         )
         self._test_linear_impl(
             x,
             m_ref,
-            emulate,
             config,
         )
 
@@ -303,8 +301,9 @@ class TestFloat8Linear:
             cast_config_grad_output=Float8TensorCastConfig(
                 scaling_type=TensorScalingType.DELAYED
             ),
+            emulate=emulate,
         )
-        m = Float8Linear.from_float(copy.deepcopy(m_ref), emulate, config)
+        m = Float8Linear.from_float(copy.deepcopy(m_ref), config)
 
         # autocast off
         x = torch.randn(16, 32, device="cuda", dtype=linear_dtype)
@@ -339,8 +338,8 @@ class TestFloat8Linear:
         )
 
         m = nn.Linear(32, 16, device="cuda", dtype=linear_dtype)
-        config = Float8LinearConfig()
-        m = Float8Linear.from_float(copy.deepcopy(m), emulate, config)
+        config = Float8LinearConfig(emulate=emulate)
+        m = Float8Linear.from_float(copy.deepcopy(m), config)
 
         # Cast the module to dtype
         m = m.to(dtype=linear_dtype)
@@ -389,10 +388,10 @@ class TestFloat8Linear:
             cast_config_weight=Float8TensorCastConfig(
                 scaling_type=TensorScalingType.DELAYED
             ),
+            emulate=True,
         )
         m = Float8Linear.from_float(
             copy.deepcopy(m),
-            emulate=True,
             config=config,
         )
         s = m.__repr__()
@@ -604,7 +603,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
     def test_swap_root_linear(self):
         for emulate in [True, False]:
             module = nn.Linear(3, 3)
-            module = swap_linear_with_float8_linear(module, emulate=emulate)
+            config = Float8LinearConfig(emulate=emulate)
+            module = swap_linear_with_float8_linear(module, config=config)
             self.assertIsInstance(module, Float8Linear)
             self.assertEqual(module.linear_mm_config.y.emulate, emulate)
             self.assertEqual(module.linear_mm_config.y.emulate, emulate)
@@ -613,11 +613,12 @@ class TestFloat8LinearUtils(unittest.TestCase):
         for emulate in [True, False]:
             module = nn.Linear(3, 3)
             module.child = nn.Sequential(nn.Linear(3, 3))
+            config = Float8LinearConfig(emulate=emulate)
             with self.assertRaisesRegex(
                 AssertionError,
                 "Does not support a root nn.Linear with children",
             ):
-                swap_linear_with_float8_linear(module, emulate=emulate)
+                swap_linear_with_float8_linear(module, config=config)
 
     def test_swap_submodule_linears(self):
         class MLP(nn.Module):
@@ -628,7 +629,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
 
         for emulate in [True, False]:
             model = nn.Sequential(MLP(3), nn.Linear(3, 3), MLP(3))
-            model = swap_linear_with_float8_linear(model, emulate=emulate)
+            config = Float8LinearConfig(emulate=emulate)
+            model = swap_linear_with_float8_linear(model, config=config)
             self.assertIsInstance(model[0].lin1, Float8Linear)
             self.assertIsInstance(model[0].lin2, Float8Linear)
             self.assertIsInstance(model[1], Float8Linear)
@@ -655,9 +657,10 @@ class TestFloat8LinearUtils(unittest.TestCase):
                 and mod.out_features % 16 == 0
             )
 
+        config = Float8LinearConfig(emulate=True)
         model = swap_linear_with_float8_linear(
             model,
-            emulate=True,
+            config=config,
             module_filter_fn=module_filter_fn,
         )
         # in_features=8, out_features=32, 8 is less than 32.
@@ -683,9 +686,10 @@ class TestFloat8LinearUtils(unittest.TestCase):
             "0.lin2",
             "2.lin1",
         ]
+        config = Float8LinearConfig(emulate=True)
         model = swap_linear_with_float8_linear(
             model,
-            emulate=True,
+            config=config,
             module_filter_fn=module_filter_fn,
         )
         self.assertTrue(type(model[0].lin1) is Float8Linear)

@@ -166,8 +166,8 @@ class Float8Linear(torch.nn.Linear):
         )
         # Amax scales should always be kept as float32.
         self.always_float32_buffers = set()
-        emulate = kwargs.pop("emulate", False)
         config = kwargs.pop("config")
+        emulate = config.emulate
         super().__init__(*args, **kwargs)
 
         # Defines the scaling behavior of input, weight, grad_output
@@ -434,7 +434,6 @@ class Float8Linear(torch.nn.Linear):
     def from_float(
         cls,
         mod,
-        emulate: bool = False,
         config: Optional[Float8LinearConfig] = None,
     ):
         """
@@ -442,7 +441,6 @@ class Float8Linear(torch.nn.Linear):
 
         Args:
             mod (torch.nn.Linear): nn.Linear to convert
-            emulate (bool): whether to emulate fp8 matmul logic in float32
             config (Optional[Float8LinearConfig]): configuration for conversion to float8
         """
         if config is None:
@@ -452,7 +450,6 @@ class Float8Linear(torch.nn.Linear):
                 mod.in_features,
                 mod.out_features,
                 bias=False,
-                emulate=emulate,
                 config=config,
             )
         new_mod.weight = mod.weight

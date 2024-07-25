@@ -147,7 +147,6 @@ def main(
 
         linear_float8 = Float8Linear.from_float(
             copy.deepcopy(linear_ref),
-            emulate=False,
             config=config,
         )
         scaling_repr = linear_float8.scaling_repr()
