@@ -252,6 +252,10 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
 
 class Float8Tensor(torch.Tensor):
     """
+    Note: this is **not** a public API and is only intended to be used
+    inside of this repository. Please file an issue if you would benefit
+    from this being a public API.
+
     A Python-only Float8 tensor subclass.  Contains:
     * `_data`: the underlying e4m3 or e5m2 data
     * `_scale`: the scale used to scale the original fp32 tensor. We multiply
