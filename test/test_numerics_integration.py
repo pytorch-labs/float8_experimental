@@ -14,11 +14,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
     linear_requires_sync,
@@ -79,22 +75,22 @@ class FeedForward(nn.Module):
 
 class TestFloat8NumericsIntegrationTest:
     @pytest.mark.parametrize(
-        "scaling_type_input", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_input", [ScalingType.DELAYED, ScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
-        "scaling_type_weight", [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC]
+        "scaling_type_weight", [ScalingType.DELAYED, ScalingType.DYNAMIC]
     )
     @pytest.mark.parametrize(
         "scaling_type_grad_output",
-        [TensorScalingType.DELAYED, TensorScalingType.DYNAMIC],
+        [ScalingType.DELAYED, ScalingType.DYNAMIC],
     )
     @pytest.mark.skipif(not is_H100, reason="requires H100 GPU")
     @pytest.mark.skipif(IS_ROCM, reason="test doesn't currently work on the ROCm stack")
     def test_encoder_fw_bw(
         self,
-        scaling_type_input: TensorScalingType,
-        scaling_type_weight: TensorScalingType,
-        scaling_type_grad_output: TensorScalingType,
+        scaling_type_input: ScalingType,
+        scaling_type_weight: ScalingType,
+        scaling_type_grad_output: ScalingType,
     ):
         # TODO(later): maybe add float16 back if it becomes important
         data_dtype = torch.bfloat16
@@ -114,11 +110,9 @@ class TestFloat8NumericsIntegrationTest:
         # for now just test the encoder to simplify things
         model_fp8 = copy.deepcopy(model_ref)
         config = Float8LinearConfig(
-            cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-            cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-            cast_config_grad_output=Float8TensorCastConfig(
-                scaling_type=scaling_type_grad_output
-            ),
+            cast_config_input=CastConfig(scaling_type=scaling_type_input),
+            cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+            cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
         )
         convert_to_float8_training(
             model_fp8,

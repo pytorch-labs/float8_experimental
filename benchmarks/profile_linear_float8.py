@@ -18,11 +18,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
     linear_requires_sync,
@@ -217,15 +213,13 @@ def main(
     assert model_type in ("linear", "ln_linear", "norm_ffn_norm"), "unsupported"
     assert dtype_filter in ("both", "float8", "bfloat16")
 
-    scaling_type_input = TensorScalingType(scaling_type_input)
-    scaling_type_weight = TensorScalingType(scaling_type_weight)
-    scaling_type_grad_output = TensorScalingType(scaling_type_grad_output)
+    scaling_type_input = ScalingType(scaling_type_input)
+    scaling_type_weight = ScalingType(scaling_type_weight)
+    scaling_type_grad_output = ScalingType(scaling_type_grad_output)
     config = Float8LinearConfig(
-        cast_config_input=Float8TensorCastConfig(scaling_type=scaling_type_input),
-        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
-        cast_config_grad_output=Float8TensorCastConfig(
-            scaling_type=scaling_type_grad_output
-        ),
+        cast_config_input=CastConfig(scaling_type=scaling_type_input),
+        cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
+        cast_config_grad_output=CastConfig(scaling_type=scaling_type_grad_output),
     )
     scaling_repr = "_".join(
         [

@@ -14,7 +14,7 @@ from typing import Optional
 
 import torch
 
-from float8_experimental.config import Float8LinearConfig, TensorScalingType
+from float8_experimental.config import Float8LinearConfig, ScalingType
 
 from float8_experimental.float8_dynamic_utils import (
     cast_to_float8_e4m3_dynamic,
@@ -215,9 +215,9 @@ class Float8Linear(torch.nn.Linear):
         self.scaling_type_grad_output = config.cast_config_grad_output.scaling_type
         # Convenience flag to skip code related to delayed scaling
         self.has_any_delayed_scaling = (
-            self.scaling_type_input is TensorScalingType.DELAYED
-            or self.scaling_type_weight is TensorScalingType.DELAYED
-            or self.scaling_type_grad_output is TensorScalingType.DELAYED
+            self.scaling_type_input is ScalingType.DELAYED
+            or self.scaling_type_weight is ScalingType.DELAYED
+            or self.scaling_type_grad_output is ScalingType.DELAYED
         )
 
         self.config = config
@@ -340,7 +340,7 @@ class Float8Linear(torch.nn.Linear):
             autocast_dtype = torch.get_autocast_gpu_dtype()
             input = input.to(autocast_dtype)
 
-        if self.scaling_type_input is TensorScalingType.DELAYED:
+        if self.scaling_type_input is ScalingType.DELAYED:
             scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
             _maybe_initialize_amaxes_scales_for_float8_cast(
                 input,
@@ -361,14 +361,14 @@ class Float8Linear(torch.nn.Linear):
                 gemm_input_role=GemmInputRole.INPUT,
             )
         else:
-            assert self.scaling_type_input is TensorScalingType.DYNAMIC
+            assert self.scaling_type_input is ScalingType.DYNAMIC
             input_fp8 = cast_to_float8_e4m3_dynamic(input, self.linear_mm_config)
         return input_fp8
 
     def cast_weight_to_float8(
         self, weight: torch.Tensor, is_amax_initialized: bool
     ) -> torch.Tensor:
-        if self.scaling_type_weight is TensorScalingType.DELAYED:
+        if self.scaling_type_weight is ScalingType.DELAYED:
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 weight_fp8 = self.weight
             else:
@@ -393,7 +393,7 @@ class Float8Linear(torch.nn.Linear):
                     gemm_input_role=GemmInputRole.WEIGHT,
                 )
         else:
-            assert self.scaling_type_weight is TensorScalingType.DYNAMIC
+            assert self.scaling_type_weight is ScalingType.DYNAMIC
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 weight_fp8 = self.weight
             else:
@@ -405,7 +405,7 @@ class Float8Linear(torch.nn.Linear):
         return weight_fp8
 
     def cast_output_to_float8_in_bw(self, output: torch.Tensor) -> torch.Tensor:
-        if self.scaling_type_grad_output is TensorScalingType.DELAYED:
+        if self.scaling_type_grad_output is ScalingType.DELAYED:
             scale_fn_name = self.config.delayed_scaling_config.scale_fn_name
             output = NoopFwToFloat8E5M2Bw.apply(
                 output,
@@ -417,7 +417,7 @@ class Float8Linear(torch.nn.Linear):
                 self.linear_mm_config,
             )
         else:
-            assert self.scaling_type_grad_output is TensorScalingType.DYNAMIC
+            assert self.scaling_type_grad_output is ScalingType.DYNAMIC
             output = cast_to_float8_e5m2_dynamic_bw(output, self.linear_mm_config)
         return output
 
@@ -504,7 +504,7 @@ class Float8Linear(torch.nn.Linear):
         # 2. buffers need to be already created for the delayed scaling version
         #    of the weight wrapper to be initialized
         if config.enable_fsdp_float8_all_gather:
-            if config.cast_config_weight.scaling_type is TensorScalingType.DYNAMIC:
+            if config.cast_config_weight.scaling_type is ScalingType.DYNAMIC:
                 new_mod.weight = torch.nn.Parameter(
                     WeightWithDynamicFloat8CastTensor(
                         new_mod.weight,
@@ -512,9 +512,7 @@ class Float8Linear(torch.nn.Linear):
                     )
                 )
             else:
-                assert (
-                    config.cast_config_weight.scaling_type is TensorScalingType.DELAYED
-                )
+                assert config.cast_config_weight.scaling_type is ScalingType.DELAYED
                 new_mod.weight = torch.nn.Parameter(
                     WeightWithDelayedFloat8CastTensor(
                         new_mod.weight,

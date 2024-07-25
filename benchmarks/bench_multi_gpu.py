@@ -14,11 +14,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.utils.benchmark as benchmark
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
     sync_float8_amax_and_scale_history,
@@ -33,11 +29,9 @@ B, M, K, N = 32, 1024, 1024, 1024
 lr = 0.01
 
 config = Float8LinearConfig(
-    cast_config_input=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
-    cast_config_weight=Float8TensorCastConfig(scaling_type=TensorScalingType.DELAYED),
-    cast_config_grad_output=Float8TensorCastConfig(
-        scaling_type=TensorScalingType.DELAYED
-    ),
+    cast_config_input=CastConfig(scaling_type=ScalingType.DELAYED),
+    cast_config_weight=CastConfig(scaling_type=ScalingType.DELAYED),
+    cast_config_grad_output=CastConfig(scaling_type=ScalingType.DELAYED),
 )
 
 

@@ -9,7 +9,7 @@ from typing import Callable, List, Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from float8_experimental.config import Float8LinearConfig, TensorScalingType
+from float8_experimental.config import Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear import Float8Linear
 
 from float8_experimental.float8_utils import (
@@ -27,9 +27,9 @@ def linear_requires_sync(config: Float8LinearConfig):
     """Returns whether the given linear_type requires sync before forward."""
     return any(
         [
-            config.cast_config_input.scaling_type is TensorScalingType.DELAYED,
-            config.cast_config_weight.scaling_type is TensorScalingType.DELAYED,
-            config.cast_config_grad_output.scaling_type is TensorScalingType.DELAYED,
+            config.cast_config_input.scaling_type is ScalingType.DELAYED,
+            config.cast_config_weight.scaling_type is ScalingType.DELAYED,
+            config.cast_config_grad_output.scaling_type is ScalingType.DELAYED,
         ]
     )
 

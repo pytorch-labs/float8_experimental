@@ -21,11 +21,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
-from float8_experimental.config import (
-    Float8LinearConfig,
-    Float8TensorCastConfig,
-    TensorScalingType,
-)
+from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
     linear_requires_sync,
@@ -78,12 +74,10 @@ def fsdp_main(rank, world_size, args):
     model_fp8 = copy.deepcopy(model)
 
     scaling_type_weight = (
-        TensorScalingType.DYNAMIC
-        if use_weight_dynamic_scaling
-        else TensorScalingType.DELAYED
+        ScalingType.DYNAMIC if use_weight_dynamic_scaling else ScalingType.DELAYED
     )
     config = Float8LinearConfig(
-        cast_config_weight=Float8TensorCastConfig(scaling_type=scaling_type_weight),
+        cast_config_weight=CastConfig(scaling_type=scaling_type_weight),
         # TODO(future): delete this arg as it's always False
         emulate=False,
     )
