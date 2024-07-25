@@ -87,10 +87,10 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         y_scale = tensor_to_scale(y_fp32, fp8_dtype).float()
 
         x_fp8 = Float8Tensor.to_float8(
-            x_fp32, x_scale, fp8_dtype, gemm_input_role=GemmInputRole.X
+            x_fp32, x_scale, fp8_dtype, gemm_input_role=GemmInputRole.INPUT
         )
         y_fp8 = Float8Tensor.to_float8(
-            y_fp32, y_scale, fp8_dtype, gemm_input_role=GemmInputRole.W
+            y_fp32, y_scale, fp8_dtype, gemm_input_role=GemmInputRole.WEIGHT
         )
 
         dist_x_fp8 = DTensor.from_local(x_fp8, mesh, [lhs_placement], run_check=False)
@@ -164,10 +164,13 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     dist_target = distribute_tensor(target, mesh, [Shard(0)])
 
     dist_x_fp8 = Float8Tensor.to_float8(
-        dist_x_fp32, dist_x_scale, fp8_dtype, gemm_input_role=GemmInputRole.X
+        dist_x_fp32, dist_x_scale, fp8_dtype, gemm_input_role=GemmInputRole.INPUT
     )
     dist_weight_fp8 = Float8Tensor.to_float8(
-        dist_wight_fp32, dist_weight_scale, fp8_dtype, gemm_input_role=GemmInputRole.W
+        dist_wight_fp32,
+        dist_weight_scale,
+        fp8_dtype,
+        gemm_input_role=GemmInputRole.WEIGHT,
     )
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)

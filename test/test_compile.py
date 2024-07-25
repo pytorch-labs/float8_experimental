@@ -256,9 +256,9 @@ class TestGraphBreaks(DynamoTestCase):
             type(y_compiled._orig_dtype)
         )
         assert isinstance(
-            y_compiled._linear_mm_config.y.emulate, bool
+            y_compiled._linear_mm_config.output.emulate, bool
         ), "Float8Tensor._emulate should be a bool but got {}".format(
-            type(y_compiled._linear_mm_config.y.emulate)
+            type(y_compiled._linear_mm_config.output.emulate)
         )
 
 

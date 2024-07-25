@@ -395,7 +395,7 @@ class TestFloat8Linear:
             config=config,
         )
         s = m.__repr__()
-        assert "x:dyn,w:del,dldy:dyn" in s
+        assert "i:dyn,w:del,go:dyn" in s
 
 
 class TestScaledMM:
@@ -464,18 +464,18 @@ class TestScaledMM:
             x_scale,
             fp8_dtype,
             linear_mm_config=linear_config_a,
-            gemm_input_role=GemmInputRole.X,
+            gemm_input_role=GemmInputRole.INPUT,
         )
         b = Float8Tensor.to_float8(
             x_fp32,
             x_scale,
             fp8_dtype,
             linear_mm_config=linear_config_b,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         )
         with pytest.raises(
             AssertionError,
-            match="linear_mm_config.y mismatch",
+            match="linear_mm_config.output mismatch",
         ):
             a @ b
 
@@ -499,10 +499,10 @@ class TestScaledMM:
         b_scale = tensor_to_scale(b, input_dtype).float()
 
         a_fp8 = Float8Tensor.to_float8(
-            a, a_scale, input_dtype, gemm_input_role=GemmInputRole.X
+            a, a_scale, input_dtype, gemm_input_role=GemmInputRole.INPUT
         )
         b_fp8 = Float8Tensor.to_float8(
-            b, b_scale, input_dtype, gemm_input_role=GemmInputRole.W
+            b, b_scale, input_dtype, gemm_input_role=GemmInputRole.WEIGHT
         )
 
         with pytest.raises(
@@ -523,14 +523,14 @@ class TestScaledMM:
             a_scale,
             input_dtype,
             linear_mm_config=pad_config,
-            gemm_input_role=GemmInputRole.X,
+            gemm_input_role=GemmInputRole.INPUT,
         )
         b_fp8 = Float8Tensor.to_float8(
             b,
             b_scale,
             input_dtype,
             linear_mm_config=pad_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         )
         out_padded = a_fp8 @ b_fp8
         out_padded.to(compare_type)
@@ -546,14 +546,14 @@ class TestScaledMM:
             a_scale,
             input_dtype,
             linear_mm_config=emulated_config,
-            gemm_input_role=GemmInputRole.X,
+            gemm_input_role=GemmInputRole.INPUT,
         )
         b_fp8 = Float8Tensor.to_float8(
             b,
             b_scale,
             input_dtype,
             linear_mm_config=emulated_config,
-            gemm_input_role=GemmInputRole.W,
+            gemm_input_role=GemmInputRole.WEIGHT,
         )
         out_emualted = a_fp8 @ b_fp8
         out_emualted.to(compare_type)
@@ -606,8 +606,8 @@ class TestFloat8LinearUtils(unittest.TestCase):
             config = Float8LinearConfig(emulate=emulate)
             module = convert_to_float8_training(module, config=config)
             self.assertIsInstance(module, Float8Linear)
-            self.assertEqual(module.linear_mm_config.y.emulate, emulate)
-            self.assertEqual(module.linear_mm_config.y.emulate, emulate)
+            self.assertEqual(module.linear_mm_config.output.emulate, emulate)
+            self.assertEqual(module.linear_mm_config.output.emulate, emulate)
 
     def test_swap_root_linear_with_children_raises(self):
         for emulate in [True, False]:
