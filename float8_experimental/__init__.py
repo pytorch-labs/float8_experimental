@@ -6,6 +6,7 @@
 # Lets define a few top level things here
 from float8_experimental.config import (
     DelayedScalingConfig,
+    Float8GemmConfig,
     Float8LinearConfig,
     Float8TensorCastConfig,
     TensorScalingType,
@@ -33,6 +34,7 @@ __all__ = [
     # configuration
     "DelayedScalingConfig",
     "TensorScalingType",
+    "Float8GemmConfig",
     "Float8LinearConfig",
     "Float8TensorCastConfig",
     # top level UX

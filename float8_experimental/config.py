@@ -54,6 +54,17 @@ class DelayedScalingConfig:
 
 
 @dataclass(frozen=True)
+class Float8GemmConfig:
+    """
+    Configuration for a float8 gemm.
+    """
+
+    # If True, fast accumulation in lower precision is used.
+    # Note: this flag is currently a no-op if emulation is turned on.
+    use_fast_accum: bool = False
+
+
+@dataclass(frozen=True)
 class Float8LinearConfig:
     """
     Configuration for converting a `torch.nn.Linear` module to float8
@@ -66,6 +77,14 @@ class Float8LinearConfig:
     cast_config_input: Float8TensorCastConfig = Float8TensorCastConfig()
     cast_config_weight: Float8TensorCastConfig = Float8TensorCastConfig()
     cast_config_grad_output: Float8TensorCastConfig = Float8TensorCastConfig()
+
+    #
+    # Per-gemm configuration for gemms calculating `output`, `grad_input` and
+    # `grad_weight`
+    #
+    gemm_config_output: Float8GemmConfig = Float8GemmConfig(use_fast_accum=True)
+    gemm_config_grad_input: Float8GemmConfig = Float8GemmConfig()
+    gemm_config_grad_weight: Float8GemmConfig = Float8GemmConfig(use_fast_accum=True)
 
     #
     # Per-linear configuration
