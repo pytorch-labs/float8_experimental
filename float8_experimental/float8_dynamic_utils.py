@@ -4,8 +4,11 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Optional, Tuple, Union
+
 import torch
 
+from float8_experimental.config import ScalingGranularity
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
@@ -52,10 +55,12 @@ def cast_to_float8_e4m3_dynamic(
     linear_mm_config: LinearMMConfig,
     reduce_amax: bool = False,
     gemm_input_role: GemmInputRole = GemmInputRole.INPUT,
+    granularity: ScalingGranularity = ScalingGranularity.TENSORWISE,
+    dim: Optional[Union[int, Tuple[int]]] = None,
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
-    scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
+    scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax, granularity, dim)
     return Float8Tensor.to_float8(
         inpt_tensor,
         scale,

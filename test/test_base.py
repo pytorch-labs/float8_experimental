@@ -143,6 +143,17 @@ class TestFloat8Tensor(unittest.TestCase):
         buffer.seek(0)
         _ = torch.load(buffer, weights_only=True)
 
+    def test_axiswise_dynamic_cast(self):
+        a = torch.randn(16, 32, dtype=torch.bfloat16)
+        linear_mm_config = LinearMMConfig()
+        a_fp8 = cast_to_float8_e4m3_dynamic(
+            a, 
+            linear_mm_config, 
+            granularity=ScalingGranularity.AXISWISE, 
+            dim=0,
+        )
+        print(a_fp8)
+
 
 class TestFloat8Linear:
     def _test_linear_impl(
