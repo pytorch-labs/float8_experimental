@@ -207,7 +207,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         tensor: torch.Tensor,
         scale: torch.Tensor,
         float8_dtype=e4m3_dtype,
-        amax_buffer: Optional[torch.Tensor] = None,
+        # amax_buffer: Optional[torch.Tensor] = None,
         linear_mm_config: Optional[LinearMMConfig] = None,
         gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
@@ -219,8 +219,8 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
             amax_buffer: an Optional buffer buffer to store the amax value in prior to conversion
             emulate: whether to emulate the matmuls in fp32
         """
-        if amax_buffer is not None:
-            amax_buffer.fill_(tensor_to_amax(tensor))
+        # if amax_buffer is not None:
+        #     amax_buffer.fill_(tensor_to_amax(tensor))
 
         return to_fp8_no_autograd(
             tensor,
