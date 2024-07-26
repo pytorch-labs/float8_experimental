@@ -128,6 +128,7 @@ def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
     return False
 
 
+# TODO: rename to hp_tensor_and_scale_to_float8_tensor
 def to_fp8_no_autograd(
     x: torch.Tensor,
     x_scale: torch.Tensor,
@@ -340,37 +341,6 @@ class Float8Tensor(torch.Tensor):
 
     def to_original_precision(self):
         return FromFloat8ConstrFunc.apply(self)
-
-    @staticmethod
-    @torch._dynamo.allow_in_graph
-    def to_float8(
-        tensor: torch.Tensor,
-        scale: torch.Tensor,
-        float8_dtype: torch.dtype,
-        amax_buffer: Optional[torch.Tensor] = None,
-        linear_mm_config: Optional[LinearMMConfig] = None,
-        gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
-    ):
-        """Converts a higher precision tensor to float8 in a differentiable way.
-
-        Args:
-            tensor: the tensor to convert
-            scale: the scale to use to convert the tensor
-            float8_dtype: the float8 dtype to use
-            amax_buffer: a buffer to store the amax value in prior to conversion
-            linearmm_config: Defines the configuration for 3 gemms in fwd/bwd of linear
-
-        Returns:
-            Float8Tensor: a float8 tensor
-        """
-        return ToFloat8ConstrFunc.apply(
-            tensor,
-            scale,
-            float8_dtype,
-            amax_buffer,
-            linear_mm_config,
-            gemm_input_role,
-        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
