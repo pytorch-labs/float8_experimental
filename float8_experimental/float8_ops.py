@@ -41,7 +41,7 @@ def implements(aten_ops):
 
 @implements(
     [
-        aten.view.default,
+        # aten.view.default,
         aten._unsafe_view.default,
         aten.as_strided.default,
         aten.clone.default,
@@ -79,6 +79,19 @@ def float8_desugar_data_and_scale(aten_op, args, kwargs=None):
         args[0]._gemm_input_role,
     )
 
+@implements([aten.view.default])
+def float8_view(aten_op, args, kwargs=None):
+    if len(args[0]._scale.shape) < 2:
+        # tensorwise scaling
+        return float8_desugar_op(aten_op, *args, **kwargs)
+    print('args', args)
+    print('kwargs', kwargs)
+    tensor, new_shape = args[0], args[1]
+
+    # for now, only support reshaping to [-1, *dims] or [*dims, -1]
+    if len(new_shape) >= 2 and (new_shape[0] == -1 or new_shape[-1] == -1):
+        return float8_desugar_data_and_scale(aten_op, *args, **kwargs)
+    raise AssertionError(f"{aten_op} with axiswise scaling and shape {new_shape} is not supported yet.")
 
 @implements([aten.split.Tensor])
 def float8_split(aten_op, args, kwargs=None):

@@ -115,9 +115,9 @@ def tensor_to_amax(
 
         # convert from axiswise_dim (dim to keep) to
         # dim as the input to the `torch.amax` function (tuple of dims to reduce)
-        dim_to_reduce = tuple(d for d in range(len(x.shape)) if d != axiswise_dim)
+        # dim_to_reduce = tuple(d for d in range(len(x.shape)) if d != axiswise_dim)
 
-        amax = torch.amax(torch.abs(x), dim=dim_to_reduce, keepdim=True)
+        amax = torch.amax(torch.abs(x), dim=axiswise_dim, keepdim=True)
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will

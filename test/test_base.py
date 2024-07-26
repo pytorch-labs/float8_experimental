@@ -63,7 +63,7 @@ def bitwise_identical(a: Float8Tensor, b: Float8Tensor) -> bool:
     return True
 
 
-class TestFloat8Tensor(unittest.TestCase):
+class TestFloat8Tensor:
     def test_preserves_dtype(self) -> None:
         # hp means high precision, lp means low precision
         hp_dtypes = (torch.float32, torch.float16, torch.bfloat16)
@@ -73,7 +73,7 @@ class TestFloat8Tensor(unittest.TestCase):
             x1_s = tensor_to_scale(x1_hp, lp_dtype)
             x2_lp = hp_tensor_and_scale_to_float8(x1_hp, x1_s, lp_dtype)
             x3_hp = x2_lp.to_original_precision()
-            self.assertTrue(x3_hp.dtype == hp_dtype)
+            assert x3_hp.dtype == hp_dtype
 
     def test_differentiable_casts(self) -> None:
         lp_dtypes = (e4m3_dtype, e5m2_dtype)
@@ -108,7 +108,7 @@ class TestFloat8Tensor(unittest.TestCase):
         fp8_b = hp_tensor_and_scale_to_float8(b, scale_a, torch.float8_e4m3fn)
         fp8_b_bad = hp_tensor_and_scale_to_float8(b, scale_b, torch.float8_e4m3fn)
 
-        with self.assertRaises(AssertionError):
+        with pytest.raises(AssertionError):
             b[index] = fp8_a
             fp8_b[index] = a
             fp8_b_bad[index] = fp8_a
@@ -122,7 +122,7 @@ class TestFloat8Tensor(unittest.TestCase):
         b = torch.empty(16, dtype=torch.bfloat16)
         b.copy_(fp8_a)  # Should work
         torch.testing.assert_close(b, fp8_a.to_original_precision())
-        with self.assertRaises(RuntimeError):
+        with pytest.raises(RuntimeError):
             fp8_a.copy_(b)  # Should fail
 
         fp8_b = Float8Tensor(
@@ -149,9 +149,33 @@ class TestFloat8Tensor(unittest.TestCase):
         buffer.seek(0)
         _ = torch.load(buffer, weights_only=True)
 
-    def test_axiswise_dynamic_cast(self):
-        a = torch.randn(16, 32, dtype=torch.bfloat16)
+    @pytest.mark.parametrize("shape", [(8, 16), (4, 8, 16), (2, 4, 8, 16)])
+    @pytest.mark.parametrize("dim_name", ["first", "last"])
+    def test_axiswise_dynamic_cast(self, shape, dim_name):
+        a = torch.randn(*shape, dtype=torch.bfloat16)
+
+        if dim_name == "first":
+            dim = 0
+        elif dim_name == "last":
+            dim = len(a.shape) - 1
+
         linear_mm_config = LinearMMConfig()
+        a_fp8 = hp_tensor_to_float8_dynamic(
+            a,
+            e4m3_dtype,
+            linear_mm_config,
+            scaling_granularity=ScalingGranularity.AXISWISE,
+            axiswise_dim=dim,
+        )
+        a_dq = a_fp8.to_original_precision()
+        sqnr = compute_error(a, a_dq)
+        assert sqnr >= 25.0
+
+    # TODO(next) make this work
+    def test_axiswise_reshape(self):
+        a = torch.randn(3, 5, 7, dtype=torch.bfloat16, device="cuda")
+        linear_mm_config = LinearMMConfig()
+
         a_fp8 = hp_tensor_to_float8_dynamic(
             a,
             e4m3_dtype,
@@ -159,11 +183,15 @@ class TestFloat8Tensor(unittest.TestCase):
             scaling_granularity=ScalingGranularity.AXISWISE,
             axiswise_dim=0,
         )
-        # print(a_fp8)
-        # print(a_fp8.to_original_precision())
-        # print(a_fp8.t())
-        b = a_fp8.t()
-        # TODO check numerical accuracy
+        # a_fp8._data.shape is (3, 5, 7)
+        # a_fp8._scale.shape is (1, 5, 7)
+        print(a_fp8._scale.shape)
+
+        # reshape to (3, 5 * 7)
+        # a_fp8._scale.shape should be (1, 5 * 7)
+        a_fp8_r = a_fp8.reshape(3, -1)
+        print(a_fp8_r._scale.shape)
+         
 
     def test_axiswise_gemm(self):
         a = torch.randn(16, 32, dtype=torch.bfloat16, device="cuda")
@@ -177,7 +205,7 @@ class TestFloat8Tensor(unittest.TestCase):
             linear_mm_config,
             gemm_input_role=GemmInputRole.INPUT,
             scaling_granularity=ScalingGranularity.AXISWISE,
-            axiswise_dim=0,
+            axiswise_dim=1,
         )
         b_fp8 = hp_tensor_to_float8_dynamic(
             b,
@@ -185,10 +213,13 @@ class TestFloat8Tensor(unittest.TestCase):
             linear_mm_config,
             gemm_input_role=GemmInputRole.WEIGHT,
             scaling_granularity=ScalingGranularity.AXISWISE,
-            axiswise_dim=0,
+            axiswise_dim=1,
         )
-        c = torch.mm(a_fp8, b_fp8.t())
-        print(c)
+        c_fp8_compute = torch.mm(a_fp8, b_fp8.t())
+        print(c_fp8_compute)
+        c_ref = torch.mm(a, b.t())
+        sqnr = compute_error(c_ref, c_fp8_compute)
+        print('sqnr', sqnr)
         # TODO check numerical accuracy
 
 
