@@ -18,8 +18,8 @@ from float8_experimental.float8_scaling_utils import (
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
+    hp_tensor_and_scale_to_float8,
     LinearMMConfig,
-    ToFloat8ConstrFunc,
 )
 
 from float8_experimental.float8_utils import e4m3_dtype, EPS
@@ -167,7 +167,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
 
     def fsdp_pre_all_gather(self, mesh):
         if self._precomputed_scale is not None:
-            float8_tensor = ToFloat8ConstrFunc.apply(
+            float8_tensor = hp_tensor_and_scale_to_float8(
                 self._tensor,
                 self._precomputed_scale,
                 torch.float8_e4m3fn,
