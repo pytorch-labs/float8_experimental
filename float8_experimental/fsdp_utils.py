@@ -10,12 +10,13 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from float8_experimental.float8_dynamic_utils import cast_to_float8_e4m3_dynamic
+from float8_experimental.float8_scaling_utils import cast_to_float8_e4m3_dynamic
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
     LinearMMConfig,
+    ToFloat8ConstrFunc,
 )
 
 from float8_experimental.float8_utils import e4m3_dtype, EPS
@@ -163,12 +164,13 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
 
     def fsdp_pre_all_gather(self, mesh):
         if self._precomputed_scale is not None:
-            float8_tensor = Float8Tensor.to_float8(
+            float8_tensor = ToFloat8ConstrFunc.apply(
                 self._tensor,
                 self._precomputed_scale,
                 torch.float8_e4m3fn,
-                linear_mm_config=self._linear_mm_config,
-                gemm_input_role=GemmInputRole.WEIGHT,
+                None,  # amax_buffer
+                self._linear_mm_config,
+                GemmInputRole.WEIGHT,
             )
         else:
             float8_tensor = cast_to_float8_e4m3_dynamic(
@@ -355,13 +357,13 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
         # 2. populate `_amax_buffer` inplace
         # TODO(future PR): clean up all the casting functions and clearly
         # separate dynamic vs delayed, tech debt has accumulated
-        float8_tensor = Float8Tensor.to_float8(
+        float8_tensor = ToFloat8ConstrFunc.apply(
             self._tensor,
             self._scale_buffer,
             e4m3_dtype,
             self._amax_buffer,
             self._linear_mm_config,
-            gemm_input_role=GemmInputRole.WEIGHT,
+            GemmInputRole.WEIGHT,
         )
         return (float8_tensor._data,), (float8_tensor._scale,)
 
