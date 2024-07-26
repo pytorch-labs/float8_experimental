@@ -2,10 +2,11 @@ import torch
 import torch.nn as nn
 from float8_experimental.config import ScalingType
 from float8_experimental.float8_scaling_utils import (
-    cast_to_float8_e4m3_dynamic,
+    cast_to_float8_dynamic,
     NoopFwToFloat8E5M2BwDynamic,
 )
 from float8_experimental.float8_tensor import GemmInputRole
+from float8_experimental.float8_utils import e4m3_dtype
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.parallel import (
@@ -45,8 +46,9 @@ class Float8ColwiseParallel(ColwiseParallel):
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
 
-        input_tensor = cast_to_float8_e4m3_dynamic(
+        input_tensor = cast_to_float8_dynamic(
             input_tensor,
+            e4m3_dtype,
             mod.linear_mm_config,
             gemm_input_role=GemmInputRole.INPUT,
         )  # DTensor(Float8Tensor)
@@ -98,8 +100,9 @@ class Float8RowwiseParallel(RowwiseParallel):
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
 
-        input_tensor = cast_to_float8_e4m3_dynamic(
+        input_tensor = cast_to_float8_dynamic(
             input_tensor,
+            e4m3_dtype,
             mod.linear_mm_config,
             gemm_input_role=GemmInputRole.INPUT,
         )  # DTensor(Float8Tensor)
@@ -196,8 +199,9 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                     input, mesh, (input_layout,), run_check=False
                 )
 
-            dt_inp = cast_to_float8_e4m3_dynamic(
+            dt_inp = cast_to_float8_dynamic(
                 dt_inp,
+                e4m3_dtype,
                 self.linear_mm_config,
                 gemm_input_role=GemmInputRole.INPUT,
             )  # DTensor(Float8Tensor)

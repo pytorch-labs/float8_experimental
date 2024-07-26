@@ -24,7 +24,6 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
-from float8_experimental.float8_scaling_utils import cast_to_float8_e4m3_dynamic
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
