@@ -30,18 +30,31 @@ from float8_experimental.float8_utils import (
 )
 
 
-def cast_to_float8_dynamic(
-    inpt_tensor: torch.Tensor,
+def hp_tensor_to_float8_dynamic(
+    hp_tensor: torch.Tensor,
     float8_dtype: torch.dtype,
     linear_mm_config: LinearMMConfig,
     reduce_amax: bool = False,
     gemm_input_role: GemmInputRole = GemmInputRole.INPUT,
 ) -> Float8Tensor:
-    if tensor_already_casted_to_fp8(inpt_tensor):
-        return inpt_tensor
-    scale = tensor_to_scale(inpt_tensor, float8_dtype, reduce_amax)
+    """
+    Given a high precision tensor `hp_tensor`,
+    scales `hp_tensor` dynamically and returns a `Float8Tensor` of the result.
+
+    Args:
+        hp_tensor: the tensor to convert
+        float8_dtype: the float8 dtype to use
+        linear_mm_config: Defines the configuration for the scaled_mm for
+          the 3 fwd/bwd gemms of linear
+        reduce_amax: whether to reduce the max(abs(hp_tensor)) value across distributed ranks
+        gemm_input_role: Defines the role of this tensor (input, weight or grad_output) in
+          the 3 fwd/bwd gemms of linear
+    """
+    if tensor_already_casted_to_fp8(hp_tensor):
+        return hp_tensor
+    scale = tensor_to_scale(hp_tensor, float8_dtype, reduce_amax)
     return hp_tensor_and_scale_to_float8(
-        inpt_tensor,
+        hp_tensor,
         scale,
         float8_dtype,
         linear_mm_config,
@@ -49,18 +62,34 @@ def cast_to_float8_dynamic(
     )
 
 
-def cast_to_float8_delayed(
-    tensor: torch.Tensor,
-    scale: torch.Tensor,
+def hp_tensor_to_float8_delayed(
+    hp_tensor: torch.Tensor,
+    s: torch.Tensor,
     float8_dtype: torch.dtype,
     amax_buffer: torch.Tensor,
     linear_mm_config: Optional[LinearMMConfig] = None,
     gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
-):
-    amax_buffer.fill_(tensor_to_amax(tensor))
+) -> Float8Tensor:
+    """
+    Given a high precision tensor `hp_tensor` and relevant metadata, scales it using
+    delayed scaling and returns a `Float8Tensor` of the result. Specifically:
+    1. calculates max(abs(hp_tensor)) and stores the result in `amax_buffer`, inplace
+    2. scales `hp_tensor` by `s` and returns the result wrapped in Float8Tensor
+
+    Args:
+        hp_tensor: the tensor to convert
+        s: the scale to use to convert the tensor
+        float8_dtype: the float8 dtype to use
+        amax_buffer: the buffer to modify inplace with max(abs(hp_tensor))
+        linear_mm_config: Defines the configuration for the scaled_mm for
+          the 3 fwd/bwd gemms of linear
+        gemm_input_role: Defines the role of this tensor (input, weight or grad_output) in
+          the 3 fwd/bwd gemms of linear
+    """
+    amax_buffer.fill_(tensor_to_amax(hp_tensor))
     return hp_tensor_and_scale_to_float8(
-        tensor,
-        scale,
+        hp_tensor,
+        s,
         float8_dtype,
         linear_mm_config,
         gemm_input_role,

@@ -20,7 +20,7 @@ from float8_experimental.float8_linear_utils import (
     get_float8_layers,
     sync_float8_amax_and_scale_history,
 )
-from float8_experimental.float8_scaling_utils import cast_to_float8_delayed
+from float8_experimental.float8_scaling_utils import hp_tensor_to_float8_delayed
 from float8_experimental.float8_tensor import LinearMMConfig
 from float8_experimental.float8_utils import e4m3_dtype
 
@@ -179,7 +179,7 @@ class TestGraphBreaks(DynamoTestCase):
             self.graph_break = graph_break
 
         def forward(self, x):
-            x_fp8 = cast_to_float8_delayed(
+            x_fp8 = hp_tensor_to_float8_delayed(
                 x,
                 self.fp8_scale_x,
                 e4m3_dtype,
