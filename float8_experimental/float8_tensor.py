@@ -129,7 +129,7 @@ def tensor_already_casted_to_fp8(tensor: torch.Tensor) -> bool:
 
 
 @torch._dynamo.allow_in_graph
-class ToFloat8ConstrFunc(torch.autograd.Function):
+class _ToFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion to fp8.
     * forward: convert from high precision to float8
@@ -154,15 +154,6 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
         with that composing with FakeTensor, so we special case here.
 
         DTensor Invariant: DTensor must always be the outer most tensor subclass
-
-        Args:
-            tensor: the tensor to convert
-            scale: the scale to use to convert the tensor
-            float8_dtype: the float8 dtype to use
-            linear_mm_config: Defines the configuration for the scaled_mm for
-              the 3 fwd/bwd gemms of linear
-            gemm_input_role: Defines the role of this tensor (input, weight or grad_output) in
-              the 3 fwd/bwd gemms of linear
         """
         tensor_scaled = tensor * scale
         bits_fp8 = to_fp8_saturated(tensor_scaled, float8_dtype)
@@ -205,7 +196,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
 
 @torch._dynamo.allow_in_graph
-class FromFloat8ConstrFunc(torch.autograd.Function):
+class _FromFloat8ConstrFunc(torch.autograd.Function):
     """
     A differentiable conversion from fp8.
     * forward: convert from float8 to high precision
@@ -219,6 +210,34 @@ class FromFloat8ConstrFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, g):
         return g, None, None
+
+
+def hp_tensor_and_scale_to_float8(
+    hp_tensor: torch.Tensor,
+    s: torch.Tensor,
+    float8_dtype=e4m3_dtype,
+    linear_mm_config: Optional[LinearMMConfig] = None,
+    gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
+):
+    """
+    Given a high precision tensor `hp_tensor` and a precalculated scale `s`,
+    scales `hp_tensor` by `s` and returns a `Float8Tensor` of the result.
+
+    Autograd-aware, the derivative is pass-through.
+    DTensor-aware, if the input is a DTensor the output will be DTensor(Float8Tensor).
+
+    Args:
+        hp_tensor: the tensor to convert
+        s: the scale to use to convert the tensor
+        float8_dtype: the float8 dtype to use
+        linear_mm_config: Defines the configuration for the scaled_mm for
+          the 3 fwd/bwd gemms of linear
+        gemm_input_role: Defines the role of this tensor (input, weight or grad_output) in
+          the 3 fwd/bwd gemms of linear
+    """
+    return _ToFloat8ConstrFunc.apply(
+        hp_tensor, s, float8_dtype, linear_mm_config, gemm_input_role
+    )
 
 
 class Float8Tensor(torch.Tensor):
@@ -309,7 +328,7 @@ class Float8Tensor(torch.Tensor):
         )
 
     def to_original_precision(self):
-        return FromFloat8ConstrFunc.apply(self)
+        return _FromFloat8ConstrFunc.apply(self)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
