@@ -10,7 +10,10 @@ from typing import Any, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from float8_experimental.float8_scaling_utils import cast_to_float8_e4m3_dynamic
+from float8_experimental.float8_scaling_utils import (
+    cast_to_float8_delayed,
+    cast_to_float8_e4m3_dynamic,
+)
 
 from float8_experimental.float8_tensor import (
     Float8Tensor,
@@ -168,7 +171,6 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 self._tensor,
                 self._precomputed_scale,
                 torch.float8_e4m3fn,
-                None,  # amax_buffer
                 self._linear_mm_config,
                 GemmInputRole.WEIGHT,
             )
@@ -352,12 +354,7 @@ class WeightWithDelayedFloat8CastTensor(torch.Tensor):
             )
             self.is_amax_initialized = True
 
-        # this will:
-        # 1. cast the tensor to float8 using `_scale_buffer`
-        # 2. populate `_amax_buffer` inplace
-        # TODO(future PR): clean up all the casting functions and clearly
-        # separate dynamic vs delayed, tech debt has accumulated
-        float8_tensor = ToFloat8ConstrFunc.apply(
+        float8_tensor = cast_to_float8_delayed(
             self._tensor,
             self._scale_buffer,
             e4m3_dtype,

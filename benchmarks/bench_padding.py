@@ -62,7 +62,6 @@ def do_fp8_matmul(A, B, fp8_dtype, out_dtype):
         A,
         scale_a,
         fp8_dtype,
-        None,  # amax_buffer
         a_config,
         GemmInputRole.INPUT,
     )
@@ -70,7 +69,6 @@ def do_fp8_matmul(A, B, fp8_dtype, out_dtype):
         B,
         scale_b,
         fp8_dtype,
-        None,  # amax_buffer
         b_config,
         GemmInputRole.WEIGHT,
     )
