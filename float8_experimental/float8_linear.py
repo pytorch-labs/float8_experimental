@@ -18,8 +18,8 @@ from float8_experimental.config import Float8LinearConfig, ScalingType
 
 from float8_experimental.float8_scaling_utils import (
     _maybe_initialize_amaxes_scales_for_float8_cast,
-    cast_to_float8_delayed,
-    cast_to_float8_dynamic,
+    hp_tensor_to_float8_delayed,
+    hp_tensor_to_float8_dynamic,
     NoopFwToFloat8E5M2BwDelayed,
     NoopFwToFloat8E5M2BwDynamic,
 )
@@ -260,7 +260,7 @@ class Float8Linear(torch.nn.Linear):
                 is_amax_initialized,
                 reduce_amax=True,
             )
-            input_fp8 = cast_to_float8_delayed(
+            input_fp8 = hp_tensor_to_float8_delayed(
                 input,
                 self.fp8_scale_input,
                 e4m3_dtype,
@@ -270,7 +270,9 @@ class Float8Linear(torch.nn.Linear):
             )
         else:
             assert self.scaling_type_input is ScalingType.DYNAMIC
-            input_fp8 = cast_to_float8_dynamic(input, e4m3_dtype, self.linear_mm_config)
+            input_fp8 = hp_tensor_to_float8_dynamic(
+                input, e4m3_dtype, self.linear_mm_config
+            )
         return input_fp8
 
     def cast_weight_to_float8(
@@ -292,7 +294,7 @@ class Float8Linear(torch.nn.Linear):
                     reduce_amax=False,
                 )
 
-                weight_fp8 = cast_to_float8_delayed(
+                weight_fp8 = hp_tensor_to_float8_delayed(
                     weight,
                     self.fp8_scale_weight,
                     e4m3_dtype,
@@ -305,7 +307,7 @@ class Float8Linear(torch.nn.Linear):
             if isinstance(self.weight, Float8Tensor):  # cast by FSDP
                 weight_fp8 = self.weight
             else:
-                weight_fp8 = cast_to_float8_dynamic(
+                weight_fp8 = hp_tensor_to_float8_dynamic(
                     self.weight,
                     e4m3_dtype,
                     self.linear_mm_config,
