@@ -20,9 +20,9 @@ from float8_experimental.float8_linear_utils import (
     get_float8_layers,
     sync_float8_amax_and_scale_history,
 )
+from float8_experimental.float8_scaling_utils import cast_to_float8_delayed
 from float8_experimental.float8_tensor import LinearMMConfig
 from float8_experimental.float8_utils import e4m3_dtype
-from float8_experimental.float8_scaling_utils import cast_to_float8_delayed
 
 from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounterWithBackend
