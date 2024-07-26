@@ -88,10 +88,10 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         y_scale = tensor_to_scale(y_fp32, fp8_dtype).float()
 
         x_fp8 = ToFloat8ConstrFunc.apply(
-            x_fp32, x_scale, fp8_dtype, None, None, GemmInputRole.INPUT
+            x_fp32, x_scale, fp8_dtype, None, GemmInputRole.INPUT
         )
         y_fp8 = ToFloat8ConstrFunc.apply(
-            y_fp32, y_scale, fp8_dtype, None, None, GemmInputRole.WEIGHT
+            y_fp32, y_scale, fp8_dtype, None, GemmInputRole.WEIGHT
         )
 
         dist_x_fp8 = DTensor.from_local(x_fp8, mesh, [lhs_placement], run_check=False)
@@ -169,14 +169,12 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
         dist_x_scale,
         fp8_dtype,
         None,
-        None,
         GemmInputRole.INPUT,
     )
     dist_weight_fp8 = ToFloat8ConstrFunc.apply(
         dist_wight_fp32,
         dist_weight_scale,
         fp8_dtype,
-        None,
         None,
         GemmInputRole.WEIGHT,
     )
