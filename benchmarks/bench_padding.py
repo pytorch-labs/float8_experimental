@@ -4,7 +4,12 @@ from typing import Optional
 import fire
 
 import torch
-from float8_experimental.float8_tensor import Float8Tensor, ScaledMMConfig
+from float8_experimental.float8_tensor import (
+    GemmInputRole,
+    LinearMMConfig,
+    ScaledMMConfig,
+    ToFloat8ConstrFunc,
+)
 from float8_experimental.float8_utils import pad_tensor_for_matmul
 from tabulate import tabulate
 from torch._inductor.utils import do_bench_using_profiling
@@ -50,9 +55,25 @@ def do_fp8_matmul(A, B, fp8_dtype, out_dtype):
     b_config = ScaledMMConfig(
         emulate=False, use_fast_accum=True, fp8_output=True, pad_inner_dim=True
     )
+    a_config = LinearMMConfig(a_config, a_config, a_config)
+    b_config = LinearMMConfig(b_config, b_config, b_config)
 
-    a_fp8 = Float8Tensor.to_float8(A, scale_a, fp8_dtype, mm_config=a_config)
-    b_fp8 = Float8Tensor.to_float8(B, scale_b, fp8_dtype, mm_config=b_config)
+    a_fp8 = ToFloat8ConstrFunc.apply(
+        A,
+        scale_a,
+        fp8_dtype,
+        None,  # amax_buffer
+        a_config,
+        GemmInputRole.INPUT,
+    )
+    b_fp8 = ToFloat8ConstrFunc.apply(
+        B,
+        scale_b,
+        fp8_dtype,
+        None,  # amax_buffer
+        b_config,
+        GemmInputRole.WEIGHT,
+    )
 
     return a_fp8 @ b_fp8
 

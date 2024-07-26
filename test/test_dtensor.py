@@ -14,13 +14,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from float8_experimental import Float8LinearConfig
-
-from float8_experimental.float8_dynamic_utils import NoopFwToFloat8E5M2Bw
 from float8_experimental.float8_linear_utils import convert_to_float8_training
+
+from float8_experimental.float8_scaling_utils import NoopFwToFloat8E5M2BwDynamic
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
     LinearMMConfig,
+    ToFloat8ConstrFunc,
 )
 from float8_experimental.float8_tensor_parallel import (
     Float8ColwiseParallel,
@@ -86,11 +87,11 @@ def test_scaled_mm(mesh: DeviceMesh, size=16):
         x_scale = tensor_to_scale(x_fp32, fp8_dtype).float()
         y_scale = tensor_to_scale(y_fp32, fp8_dtype).float()
 
-        x_fp8 = Float8Tensor.to_float8(
-            x_fp32, x_scale, fp8_dtype, gemm_input_role=GemmInputRole.INPUT
+        x_fp8 = ToFloat8ConstrFunc.apply(
+            x_fp32, x_scale, fp8_dtype, None, None, GemmInputRole.INPUT
         )
-        y_fp8 = Float8Tensor.to_float8(
-            y_fp32, y_scale, fp8_dtype, gemm_input_role=GemmInputRole.WEIGHT
+        y_fp8 = ToFloat8ConstrFunc.apply(
+            y_fp32, y_scale, fp8_dtype, None, None, GemmInputRole.WEIGHT
         )
 
         dist_x_fp8 = DTensor.from_local(x_fp8, mesh, [lhs_placement], run_check=False)
@@ -116,7 +117,7 @@ def test_fp8_redistribute(mesh: DeviceMesh, size=16):
 
     x_scale = tensor_to_scale(x_fp32, fp8_dtype).float()
 
-    x_fp8 = Float8Tensor.to_float8(x_fp32, x_scale, fp8_dtype)
+    x_fp8 = ToFloat8ConstrFunc.apply(x_fp32, x_scale, fp8_dtype)
 
     dist_x_fp8 = DTensor.from_local(x_fp8, mesh, [Shard(0)], run_check=False)
     out_dist = dist_x_fp8.redistribute(placements=[Replicate()])
@@ -144,7 +145,7 @@ def test_dtensor_cast_to_fp8(mesh: DeviceMesh, size=16):
     dist_x_scale = tensor_to_scale(dist_x_fp32, fp8_dtype).float()
     assert isinstance(dist_x_scale, DTensor)
 
-    dist_x_fp8 = Float8Tensor.to_float8(dist_x_fp32, dist_x_scale, fp8_dtype)
+    dist_x_fp8 = ToFloat8ConstrFunc.apply(dist_x_fp32, dist_x_scale, fp8_dtype)
     assert isinstance(dist_x_fp8, DTensor)
 
 
@@ -163,18 +164,25 @@ def test_dtensor_fp8_autograd(mesh: DeviceMesh, size=16):
     dist_weight_scale = tensor_to_scale(dist_wight_fp32, fp8_dtype).float()
     dist_target = distribute_tensor(target, mesh, [Shard(0)])
 
-    dist_x_fp8 = Float8Tensor.to_float8(
-        dist_x_fp32, dist_x_scale, fp8_dtype, gemm_input_role=GemmInputRole.INPUT
+    dist_x_fp8 = ToFloat8ConstrFunc.apply(
+        dist_x_fp32,
+        dist_x_scale,
+        fp8_dtype,
+        None,
+        None,
+        GemmInputRole.INPUT,
     )
-    dist_weight_fp8 = Float8Tensor.to_float8(
+    dist_weight_fp8 = ToFloat8ConstrFunc.apply(
         dist_wight_fp32,
         dist_weight_scale,
         fp8_dtype,
-        gemm_input_role=GemmInputRole.WEIGHT,
+        None,
+        None,
+        GemmInputRole.WEIGHT,
     )
 
     out = torch.nn.functional.linear(dist_x_fp8, dist_weight_fp8)
-    out = NoopFwToFloat8E5M2Bw.apply(out, LinearMMConfig())
+    out = NoopFwToFloat8E5M2BwDynamic.apply(out, LinearMMConfig())
     assert isinstance(out, DTensor), f"Expected DTensor, got {type(out)}"
     loss = torch.sum(torch.abs(out - dist_target))
     loss.backward()

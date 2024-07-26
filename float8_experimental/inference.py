@@ -22,7 +22,7 @@ from float8_experimental.float8_tensor import (
     LinearMMConfig,
     ScaledMMConfig,
     tensor_already_casted_to_fp8,
-    to_fp8_no_autograd,
+    ToFloat8ConstrFunc,
 )
 from float8_experimental.float8_utils import e4m3_dtype, tensor_to_scale
 
@@ -127,12 +127,13 @@ class Float8InferenceLinear(torch.nn.Linear):
             self.weight, Float8Tensor
         ), "Weight has already been quantized, cannot quantize again."
         scale = tensor_to_scale(self.weight, dtype)
-        quantized_weight = to_fp8_no_autograd(
+        quantized_weight = ToFloat8ConstrFunc.apply(
             self.weight,
             scale,
             dtype,
+            None,  # amax_buffer
             self.linear_mm_config,
-            gemm_input_role=GemmInputRole.WEIGHT,
+            GemmInputRole.WEIGHT,
         )
         self.weight = nn.Parameter(quantized_weight)
         self.weight.requires_grad = False
@@ -200,12 +201,13 @@ def cast_to_float8_e4m3_inference(
         if static_quantization_scale is not None
         else tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
     )
-    return Float8Tensor.to_float8(
+    return ToFloat8ConstrFunc.apply(
         inpt_tensor,
         scale,
         e4m3_dtype,
-        linear_mm_config=linear_mm_config,
-        gemm_input_role=GemmInputRole.INPUT,
+        None,  # amax_buffer
+        linear_mm_config,
+        GemmInputRole.INPUT,
     )
 
 
