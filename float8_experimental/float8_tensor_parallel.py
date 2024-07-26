@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 from float8_experimental.config import ScalingType
-from float8_experimental.float8_dynamic_utils import (
+from float8_experimental.float8_scaling_utils import (
     cast_to_float8_e4m3_dynamic,
-    cast_to_float8_e5m2_dynamic_bw,
+    NoopFwToFloat8E5M2BwDynamic,
 )
 from float8_experimental.float8_tensor import GemmInputRole
 from torch.distributed._tensor import DTensor
@@ -67,7 +67,7 @@ class Float8ColwiseParallel(ColwiseParallel):
             )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
+        outputs = NoopFwToFloat8E5M2BwDynamic.apply(outputs, mod.linear_mm_config)
 
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
@@ -119,7 +119,7 @@ class Float8RowwiseParallel(RowwiseParallel):
             outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
+        outputs = NoopFwToFloat8E5M2BwDynamic.apply(outputs, mod.linear_mm_config)
 
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
