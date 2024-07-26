@@ -4,12 +4,13 @@
 # This source code is licensed under the BSD 3-Clause license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Iterable, Literal, Tuple, Union
+from typing import Iterable, Literal, Optional, Tuple, Union
 
 import float8_experimental.config as config
 
 import torch
 import torch.distributed as dist
+from float8_experimental.config import ScalingGranularity
 
 # Helpful visualizer for debugging (only supports fp32):
 # https://www.h-schmidt.net/FloatConverter/IEEE754.html
@@ -100,8 +101,23 @@ def amax_history_to_scale_stack(
 
 
 @torch.no_grad()
-def tensor_to_amax(x: torch.Tensor, reduce_amax: bool = False) -> torch.Tensor:
-    amax = torch.max(torch.abs(x))
+def tensor_to_amax(
+    x: torch.Tensor,
+    reduce_amax: bool = False,
+    scaling_granularity: ScalingGranularity = ScalingGranularity.TENSORWISE,
+    axiswise_dim: Optional[int] = None,
+) -> torch.Tensor:
+    if scaling_granularity is ScalingGranularity.TENSORWISE:
+        amax = torch.max(torch.abs(x))
+    else:
+        assert scaling_granularity is ScalingGranularity.AXISWISE, "unsupported"
+        assert axiswise_dim is not None, "unsupported"
+
+        # convert from axiswise_dim (dim to keep) to
+        # dim as the input to the `torch.amax` function (tuple of dims to reduce)
+        dim_to_reduce = tuple(d for d in range(len(x.shape)) if d != axiswise_dim)
+
+        amax = torch.amax(torch.abs(x), dim=dim_to_reduce, keepdim=True)
 
     # If the user asked for distributed reduction, do it.
     # If the user did not ask for it, assume that it will
@@ -114,9 +130,13 @@ def tensor_to_amax(x: torch.Tensor, reduce_amax: bool = False) -> torch.Tensor:
 
 @torch.no_grad()
 def tensor_to_scale(
-    x: torch.Tensor, float8_dtype: torch.dtype, reduce_amax: bool = False
+    x: torch.Tensor,
+    float8_dtype: torch.dtype,
+    reduce_amax: bool = False,
+    scaling_granularity: ScalingGranularity = ScalingGranularity.TENSORWISE,
+    axiswise_dim: Optional[int] = None,
 ) -> torch.Tensor:
-    amax = tensor_to_amax(x, reduce_amax=reduce_amax)
+    amax = tensor_to_amax(x, reduce_amax, scaling_granularity, axiswise_dim)
     return amax_to_scale(amax, float8_dtype, x.dtype)
 
 

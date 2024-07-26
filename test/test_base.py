@@ -16,7 +16,12 @@ import pytest
 import torch
 import torch.nn as nn
 
-from float8_experimental.config import CastConfig, Float8LinearConfig, ScalingType
+from float8_experimental.config import (
+    CastConfig,
+    Float8LinearConfig,
+    ScalingGranularity,
+    ScalingType,
+)
 from float8_experimental.float8_linear import Float8Linear
 from float8_experimental.float8_linear_utils import (
     convert_to_float8_training,
@@ -24,6 +29,7 @@ from float8_experimental.float8_linear_utils import (
     sync_float8_amax_and_scale_history,
 )
 from float8_experimental.float8_python_api import addmm_float8_unwrapped
+from float8_experimental.float8_scaling_utils import hp_tensor_to_float8_dynamic
 from float8_experimental.float8_tensor import (
     Float8Tensor,
     GemmInputRole,
@@ -142,6 +148,48 @@ class TestFloat8Tensor(unittest.TestCase):
         torch.save(fp8_module.state_dict(), buffer)
         buffer.seek(0)
         _ = torch.load(buffer, weights_only=True)
+
+    def test_axiswise_dynamic_cast(self):
+        a = torch.randn(16, 32, dtype=torch.bfloat16)
+        linear_mm_config = LinearMMConfig()
+        a_fp8 = hp_tensor_to_float8_dynamic(
+            a,
+            e4m3_dtype,
+            linear_mm_config,
+            scaling_granularity=ScalingGranularity.AXISWISE,
+            axiswise_dim=0,
+        )
+        # print(a_fp8)
+        # print(a_fp8.to_original_precision())
+        # print(a_fp8.t())
+        b = a_fp8.t()
+        # TODO check numerical accuracy
+
+    def test_axiswise_gemm(self):
+        a = torch.randn(16, 32, dtype=torch.bfloat16, device="cuda")
+        b = torch.randn(64, 32, dtype=torch.bfloat16, device="cuda")
+
+        linear_mm_config = LinearMMConfig()
+
+        a_fp8 = hp_tensor_to_float8_dynamic(
+            a,
+            e4m3_dtype,
+            linear_mm_config,
+            gemm_input_role=GemmInputRole.INPUT,
+            scaling_granularity=ScalingGranularity.AXISWISE,
+            axiswise_dim=0,
+        )
+        b_fp8 = hp_tensor_to_float8_dynamic(
+            b,
+            e4m3_dtype,
+            linear_mm_config,
+            gemm_input_role=GemmInputRole.WEIGHT,
+            scaling_granularity=ScalingGranularity.AXISWISE,
+            axiswise_dim=0,
+        )
+        c = torch.mm(a_fp8, b_fp8.t())
+        print(c)
+        # TODO check numerical accuracy
 
 
 class TestFloat8Linear:
