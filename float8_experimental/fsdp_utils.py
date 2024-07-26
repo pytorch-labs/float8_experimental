@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 from float8_experimental.float8_scaling_utils import (
     cast_to_float8_delayed,
-    cast_to_float8_e4m3_dynamic,
+    cast_to_float8_dynamic,
 )
 
 from float8_experimental.float8_tensor import (
@@ -175,8 +175,9 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 GemmInputRole.WEIGHT,
             )
         else:
-            float8_tensor = cast_to_float8_e4m3_dynamic(
+            float8_tensor = cast_to_float8_dynamic(
                 self._tensor,
+                e4m3_dtype,
                 self._linear_mm_config,
                 reduce_amax=True,
                 gemm_input_role=GemmInputRole.WEIGHT,

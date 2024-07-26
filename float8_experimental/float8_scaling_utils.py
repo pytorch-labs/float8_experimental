@@ -30,25 +30,25 @@ from float8_experimental.float8_utils import (
 )
 
 
-def cast_to_float8_e4m3_dynamic(
+def cast_to_float8_dynamic(
     inpt_tensor: torch.Tensor,
+    float8_dtype: torch.dtype,
     linear_mm_config: LinearMMConfig,
     reduce_amax: bool = False,
     gemm_input_role: GemmInputRole = GemmInputRole.INPUT,
 ) -> Float8Tensor:
     if tensor_already_casted_to_fp8(inpt_tensor):
         return inpt_tensor
-    scale = tensor_to_scale(inpt_tensor, e4m3_dtype, reduce_amax)
+    scale = tensor_to_scale(inpt_tensor, float8_dtype, reduce_amax)
     return hp_tensor_and_scale_to_float8(
         inpt_tensor,
         scale,
-        e4m3_dtype,
+        float8_dtype,
         linear_mm_config,
         gemm_input_role,
     )
 
 
-# TODO(future PR): align name with cast_to_float8_e4m3_dynamic
 def cast_to_float8_delayed(
     tensor: torch.Tensor,
     scale: torch.Tensor,
