@@ -451,7 +451,6 @@ class TestScaledMM:
             x_fp32,
             x_scale,
             fp8_dtype,
-            None,  # amax_buffer
             linear_config_a,
             GemmInputRole.INPUT,
         )
@@ -459,7 +458,6 @@ class TestScaledMM:
             x_fp32,
             x_scale,
             fp8_dtype,
-            None,  # amax_buffer
             linear_config_b,
             GemmInputRole.WEIGHT,
         )
@@ -489,10 +487,10 @@ class TestScaledMM:
         b_scale = tensor_to_scale(b, input_dtype).float()
 
         a_fp8 = ToFloat8ConstrFunc.apply(
-            a, a_scale, input_dtype, None, None, GemmInputRole.INPUT
+            a, a_scale, input_dtype, None, GemmInputRole.INPUT
         )
         b_fp8 = ToFloat8ConstrFunc.apply(
-            b, b_scale, input_dtype, None, None, GemmInputRole.WEIGHT
+            b, b_scale, input_dtype, None, GemmInputRole.WEIGHT
         )
 
         with pytest.raises(
@@ -512,7 +510,6 @@ class TestScaledMM:
             a,
             a_scale,
             input_dtype,
-            None,  # amax_buffer
             pad_config,
             GemmInputRole.INPUT,
         )
@@ -520,7 +517,6 @@ class TestScaledMM:
             b,
             b_scale,
             input_dtype,
-            None,  # amax_buffer
             pad_config,
             GemmInputRole.WEIGHT,
         )
@@ -537,7 +533,6 @@ class TestScaledMM:
             a,
             a_scale,
             input_dtype,
-            None,  # amax_buffer
             emulated_config,
             GemmInputRole.INPUT,
         )
@@ -545,7 +540,6 @@ class TestScaledMM:
             b,
             b_scale,
             input_dtype,
-            None,  # amax_buffer
             emulated_config,
             GemmInputRole.WEIGHT,
         )

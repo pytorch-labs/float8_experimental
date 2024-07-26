@@ -131,7 +131,6 @@ class Float8InferenceLinear(torch.nn.Linear):
             self.weight,
             scale,
             dtype,
-            None,  # amax_buffer
             self.linear_mm_config,
             GemmInputRole.WEIGHT,
         )
@@ -205,7 +204,6 @@ def cast_to_float8_e4m3_inference(
         inpt_tensor,
         scale,
         e4m3_dtype,
-        None,  # amax_buffer
         linear_mm_config,
         GemmInputRole.INPUT,
     )
