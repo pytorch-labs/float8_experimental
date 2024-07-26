@@ -44,7 +44,6 @@ def cast_to_float8_e4m3_dynamic(
         inpt_tensor,
         scale,
         e4m3_dtype,
-        None,  # amax_buffer
         linear_mm_config,
         gemm_input_role,
     )
@@ -59,11 +58,11 @@ def cast_to_float8_delayed(
     linear_mm_config: Optional[LinearMMConfig] = None,
     gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
 ):
+    amax_buffer.fill_(tensor_to_amax(tensor))
     return ToFloat8ConstrFunc.apply(
         tensor,
         scale,
         float8_dtype,
-        amax_buffer,
         linear_mm_config,
         gemm_input_role,
     )
