@@ -18,7 +18,6 @@ from float8_experimental.float8_tensor import (
     LinearMMConfig,
     ScaledMMConfig,
     tensor_already_casted_to_fp8,
-    to_fp8_no_autograd,
     ToFloat8ConstrFunc,
 )
 
@@ -146,12 +145,12 @@ class NoopFwToFloat8E5M2BwDelayed(torch.autograd.Function):
 
         fp8_amax_grad_output.fill_(tensor_to_amax(go))
 
-        res = to_fp8_no_autograd(
+        res = ToFloat8ConstrFunc.apply(
             go,
             fp8_scale_grad_output,
             e5m2_dtype,
-            linear_mm_config=ctx.linear_mm_config,
-            gemm_input_role=GemmInputRole.GRAD_OUTPUT,
+            ctx.linear_mm_config,
+            GemmInputRole.GRAD_OUTPUT,
         )
         empty_grads = None, None, None, None, None, None
         return res, *empty_grads
@@ -178,11 +177,11 @@ class NoopFwToFloat8E5M2BwDynamic(torch.autograd.Function):
         if tensor_already_casted_to_fp8(gradY):
             return gradY, None
         gradY_scale = tensor_to_scale(gradY, e5m2_dtype)
-        fp8_tensor = to_fp8_no_autograd(
+        fp8_tensor = ToFloat8ConstrFunc.apply(
             gradY,
             gradY_scale,
             e5m2_dtype,
-            linear_mm_config=ctx.linear_mm_config,
-            gemm_input_role=GemmInputRole.GRAD_OUTPUT,
+            ctx.linear_mm_config,
+            GemmInputRole.GRAD_OUTPUT,
         )
         return fp8_tensor, None
