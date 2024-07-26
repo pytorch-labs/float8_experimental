@@ -169,7 +169,7 @@ class ToFloat8ConstrFunc(torch.autograd.Function):
 
         if isinstance(bits_fp8, DTensor):
             assert isinstance(
-                x, DTensor
+                scale, DTensor
             ), "Expected Float8 scale to be a DTensor if bits_fp8 is a DTensor"
             bits_mesh = bits_fp8.device_mesh
             bits_placements = bits_fp8.placements
