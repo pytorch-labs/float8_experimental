@@ -112,11 +112,6 @@ def tensor_to_amax(
     else:
         assert scaling_granularity is ScalingGranularity.AXISWISE, "unsupported"
         assert axiswise_dim is not None, "unsupported"
-
-        # convert from axiswise_dim (dim to keep) to
-        # dim as the input to the `torch.amax` function (tuple of dims to reduce)
-        # dim_to_reduce = tuple(d for d in range(len(x.shape)) if d != axiswise_dim)
-
         amax = torch.amax(torch.abs(x), dim=axiswise_dim, keepdim=True)
 
     # If the user asked for distributed reduction, do it.
