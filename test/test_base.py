@@ -171,27 +171,57 @@ class TestFloat8Tensor:
         sqnr = compute_error(a, a_dq)
         assert sqnr >= 25.0
 
-    # TODO(next) make this work
     def test_axiswise_reshape(self):
         a = torch.randn(3, 5, 7, dtype=torch.bfloat16, device="cuda")
         linear_mm_config = LinearMMConfig()
 
-        a_fp8 = hp_tensor_to_float8_dynamic(
+        # if we scale across dim0, we can only reshape to [3, -1]
+        a_fp8_d0 = hp_tensor_to_float8_dynamic(
             a,
             e4m3_dtype,
             linear_mm_config,
             scaling_granularity=ScalingGranularity.AXISWISE,
             axiswise_dim=0,
         )
-        # a_fp8._data.shape is (3, 5, 7)
-        # a_fp8._scale.shape is (1, 5, 7)
-        print(a_fp8._scale.shape)
+        assert list(a_fp8_d0._data.shape) == [3, 5, 7]
+        assert list(a_fp8_d0._scale.shape) == [1, 5, 7]
 
-        # reshape to (3, 5 * 7)
-        # a_fp8._scale.shape should be (1, 5 * 7)
-        a_fp8_r = a_fp8.reshape(3, -1)
-        print(a_fp8_r._scale.shape)
-         
+        a_fp8_d0_r = a_fp8_d0.reshape(3, -1)
+        assert list(a_fp8_d0_r.shape) == [3, 5 * 7]
+        assert list(a_fp8_d0_r._scale.shape) == [1, 5 * 7]
+        # verify numerics did not change
+        assert torch.allclose(
+            a_fp8_d0.to_original_precision(),
+            a_fp8_d0_r.to_original_precision().reshape(3, 5, 7),
+            atol=0,
+            rtol=0,
+        )
+        with pytest.raises(AssertionError):
+            a_fp8_d0_r2 = a_fp8_d0.reshape(-1, 7)
+
+        # if we scale across dim2, we can only reshape to [-1, 7]
+        a_fp8_d2 = hp_tensor_to_float8_dynamic(
+            a,
+            e4m3_dtype,
+            linear_mm_config,
+            scaling_granularity=ScalingGranularity.AXISWISE,
+            axiswise_dim=2,
+        )
+        assert list(a_fp8_d2._data.shape) == [3, 5, 7]
+        assert list(a_fp8_d2._scale.shape) == [3, 5, 1]
+
+        a_fp8_d2_r = a_fp8_d2.reshape(-1, 7)
+        assert list(a_fp8_d2_r.shape) == [3 * 5, 7]
+        assert list(a_fp8_d2_r._scale.shape) == [3 * 5, 1]
+        # verify numerics did not change
+        assert torch.allclose(
+            a_fp8_d2.to_original_precision(),
+            a_fp8_d2_r.to_original_precision().reshape(3, 5, 7),
+            atol=0,
+            rtol=0,
+        )
+        with pytest.raises(AssertionError):
+            a_fp8_d2_r2 = a_fp8_d2.reshape(3, -1)
 
     def test_axiswise_gemm(self):
         a = torch.randn(16, 32, dtype=torch.bfloat16, device="cuda")
@@ -216,11 +246,9 @@ class TestFloat8Tensor:
             axiswise_dim=1,
         )
         c_fp8_compute = torch.mm(a_fp8, b_fp8.t())
-        print(c_fp8_compute)
         c_ref = torch.mm(a, b.t())
         sqnr = compute_error(c_ref, c_fp8_compute)
-        print('sqnr', sqnr)
-        # TODO check numerical accuracy
+        assert sqnr >= 25.0
 
 
 class TestFloat8Linear:
