@@ -250,7 +250,12 @@ class Float8Tensor(torch.Tensor):
     * `_data`: the underlying e4m3 or e5m2 data
     * `_scale`: the scale used to scale the original fp32 tensor. We multiply
       by scale to go from fp32 range to fp8 range, and divide by scale to go
-      from fp8 range to fp32 range.
+      from fp8 range to fp32 range. Scale is guaranteed to have a shape compatible
+      with `_data`. For example:
+      - if scaling is tensorwise, `_scale` is a scalar tensor
+      - if scaling is axiswise and _data.shape is [3, 5], `_scale` could have
+        shape [1, 5] or [5, 1]. The dim of the non-one entry defines the scaling
+        axis.
     * `_orig_dtype`: the original dtype of the tensor used to create this
       tensor.
     * `_emulate`: if true using fp32 emulation for the matmuls, helpful
@@ -279,12 +284,6 @@ class Float8Tensor(torch.Tensor):
         linear_mm_config: Optional[LinearMMConfig],
         gemm_input_role: Optional[GemmInputRole] = GemmInputRole.INPUT,
     ):
-        assert (
-            scale.numel() == 1
-        ), "Scale should contain a single value, but got: {} elements".format(
-            scale.numel()
-        )
-
         self = torch.Tensor._make_wrapper_subclass(
             cls,
             data.size(),
