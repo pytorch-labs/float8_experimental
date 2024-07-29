@@ -19,6 +19,15 @@ _c10d_functional = torch.ops._c10d_functional
 FLOAT8_OPS_TABLE: Dict[Any, Any] = {}
 
 
+def _assert_tensorwise_scale(aten_op, scale):
+    assert (
+        # TODO(future PR): figure out why tensorwise scaling can have
+        # both rank 0 and rank 1
+        len(scale.shape)
+        in (0, 1)
+    ), f"{aten_op} with axiswise scaling is not supported yet"
+
+
 def implements(aten_ops):
     """Register aten ops to the float8 op table"""
 
@@ -32,18 +41,16 @@ def implements(aten_ops):
 
 @implements(
     [
-        aten.view.default,
         aten._unsafe_view.default,
-        aten.t.default,
         aten.as_strided.default,
         aten.clone.default,
         aten.detach.default,
         aten.slice.Tensor,
-        aten.transpose.int,
         aten.fill_.Scalar,
     ]
 )
 def float8_desugar_op(aten_op, args, kwargs=None):
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     new_data = aten_op(args[0]._data, *args[1:], **kwargs)
     return Float8Tensor(
         new_data,
@@ -54,8 +61,61 @@ def float8_desugar_op(aten_op, args, kwargs=None):
     )
 
 
+@implements(
+    [
+        aten.t.default,
+        aten.transpose.int,
+    ]
+)
+def float8_desugar_data_and_scale(aten_op, args, kwargs=None):
+    new_data = aten_op(args[0]._data, *args[1:], **kwargs)
+    new_scale = aten_op(args[0]._scale, *args[1:], **kwargs)
+    return Float8Tensor(
+        new_data,
+        new_scale,
+        args[0]._orig_dtype,
+        args[0]._linear_mm_config,
+        args[0]._gemm_input_role,
+    )
+
+
+@implements([aten.view.default])
+def float8_view(aten_op, args, kwargs=None):
+    if len(args[0]._scale.shape) < 2:
+        # tensorwise scaling
+        return float8_desugar_op(aten_op, args, kwargs)
+
+    t, new_shape = args[0], args[1]
+    # for now, only support reshaping to [-1, dim] or [dim, -1]
+    if len(new_shape) == 2:
+        if new_shape == [t.shape[0], -1] and t._scale.shape[0] == 1:
+            new_data = aten_op(t._data, new_shape, **kwargs)
+            new_scale = aten_op(t._scale, [1, -1], **kwargs)
+            return Float8Tensor(
+                new_data,
+                new_scale,
+                t._orig_dtype,
+                t._linear_mm_config,
+                t._gemm_input_role,
+            )
+        elif new_shape == [-1, t.shape[-1]] and t._scale.shape[-1] == 1:
+            new_data = aten_op(t._data, new_shape, **kwargs)
+            new_scale = aten_op(t._scale, [-1, 1], **kwargs)
+            return Float8Tensor(
+                new_data,
+                new_scale,
+                t._orig_dtype,
+                t._linear_mm_config,
+                t._gemm_input_role,
+            )
+    raise AssertionError(
+        f"{aten_op} with axiswise scaling and t.shape {t.shape} t._scale.shape {t._scale.shape} new_shape {new_shape} is not supported yet."
+    )
+
+
 @implements([aten.split.Tensor])
 def float8_split(aten_op, args, kwargs=None):
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     new_data_tensors = aten_op(args[0]._data, *args[1:], **kwargs)
 
     def make_float8(data):
@@ -101,6 +161,7 @@ def float8_cat(aten_op, args, kwargs=None):
         assert (
             chunk._gemm_input_role is gemm_input_role
         ), "Expecting all chunks to have the same gemm_input_role as a result of a split"
+        _assert_tensorwise_scale(aten_op, chunk._scale)
         chunk_data.append(chunk._data.view(torch.uint8))
 
     new_data = aten_op(chunk_data, *args[1:], **kwargs)
@@ -117,6 +178,7 @@ def float8_cast_up_op(aten_op, args, kwargs=None):
     "addmm" -> out
     "hp_gradBias" <-"sum" <- "identity" <- gradOut <- "hp_gradOut"
     """
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
 
     def unwrap(x):
         if isinstance(x, Float8Tensor):
@@ -229,6 +291,7 @@ def float8_addmm(aten_op, args, kwargs=None):
 
 @implements([aten.is_same_size.default])
 def float8_is_same_size(aten_op, args, kwargs=None):
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     return args[0].shape == args[1].shape
 
 
@@ -238,6 +301,7 @@ def autocast_to_copy(aten_op, args, kwargs=None):
     when the input is a Float8Tensor, presenting as a fp32
     tensor.
     """
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     assert isinstance(args[0], Float8Tensor)
     assert (
         len(kwargs) == 1 and "dtype" in kwargs
@@ -265,6 +329,7 @@ def allgather_fp8(aten_op, args, kwargs=None):
     """
     override funcol with FP8 handling
     """
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     fp8_input = args[0]
     assert isinstance(
         fp8_input, Float8Tensor
@@ -284,6 +349,7 @@ def allgather_fp8(aten_op, args, kwargs=None):
 
 @implements([c10d_functional.wait_tensor.default, _c10d_functional.wait_tensor.default])
 def wait_tensor_fp8(aten_op, args, kwargs=None):
+    _assert_tensorwise_scale(aten_op, args[0]._scale)
     fp8_input = args[0]
     assert isinstance(fp8_input, Float8Tensor)
 
@@ -304,6 +370,7 @@ def index_put_fp8(aten_op, args, kwargs=None):
     fp8_values = args[2]
     assert isinstance(fp8_self, Float8Tensor)
     assert isinstance(fp8_values, Float8Tensor)
+    _assert_tensorwise_scale(fp8_self, args[0]._scale)
     assert fp8_self._scale == fp8_values._scale
     assert fp8_self.dtype == fp8_values.dtype
     assert fp8_self._orig_dtype == fp8_values._orig_dtype
@@ -334,8 +401,10 @@ def copy_fp8(aten_op, args, kwargs=None):
 
     if not isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
         src_hp = src.to_original_precision()
+        _assert_tensorwise_scale(aten_op, src._scale)
         return aten_op(self, src_hp, *args[2:], **kwargs)
     elif isinstance(self, Float8Tensor) and isinstance(src, Float8Tensor):
+        _assert_tensorwise_scale(aten_op, src._scale)
         assert (
             self._orig_dtype == src._orig_dtype
         ), "Expecting both Float8Tensors to be of the same dtype"
