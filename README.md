@@ -1,3 +1,10 @@
+# NOTICE: float8_experimental has moved
+
+We have moved `float8_experimental` to 
+[pytorch/ao](https://github.com/pytorch/ao/tree/main/torchao/float8)
+
+- `import float8_experimental` is now `import torchao.float8`
+
 # float8_experimental
 
 This is an early version of a library for accelerating training with float8 in native PyTorch
