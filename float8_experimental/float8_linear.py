@@ -357,12 +357,9 @@ class Float8Linear(torch.nn.Linear):
                 )
         else:
             assert self.scaling_type_w is TensorScalingType.DYNAMIC
-            if isinstance(self.weight, Float8Tensor):  # cast by FSDP
-                w_fp8 = self.weight
-            else:
-                w_fp8 = cast_to_float8_e4m3_dynamic(
-                    self.weight, self.linear_mm_config, gemm_input_role=GemmInputRole.W
-                )
+            w_fp8 = cast_to_float8_e4m3_dynamic(
+                self.weight, self.linear_mm_config, gemm_input_role=GemmInputRole.W
+            )
         return w_fp8
 
     def cast_y_to_float8_in_bw(self, y: torch.Tensor) -> torch.Tensor:
@@ -407,8 +404,10 @@ class Float8Linear(torch.nn.Linear):
         if self.has_any_delayed_scaling:
             self.float8_pre_forward(input)
 
-        x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
-        w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
+        with torch.profiler.record_function("cast_x_to_float8"):
+            x_fp8 = self.cast_x_to_float8(input, self.is_amax_initialized)
+        with torch.profiler.record_function("cast_w_to_float8"):
+            w_fp8 = self.cast_w_to_float8(self.weight, self.is_amax_initialized)
 
         y = torch.matmul(x_fp8, w_fp8.t())
 

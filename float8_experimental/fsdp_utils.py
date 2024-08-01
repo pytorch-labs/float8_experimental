@@ -140,6 +140,10 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
             WeightWithDynamicFloat8CastTensor, unwrap, (args, kwargs or {})
         )
         out = func(*args, **kwargs)
+        if func is torch.ops.aten.split.Tensor:
+        # if func is torch.ops.aten.clone.default:
+            if torch.distributed.get_rank() == 0:
+                print(f"dispatched {func=}", flush=True)
         if func not in _ops_to_preserve_subclass:
             return out
         return pytree.tree_map_only(
@@ -203,7 +207,7 @@ class WeightWithDynamicFloat8CastTensor(torch.Tensor):
                 out._local_tensor._scale = scale
             else:
                 raise RuntimeError(
-                    f"out must be a Float8Tensor or DTensor with Float8Tensor local tensor, but got {type(out)}"
+                    f"out must be a Float8Tensor or DTensor(_local_tensor=Float8Tensor), but got {out}"
                 )
             return out
         return Float8Tensor(

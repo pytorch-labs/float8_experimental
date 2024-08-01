@@ -16,6 +16,14 @@ from test_fsdp2_common import (
     check_parity_no_mp,
     set_enable_fsdp_fp8_all_gather,
 )
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    PrepareModuleInput,
+    RowwiseParallel,
+    SequenceParallel,
+)
+from torch.distributed._tensor import Replicate, Shard
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._tensor import (
     distribute_tensor,
@@ -532,6 +540,86 @@ class Test2DFloat8MultiProcess(FSDPTest, TestFloat8Common):
         return init_device_mesh(
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
+    
+    def parallelize(
+        self, module: "Transformer", device_mesh: DeviceMesh, use_seq_parallel: bool
+    ) -> nn.Module:
+        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        module_tp = parallelize_module(module, device_mesh, {
+            "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
+            "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
+            "norm": SequenceParallel(),
+        })
+        for layer_id, transformer_block in model.layers.items():
+            layer_plan = {
+                
+                
+                "attention.wq": Float8ColwiseParallel(),
+                "attention.wk": Float8ColwiseParallel(),
+                "attention.wv": Float8ColwiseParallel(),
+                "attention.wo": Float8RowwiseParallel(output_layouts=Shard(1)),
+                
+                "feed_forward": PrepareFloat8ModuleInput(
+                    input_layouts=(Shard(1),),
+                    desired_input_layouts=(Replicate(),),
+                ),
+                "feed_forward.w1": Float8ColwiseParallel(),
+                "feed_forward.w2": Float8RowwiseParallel(output_layouts=Shard(1)),
+                "feed_forward.w3": Float8ColwiseParallel(),
+            }
+
+            # Adjust attention module to use the local number of heads
+            attn_layer = transformer_block.attention
+            attn_layer.n_heads = attn_layer.n_heads // tp_mesh.size()
+            attn_layer.n_kv_heads = attn_layer.n_kv_heads // tp_mesh.size()
+
+            parallelize_module(
+                module=transformer_block,
+                device_mesh=tp_mesh,
+                parallelize_plan=layer_plan,
+            )
+        # Parallelize the attention and feed forward submodules.
+        for layer in module_tp.layers:
+            layer_parallelize_plan = {}
+            layer_parallelize_plan["attention"] = PrepareFloat8ModuleInput(
+                input_layouts=(Shard(1), None),
+                desired_input_layouts=(Replicate(), None),
+            )
+            # shard the RMSNorms
+            layer_parallelize_plan["attention_norm"] = SequenceParallel()
+            layer_parallelize_plan["ffn_norm"] = SequenceParallel()
+            layer_parallelize_plan["attention.wq"] = Float8ColwiseParallel()
+            layer_parallelize_plan["attention.wk"] = Float8ColwiseParallel()
+            layer_parallelize_plan["attention.wv"] = Float8ColwiseParallel()
+            layer_parallelize_plan["attention.wo"] = Float8RowwiseParallel(output_layouts=Shard(1))
+
+            layer_parallelize_plan["feed_forward.w1"] = (
+                ColwiseParallel(input_layouts=Shard(1))
+                if use_seq_parallel
+                else ColwiseParallel()
+            )
+            layer_parallelize_plan["feed_forward.w2"] = Float8RowwiseParallel(output_layouts=Shard(1))
+
+            parallelize_module(layer, device_mesh, layer_parallelize_plan)
+
+        # Parallelize the output submodule. If weight tying is enabled, we need to
+        # make sure output.weight is sharded consistently as tok_embeddings.weight,
+        # at the cost of the all_reduce operation using RowwiseParallel.
+        output_parallelize_plan = (
+            ColwiseParallel(
+                input_layouts=Shard(1),
+                output_layouts=Replicate(),
+            )
+            if use_seq_parallel
+            else ColwiseParallel(output_layouts=Replicate())
+        )
+        parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
+
+        # Manually set output.weight so that parameters and gradients are shared.
+        if module_tp.model_args.weight_tying:
+            module_tp.output.weight = module_tp.tok_embeddings.weight
+
+        return module_tp
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp(
@@ -541,13 +629,18 @@ class Test2DFloat8MultiProcess(FSDPTest, TestFloat8Common):
         scaling_type_w = TensorScalingType.DYNAMIC
         global_mesh = self.init_global_mesh()
         _, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-        module = self.init_transformer(weight_tying=False).cuda()
+        model = self.init_transformer(weight_tying=False).cuda()
         with set_enable_fsdp_fp8_all_gather(enable_fsdp_fp8_all_gather):
-            swap_linear_with_float8_linear(module, scaling_type_w=scaling_type_w)
+            swap_linear_with_float8_linear(model, scaling_type_w=scaling_type_w)
+        model.
+        loss_parallel = True
+        
+
+        
 
         # "attention.wq": Float8ColwiseParallel
         colwise_param = distribute_tensor(
-            module.layers[0].attention.wq.weight, tp_mesh, [Shard(0)]
+            model.layers[0].attention.wq.weight, tp_mesh, [Shard(0)]
         )
         self.assertTrue(
             isinstance(colwise_param, DTensor)
@@ -557,7 +650,7 @@ class Test2DFloat8MultiProcess(FSDPTest, TestFloat8Common):
         )
         # "attention.wo": Float8RowwiseParallel(output_layouts=Shard(1)),
         rowwise_param = distribute_tensor(
-            module.layers[0].attention.wo.weight, tp_mesh, [Shard(1)]
+            model.layers[0].attention.wo.weight, tp_mesh, [Shard(1)]
         )
         self.assertTrue(
             isinstance(rowwise_param, DTensor)

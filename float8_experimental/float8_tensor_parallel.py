@@ -44,12 +44,13 @@ class Float8ColwiseParallel(ColwiseParallel):
             input_tensor = DTensor.from_local(
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
-
-        input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor,
-            mod.linear_mm_config,
-            gemm_input_role=GemmInputRole.X,
-        )  # DTensor(Float8Tensor)
+        
+        with torch.profiler.record_function("colwise_cast_to_float8_e4m3_dynamic"):
+            input_tensor = cast_to_float8_e4m3_dynamic(
+                input_tensor,
+                mod.linear_mm_config,
+                gemm_input_role=GemmInputRole.X,
+            )  # DTensor(Float8Tensor)
 
         # transform the input layouts to the desired layouts of ColwiseParallel
         if input_layouts != desired_input_layouts:
@@ -67,7 +68,8 @@ class Float8ColwiseParallel(ColwiseParallel):
             )  # DTensor(torch.Tensor)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
+        with torch.profiler.record_function("colwise_cast_to_float8_e5m2_dynamic_bw"):
+            outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
 
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
@@ -98,11 +100,12 @@ class Float8RowwiseParallel(RowwiseParallel):
                 input_tensor, device_mesh, input_layouts, run_check=False
             )
 
-        input_tensor = cast_to_float8_e4m3_dynamic(
-            input_tensor,
-            mod.linear_mm_config,
-            gemm_input_role=GemmInputRole.X,
-        )  # DTensor(Float8Tensor)
+        with torch.profiler.record_function("rowwise_cast_to_float8_e4m3_dynamic"):
+            input_tensor = cast_to_float8_e4m3_dynamic(
+                input_tensor,
+                mod.linear_mm_config,
+                gemm_input_role=GemmInputRole.X,
+            )  # DTensor(Float8Tensor)
 
         if input_layouts != desired_input_layouts:
             input_tensor = input_tensor.redistribute(
@@ -119,7 +122,8 @@ class Float8RowwiseParallel(RowwiseParallel):
             outputs = outputs.redistribute(placements=output_layouts, async_op=True)
 
         # fwd noop bwd cast to DTensor(Float8Tensor)
-        outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
+        with torch.profiler.record_function("rowwise_cast_to_float8_e5m2_dynamic_bw"):
+            outputs = cast_to_float8_e5m2_dynamic_bw(outputs, mod.linear_mm_config)
 
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
@@ -196,11 +200,12 @@ class PrepareFloat8ModuleInput(PrepareModuleInput):
                     input, mesh, (input_layout,), run_check=False
                 )
 
-            dt_inp = cast_to_float8_e4m3_dynamic(
-                dt_inp,
-                self.linear_mm_config,
-                gemm_input_role=GemmInputRole.X,
-            )  # DTensor(Float8Tensor)
+            with torch.profiler.record_function("prepareinput_cast_to_float8_e4m3_dynamic"):
+                dt_inp = cast_to_float8_e4m3_dynamic(
+                    dt_inp,
+                    self.linear_mm_config,
+                    gemm_input_role=GemmInputRole.X,
+                )  # DTensor(Float8Tensor)
             if desired_layout is not None and input_layout != desired_layout:
                 dt_inp = dt_inp.redistribute(placements=(desired_layout,))
 
